@@ -58,7 +58,8 @@ What it keeps, in <root>/.ask/: CLAUDE.md, your standing context in your own
 words, which cpb only reads and sends with every ask; and history.md, one
 record per answered ask, appended and never rewritten (delete it to forget).
 Each ask sends the last 20 records' headings and the last record, and the
-model can read further back. --no-history keeps one ask out of it.
+model can read further back. --no-history keeps one ask out of it. Read it
+with cpb SHOW ASK HISTORY, and one record with cpb SHOW ASK RECORD <id>.
 
 A line marked ! says what a step removes, forgets or replaces, which
 credential or login it touches, or what code it fetches: read it before you

@@ -13,6 +13,12 @@
   `.ask/CLAUDE.md` is your standing context, sent with every ask. Nothing
   is recorded for a refused ask, a part that looks like a credential is
   withheld, and `--no-history` keeps one ask out.
+- **`SHOW ASK HISTORY` and `SHOW ASK RECORD <id>`.** Read the ask history
+  from the command line: index lines newest first, `FOR PLAYBOOK <name>`,
+  `BEFORE <id>` and `LIMIT <n>` (20 by default, at most 200), with the
+  statement that lists older ones; one record in full; `--json` for both.
+  The model reads the history through its tool with the same statements.
+  They reserve no word.
 
 ## [v4.4.0] -- 2026-11-04
 

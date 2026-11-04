@@ -3,17 +3,17 @@ package cmd
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
 // The cpb ask store (SPEC.md, "cpb ask", "The ask store"): <root>/.ask/, with
@@ -29,9 +29,8 @@ const (
 	askStandingName  = "CLAUDE.md"
 	askStandingLimit = 8 << 10
 	// askIndexWindow is how many index lines every ask hands the model;
-	// the tool's HISTORY pages further back.
-	askIndexWindow = 20
-	askIndexMax    = 200
+	// SHOW ASK HISTORY, in the tool too, pages further back.
+	askIndexWindow = grammar.AskHistoryDefault
 )
 
 func askStoreDir(root string) string { return filepath.Join(root, askStoreDirName) }
@@ -46,7 +45,7 @@ type askEntry struct {
 	text  string
 }
 
-var askHeading = regexp.MustCompile(`^## (\S+) · (\S+) · (r-[0-9]{8}-[0-9]{6}-[0-9a-f]{4})$`)
+var askHeading = regexp.MustCompile(`^## (\S+) · (\S+) · (` + strings.Trim(grammar.AskRecordID.String(), "^$") + `)$`)
 
 // askStoreFile says whether path is there to read, refusing anything but a
 // regular file: a link could point at anything, and what is read is sent. A
@@ -142,7 +141,7 @@ func askHistoryPrelude(root, tag string) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	b.WriteString("History of your earlier answers, newest first (time · playbook asked · id · what was asked). It is the past: the installed state above is the present. Read a record in full with the query tool's HISTORY RECORD <id>, and further back with HISTORY BEFORE <id>:\n")
+	b.WriteString("History of your earlier answers, newest first (time · playbook asked · id · what was asked). It is the past: the installed state above is the present. Read a record in full with the query tool's SHOW ASK RECORD <id>, and further back with SHOW ASK HISTORY BEFORE <id>:\n")
 	for i := len(entries) - 1; i >= 0 && i >= len(entries)-askIndexWindow; i-- {
 		e := entries[i]
 		fmt.Fprintf(&b, "%s · %s · %s · %s\n", e.Time, e.Tag, e.ID, e.Asked)
@@ -254,64 +253,105 @@ func appendAskRecord(root, tag, request string, p *askPlan) (string, error) {
 	return id, f.Close()
 }
 
-// askHistoryQuery answers the tool's HISTORY statements:
-//
-//	HISTORY [FOR <playbook>] [BEFORE <id>] [LIMIT <n>]   index lines, newest first
-//	HISTORY RECORD <id>                                  one record in full
-//
-// They read <root>/.ask/history.md, a path cpb fixes, and nothing else.
-func askHistoryQuery(root string, words []string) (string, error) {
-	usage := errors.New("HISTORY [FOR <playbook>] [BEFORE <id>] [LIMIT <n>], or HISTORY RECORD <id>")
+// askHistoryPage is one page of SHOW ASK HISTORY: the records older than
+// before ("" for the newest), addressed to tag when one is given, at most
+// limit of them (0: the default), newest first, and how many older ones
+// match beyond the page. It reads <root>/.ask/history.md, a path cpb
+// fixes, and nothing else.
+func askHistoryPage(root, tag, before string, limit int) ([]askEntry, int, error) {
+	if limit <= 0 {
+		limit = grammar.AskHistoryDefault
+	}
+	limit = min(limit, grammar.AskHistoryMax)
 	entries, err := readAskHistory(root)
 	if err != nil {
-		return "", err
+		return nil, 0, err
 	}
-	if len(words) == 2 && strings.EqualFold(words[0], "RECORD") {
-		for _, e := range entries {
-			if e.ID == words[1] {
-				return e.text, nil
-			}
-		}
-		return "", fmt.Errorf("no record %s", words[1])
-	}
-	tag, before, limit := "", "", askIndexWindow
-	for i := 0; i < len(words); i += 2 {
-		if i+1 >= len(words) {
-			return "", usage
-		}
-		switch strings.ToUpper(words[i]) {
-		case "FOR":
-			tag = words[i+1]
-		case "BEFORE":
-			before = words[i+1]
-		case "LIMIT":
-			n, err := strconv.Atoi(words[i+1])
-			if err != nil || n < 1 {
-				return "", usage
-			}
-			limit = min(n, askIndexMax)
-		default:
-			return "", usage
-		}
-	}
-	var out []askEntry
+	out := []askEntry{}
+	older := 0
 	seen := before == ""
-	for i := len(entries) - 1; i >= 0 && len(out) < limit; i-- {
+	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
 		if !seen {
 			seen = e.ID == before
 			continue
 		}
-		if tag == "" || e.Tag == tag {
+		if tag != "" && e.Tag != tag {
+			continue
+		}
+		if len(out) < limit {
 			out = append(out, e)
+		} else {
+			older++
 		}
 	}
 	if !seen {
-		return "", fmt.Errorf("no record %s", before)
+		return nil, 0, fmt.Errorf("no record %s in the ask history", before)
 	}
-	if out == nil {
-		out = []askEntry{}
+	return out, older, nil
+}
+
+// askRecordJSON is one record in full: SHOW ASK RECORD --json.
+type askRecordJSON struct {
+	askEntry
+	Text string `json:"text"`
+}
+
+// askRecordByID is SHOW ASK RECORD <id>: one record in full.
+func askRecordByID(root, id string) (askRecordJSON, error) {
+	entries, err := readAskHistory(root)
+	if err != nil {
+		return askRecordJSON{}, err
 	}
-	data, err := json.Marshal(map[string]any{"records": out})
-	return string(data), err
+	for _, e := range entries {
+		if e.ID == id {
+			return askRecordJSON{askEntry: e, Text: e.text}, nil
+		}
+	}
+	return askRecordJSON{}, fmt.Errorf("no record %s in the ask history", id)
+}
+
+// showAskStore runs SHOW ASK HISTORY and SHOW ASK RECORD.
+func showAskStore(root string, st *grammar.Stmt) error {
+	if st.Object == grammar.AskRecord {
+		r, err := askRecordByID(root, st.Name)
+		if err != nil {
+			return err
+		}
+		if st.JSON {
+			return printJSON(r)
+		}
+		fmt.Println(r.Text)
+		return nil
+	}
+	page, older, err := askHistoryPage(root, st.For, st.HistoryBefore, st.HistoryLimit)
+	if err != nil {
+		return err
+	}
+	if st.JSON {
+		return printJSON(page)
+	}
+	if len(page) == 0 {
+		switch {
+		case st.HistoryBefore != "":
+			fmt.Printf("No records before %s.\n", st.HistoryBefore)
+		case st.For != "":
+			fmt.Printf("No asks addressed to playbook %s are recorded.\n", st.For)
+		default:
+			fmt.Printf("No asks are recorded (%s).\n", tildePath(filepath.Join(askStoreDir(root), askHistoryName)))
+		}
+		return nil
+	}
+	t := newTable("TIME", "PLAYBOOK", "ID", "ASKED").flexible(3)
+	for _, e := range page {
+		t.add(e.Time, e.Tag, e.ID, e.Asked)
+	}
+	t.render(os.Stdout)
+	if older > 0 {
+		next := *st
+		next.HistoryBefore = page[len(page)-1].ID
+		next.JSON = false
+		fmt.Printf("%d older: cpb %s\n", older, next.String())
+	}
+	return nil
 }

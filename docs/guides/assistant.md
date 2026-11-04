@@ -197,7 +197,7 @@ answer then uses a reference, `ALTER ACCOUNT router SET auth_token FROM
 
 ## Follow-ups and your own context
 
-`cpb ask` remembers what it answered (since v4.4.0), so you can correct it
+`cpb ask` remembers what it answered (since v4.5.0), so you can correct it
 or point back:
 
 ```
@@ -217,8 +217,9 @@ Everything it keeps is under `~/.claude-playbooks/.ask/`:
   **Asked:** list my env sets
   ```
 
-  It is appended to and never rewritten. Read it with any tool; delete it
-  to forget, and cpb starts a new one. Each ask sends the last 20 headings
+  It is appended to and never rewritten. Read it with `cpb SHOW ASK
+  HISTORY` (below) or any tool; delete it to forget, and cpb starts a new
+  one. Each ask sends the last 20 headings
   and the last record; the model reads further back only when your request
   points there. A refused ask is never recorded, and a part that looks like
   a credential is written as withheld.
@@ -227,6 +228,19 @@ Everything it keeps is under `~/.claude-playbooks/.ask/`:
   that holds a credential refuses the ask.
 
 `--no-history` keeps one ask out: it reads no history and adds nothing.
+
+To look back yourself:
+
+```
+cpb SHOW ASK HISTORY                                   # the last 20, newest first
+cpb SHOW ASK HISTORY FOR PLAYBOOK work LIMIT 50        # the asks addressed to work
+cpb SHOW ASK RECORD r-20261102-113912-3f2a             # one in full
+```
+
+`SHOW ASK HISTORY` prints `TIME PLAYBOOK ID ASKED`, and when there is more
+a last line with the statement that lists the older ones (`BEFORE <id>`).
+Both take `--json`. The model reads the history with the same two
+statements, through its read-only tool.
 
 ## Choosing the model
 

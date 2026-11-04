@@ -206,6 +206,8 @@ mcp-part   := VAR <key>=<value> ...          literal values; a credential needs 
 
 read       := SHOW [ PLAYBOOKS | ENVS | ACCOUNTS | DEFAULTS | PLAYBOOK <name> | ENV <name> | ACCOUNT <name> ] [--json]
             | SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
+            | SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>] [--json]
+            | SHOW ASK RECORD <id> [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ACCOUNT <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name> [--json]
 ```
@@ -3389,8 +3391,10 @@ Code starts for that call and that is granted alone (`--allowedTools
 mcp__cpb__query`; Claude Code's own tools are off). It is a hidden command.
 - **It reads, and nothing else.** Its one tool, `query`, takes a statement and
   accepts only `SHOW PLAYBOOKS`, `SHOW PLAYBOOK <name>`, `SHOW ENVS`,
-  `SHOW ENV <name>`, `SHOW DEFAULTS`, `SHOW SESSIONS [FOR PLAYBOOK <name>]`
-  and `EXPLAIN PLAYBOOK <name>`; anything else is refused with that list.
+  `SHOW ENV <name>`, `SHOW DEFAULTS`, `SHOW SESSIONS [FOR PLAYBOOK <name>]`,
+  `EXPLAIN PLAYBOOK <name>`, `SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE
+  <id>] [LIMIT <n>]` and `SHOW ASK RECORD <id>`; anything else is refused
+  with that list.
   A `SHOW` runs in that process, as its `--json` form. `EXPLAIN` is built by
   the tool itself (below), since EXPLAIN's own login check reads credentials.
 - **It returns a cut-down view**, never the `--json` as it is:
@@ -3496,7 +3500,7 @@ known keys and tokens (Anthropic and other `sk-` keys, GitHub, GitLab and
 Slack tokens, AWS access keys, Google API keys, JSON web tokens); and long
 key-shaped runs, except a hash that follows `sha256`, `commit` and the like.
 
-**The ask store** (since v4.4.0). `<root>/.ask/` holds what cpb ask carries
+**The ask store** (since v4.5.0). `<root>/.ask/` holds what cpb ask carries
 from one ask to the next; nothing else in cpb reads it.
 
 - `CLAUDE.md`: your standing context, in your own words ("my router account
@@ -3518,16 +3522,42 @@ from one ask to the next; nothing else in cpb reads it.
 Every ask hands the model, after the installed state, the index lines of the
 last 20 records (newest first, each with the first line of what was asked)
 and the last record in full, the last addressed to the same playbook when the
-ask names one. The model's tool reads further back, so the model decides how
-far: `HISTORY [FOR <playbook>] [BEFORE <id>] [LIMIT <n>]` (index lines, newest
-first; LIMIT 20 by default, at most 200) and `HISTORY RECORD <id>` (one record
-in full). These are the tool's own statements, not cpb grammar, and read
-`history.md` only. History is the past: the installed state is the present,
-and the reference tells the model so. `--no-history` keeps one ask out: it
+ask names one. The model's tool reads further back with `SHOW ASK` (below),
+so the model decides how far. History is the past: the installed state is the
+present, and the reference tells the model so. `--no-history` keeps one ask out: it
 neither reads the history nor adds to it. With `--json` the plan carries
 `record`, the id it was written as. A `CLAUDE.md` or `history.md` that is not
 a regular file (a link) is refused, naming it: what is read is sent. A record
 that cannot be written is a warning; the plan is still shown.
+
+**Reading it: `SHOW ASK`.** The same two statements read the history from the
+command line and through the model's tool:
+
+```
+SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>] [--json]
+SHOW ASK RECORD <id> [--json]
+```
+
+- **`SHOW ASK HISTORY`** lists index lines, newest first: `TIME PLAYBOOK ID
+  ASKED`, the first line of what was asked. `FOR PLAYBOOK` keeps the asks
+  addressed to that playbook (one that is gone too: history is the past);
+  `BEFORE <id>` starts after that record; `LIMIT` is 20 by default, a whole
+  number from 1 to 200. When older records match, a last line names the
+  statement that lists them, `<n> older: cpb SHOW ASK HISTORY … BEFORE <id>`.
+  No history prints `No asks are recorded (<path>).` `--json` is an array of
+  `{time, playbook, id, asked}`, `-` as the playbook of an ask addressed to
+  none.
+- **`SHOW ASK RECORD <id>`** prints one record as it is in `history.md`;
+  `--json` is the object above with `text`, the record.
+- An `<id>` that is not the shape `r-<YYYYMMDD-HHMMSS>-<4 hex>` is a parse
+  error, never quoted back; one that is not in the history is refused, `no
+  record <id> in the ask history`. They read `<root>/.ask/history.md` and
+  nothing else, the same file checks as an ask (a link is refused). The
+  tool returns their `--json`: a record holds no path, and a part that looked
+  like a credential was withheld when it was written.
+- Like `SHOW SESSIONS`, `SHOW ASK` reserves no word: `ask`, `history`,
+  `record` and `limit` can still name a playbook. A playbook file cannot
+  hold it (it only reads).
 
 **Exit codes:** 0 shown; 1 refused (a credential in the request or in `.ask/CLAUDE.md`, a link in the ask store, a proxy, `CPB_ASK_LOGIN=token` without a
 machine token, the gate, an addressed playbook it cannot sign in as) or no

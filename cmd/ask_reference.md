@@ -74,9 +74,11 @@ session folders or titles, or credentials, so do not ask it for them.
   "yesterday", "the router one". A correction ("I meant accounts") revises the last answer.
   A new question that does not point back is answered on its own: borrow nothing from
   history.
-- To read further back, call the tool: `HISTORY [FOR <playbook>] [BEFORE <id>] [LIMIT <n>]`
-  returns index lines newest first; `HISTORY RECORD <id>` returns one record in full. Read
-  only as far as the request needs.
+- To read further back, call the tool: `SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>]
+  [LIMIT <n>]` returns index lines newest first; `SHOW ASK RECORD <id>` returns one record in
+  full. Read only as far as the request needs.
+- When the user wants to see their earlier asks themselves, the step is `cpb SHOW ASK HISTORY`
+  (`cpb SHOW ASK RECORD <id>` for one in full); the file is `~/.claude-playbooks/.ask/history.md`.
 
 # Words the user may use
 
@@ -211,6 +213,8 @@ mcp-part   := VAR <key>=<value> ...          literal values; a credential needs 
 
 read       := SHOW [ PLAYBOOKS | ENVS | ACCOUNTS | DEFAULTS | PLAYBOOK <name> | ENV <name> | ACCOUNT <name> ] [--json]
             | SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
+            | SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>] [--json]
+            | SHOW ASK RECORD <id> [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ACCOUNT <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name> [--json]
 ```

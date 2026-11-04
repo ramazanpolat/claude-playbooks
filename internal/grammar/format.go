@@ -134,6 +134,15 @@ func (s *Stmt) headWords() []string {
 		if s.Name != "" {
 			w = append(w, quoteWord(s.Name))
 		}
+		if s.For != "" {
+			w = append(w, "FOR", "PLAYBOOK", quoteWord(s.For))
+		}
+		if s.HistoryBefore != "" {
+			w = append(w, "BEFORE", s.HistoryBefore)
+		}
+		if s.HistoryLimit != 0 {
+			w = append(w, "LIMIT", strconv.Itoa(s.HistoryLimit))
+		}
 		if s.SkipSecrets {
 			w = append(w, "--skip-secrets")
 		}

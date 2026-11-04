@@ -132,11 +132,14 @@ func mustAskHistory(t *testing.T, root string) []askEntry {
 	return e
 }
 
-// The tool's HISTORY statements: index lines newest first, by playbook,
+// SHOW ASK HISTORY and SHOW ASK RECORD, over the tool as Claude Code calls
+// it and from the command line: index lines newest first, by playbook,
 // before an id, a bounded limit, and one record in full. A torn last
 // append is skipped.
-func TestAskHistoryQuery(t *testing.T) {
+func TestShowAskHistory(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
 	plan := func(cmd string) *askPlan {
 		return &askPlan{Answer: "ok", Steps: []askStep{{Command: cmd, Status: stepOK, Why: "does it"}}}
 	}
@@ -153,41 +156,77 @@ func TestAskHistoryQuery(t *testing.T) {
 	f.WriteString("## 2026-11-02T11:39:12+03:00 · torn")
 	f.Close()
 
-	index := func(words ...string) []askEntry {
+	index := func(stmt string) []askEntry {
 		t.Helper()
-		text, err := askHistoryQuery(root, words)
+		text, err := askQuery(stmt)
 		if err != nil {
-			t.Fatalf("HISTORY %v: %v", words, err)
+			t.Fatalf("%s: %v", stmt, err)
 		}
-		var got struct{ Records []askEntry }
+		var got []askEntry
 		if err := json.Unmarshal([]byte(text), &got); err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v\n%s", stmt, err, text)
 		}
-		return got.Records
+		return got
 	}
-	if got := index(); len(got) != 4 || got[0].ID != ids[3] || got[0].Asked != "ask d" || got[3].Tag != "-" {
-		t.Fatalf("HISTORY: %+v", got)
+	if got := index("SHOW ASK HISTORY"); len(got) != 4 || got[0].ID != ids[3] || got[0].Asked != "ask d" || got[3].Tag != "-" {
+		t.Fatalf("SHOW ASK HISTORY: %+v", got)
 	}
-	if got := index("FOR", "reviewer"); len(got) != 2 || got[0].ID != ids[3] || got[1].ID != ids[1] {
-		t.Fatalf("HISTORY FOR reviewer: %+v", got)
+	if got := index("SHOW ASK HISTORY FOR PLAYBOOK reviewer"); len(got) != 2 || got[0].ID != ids[3] || got[1].ID != ids[1] {
+		t.Fatalf("FOR PLAYBOOK reviewer: %+v", got)
 	}
-	if got := index("BEFORE", ids[2], "LIMIT", "1"); len(got) != 1 || got[0].ID != ids[1] {
-		t.Fatalf("HISTORY BEFORE LIMIT: %+v", got)
+	if got := index("SHOW ASK HISTORY BEFORE " + ids[2] + " LIMIT 1"); len(got) != 1 || got[0].ID != ids[1] {
+		t.Fatalf("BEFORE LIMIT: %+v", got)
 	}
-	text, err := askHistoryQuery(root, []string{"RECORD", ids[1]})
-	if err != nil || !strings.Contains(text, "**Asked:** ask b") || !strings.Contains(text, "`cpb SHOW ENVS`: does it") {
-		t.Fatalf("HISTORY RECORD: %v\n%s", err, text)
+	text, err := askQuery("SHOW ASK RECORD " + ids[1])
+	var rec askRecordJSON
+	if err == nil {
+		err = json.Unmarshal([]byte(text), &rec)
 	}
-	for _, bad := range [][]string{{"RECORD", "r-00000000-000000-0000"}, {"BEFORE", "nope"}, {"LIMIT", "0"}, {"SINCE", "x"}} {
-		if _, err := askHistoryQuery(root, bad); err == nil {
-			t.Errorf("HISTORY %v: accepted", bad)
+	if err != nil || rec.ID != ids[1] || rec.Tag != "reviewer" || !strings.Contains(rec.Text, "**Asked:** ask b") || !strings.Contains(rec.Text, "`cpb SHOW ENVS`: does it") {
+		t.Fatalf("SHOW ASK RECORD: %v\n%s", err, text)
+	}
+	for _, bad := range []string{
+		"SHOW ASK RECORD r-00000000-000000-0000", "SHOW ASK HISTORY BEFORE r-00000000-000000-0000",
+		"SHOW ASK HISTORY LIMIT 0", "SHOW ASK HISTORY SINCE x", "HISTORY RECORD " + ids[1],
+	} {
+		if _, err := askQuery(bad); err == nil {
+			t.Errorf("%s: accepted", bad)
 		}
 	}
-	// Over the tool, as Claude Code calls it.
-	t.Setenv("CPB_PLAYBOOKS_DIR", root)
-	config.PlaybooksDir = ""
-	if text, err := askQuery("HISTORY LIMIT 1"); err != nil || !strings.Contains(text, ids[3]) {
-		t.Fatalf("the tool's HISTORY: %v %s", err, text)
+
+	// From the command line: a table, newest first, and the statement that
+	// pages on; --json prints what the tool returns.
+	run := func(args ...string) string {
+		t.Helper()
+		var err error
+		out := captureStdout(t, func() { err = runStatement(args) })
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return out
+	}
+	out := run("SHOW", "ASK", "HISTORY", "LIMIT", "2")
+	if !strings.Contains(out, "TIME") || !strings.Contains(out, "ASKED") || !strings.Contains(out, ids[3]) || !strings.Contains(out, ids[2]) ||
+		strings.Contains(out, ids[1]+" ") || !strings.Contains(out, "2 older: cpb SHOW ASK HISTORY BEFORE "+ids[2]+" LIMIT 2") {
+		t.Fatalf("SHOW ASK HISTORY LIMIT 2:\n%s", out)
+	}
+	if out := run("SHOW", "ASK", "HISTORY", "--json"); strings.TrimSpace(out) == "" {
+		t.Fatal("no JSON")
+	} else {
+		var cli []askEntry
+		if err := json.Unmarshal([]byte(out), &cli); err != nil || len(cli) != 4 || cli[0].ID != ids[3] {
+			t.Fatalf("--json: %v\n%s", err, out)
+		}
+	}
+	if out := run("SHOW", "ASK", "RECORD", ids[1]); !strings.HasPrefix(out, "## ") || !strings.Contains(out, "**Asked:** ask b") {
+		t.Fatalf("SHOW ASK RECORD:\n%s", out)
+	}
+	if out := run("SHOW", "ASK", "HISTORY", "FOR", "PLAYBOOK", "gone"); !strings.Contains(out, "No asks addressed to playbook gone") {
+		t.Fatalf("FOR an unknown playbook:\n%s", out)
+	}
+	t.Setenv("CPB_PLAYBOOKS_DIR", t.TempDir())
+	if out := run("SHOW", "ASK", "HISTORY"); !strings.Contains(out, "No asks are recorded") {
+		t.Fatalf("no history:\n%s", out)
 	}
 }
 
