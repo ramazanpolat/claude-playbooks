@@ -14,8 +14,47 @@
   is recorded for a refused ask, a part that looks like a credential is
   withheld, and `--no-history` keeps one ask out.
 
+## [v4.4.0] -- 2026-11-04
+
+v4.4.0 makes a second account easy to use when the first has hit its
+limit. `cpb ask --account <account>` asks on a Claude token or Claude login
+account, and a failed question names your other accounts. A `--resume` of
+another playbook's session names the playbook that holds it, a live
+session's refusal says where it runs and offers a copy under a new id, and
+the commands cpb suggests keep your `--account` where it can run.
+`cpb update` names the migrate step it asks about, and `cpb ask` proposes
+`SET` statements cpb accepts.
+
+### Added
+
+- **`cpb ask --account <account>`.** A question can sign in on one of your
+  accounts, for when your Claude login has hit its limit: an Anthropic
+  account that signs in with a Claude token (`claude_token`) or a Claude
+  login. The token goes into that one `claude` call's environment, with a
+  fresh config directory; a reference is resolved by the secret helper, as
+  at launch. Another provider, request headers, or another kind of
+  credential is refused before anything is sent. With a playbook named, it
+  signs in as `cpb run --account` on that playbook would. An empty
+  `--account` is a usage error.
+- **A failed `cpb ask` names your other accounts.** A hit limit or another
+  error from Claude Code now ends with `or ask on another account: cpb ask
+  --account <account> "<request>"` and the Claude token accounts open to
+  any playbook, never the one that failed.
+
 ### Changed
 
+- **`cpb ask <playbook>` on a Claude token account asks with that token.**
+  It was refused as "a token of its own"; it now signs in as a launch of the
+  playbook would. Keys and other tokens are still refused.
+- **A refused `--resume` of a live session says where it runs and how to go
+  on.** It names the folder and the session's name beside the pid, and offers
+  a copy under a new id (`<launcher> --resume <id> --fork-session`, with the
+  `cd` in front from another folder) beside the picker.
+- **The commands cpb names for a launch keep its `--account`.** The resume
+  refusals and the exit line say `<launcher> --account <account> --resume
+  <id>`, or `cpb run --account <account> <playbook> --resume <id>`. A command
+  for another playbook keeps it only when that playbook may run on the
+  account, and says so when it cannot.
 - **`cpb update` names the migrate step it asks about.** The question before
   an update whose source declares a migrate step read "Update <name> and run
   it?", which reads as running the playbook. It is now "Update <name> and run
@@ -25,6 +64,12 @@
 
 ### Fixed
 
+- **A `--resume` of another playbook's session names that playbook.** Given
+  an id the playbook holds no transcript of while another config dir cpb
+  knows does, the launch was left to Claude Code, which only said "No
+  conversation found". It is now refused with the playbook that holds it and
+  the command that resumes it there.
+- **"1 minute ago", "1 hour ago".** Ages read "1 minutes ago".
 - **`cpb ask` proposes `CREATE ACCOUNT` and other `SET` statements cpb
   accepts.** The model put `key = 'value'` into one argument, so a step
   such as creating an account was shown as not proposed. The reference it

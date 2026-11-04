@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 )
 
@@ -225,6 +226,11 @@ const (
 type askSignIn struct {
 	mode      string
 	configDir string
+	// account is askLoginAccount's account (ask_account.go).
+	account *account.Account
+	// loginOnly: askLoginClaude keeps no Anthropic key or token from the
+	// environment, as a launch on a claude_login account blocks them.
+	loginOnly bool
 }
 
 // askLogin reads CPB_ASK_LOGIN; anything else is a usage error.
@@ -247,7 +253,24 @@ func askLogin() (string, error) {
 // configDir, empty and fresh: with no stored login in it, a token that is
 // refused cannot fall back to the machine's login. Neither mode falls back
 // to the other.
-func askLoginEnvFor(mode string, env []string, configDir string) ([]string, error) {
+func askLoginEnvFor(signIn askSignIn, env []string, configDir string) ([]string, error) {
+	mode := signIn.mode
+	if mode == askLoginAccount {
+		// The account's Claude token and no other credential: a literal
+		// stored AS PLAINTEXT goes in here; a reference is set by the
+		// secret helper that execs claude (askCommand).
+		out := make([]string, 0, len(env)+2)
+		for _, kv := range env {
+			if k, _, _ := strings.Cut(kv, "="); !askEnvLogin[k] {
+				out = append(out, kv)
+			}
+		}
+		out = append(out, "CLAUDE_CONFIG_DIR="+configDir)
+		if a := signIn.account; a != nil && a.Auth.Ref == "" && a.Auth.Value != "" {
+			out = append(out, auth.OAuthTokenEnv+"="+a.Auth.Value)
+		}
+		return out, nil
+	}
 	if mode == askLoginPlaybook {
 		// The playbook's own login, and no other credential beside it.
 		out := make([]string, 0, len(env)+1)
@@ -259,6 +282,15 @@ func askLoginEnvFor(mode string, env []string, configDir string) ([]string, erro
 		return append(out, "CLAUDE_CONFIG_DIR="+configDir), nil
 	}
 	if mode != askLoginToken {
+		if signIn.loginOnly {
+			out := make([]string, 0, len(env))
+			for _, kv := range env {
+				if k, _, _ := strings.Cut(kv, "="); !askEnvLogin[k] {
+					out = append(out, kv)
+				}
+			}
+			return out, nil
+		}
 		return env, nil
 	}
 	f := auth.OAuthTokenFile()
@@ -338,13 +370,13 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	}
 	defer os.RemoveAll(dir)
 	configDir := signIn.configDir
-	if signIn.mode == askLoginToken {
+	if signIn.mode == askLoginToken || signIn.mode == askLoginAccount {
 		if configDir, err = askNeutralDir(); err != nil {
 			return nil, err
 		}
 		defer os.RemoveAll(configDir)
 	}
-	env, err := askLoginEnvFor(signIn.mode, askEnv(os.Environ()), configDir)
+	env, err := askLoginEnvFor(signIn, askEnv(os.Environ()), configDir)
 	if err != nil {
 		return nil, err
 	}
@@ -361,21 +393,46 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	if err != nil {
 		return nil, err
 	}
-	c := exec.CommandContext(ctx, path, askClaudeArgs(model, self, root)...)
+	c, err := askCommand(ctx, signIn, path, askClaudeArgs(model, self, root), env)
+	if err != nil {
+		return nil, err
+	}
 	c.Dir = dir
-	c.Env = env
 	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\n" + prelude + "Request: " + request + "\n")
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	runErr := c.Run()
+	hint := askFailureHint(root, signIn)
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("Claude Code did not answer within %s: nothing came back. %s", askTimeout, askLoginHint)
+		return nil, fmt.Errorf("Claude Code did not answer within %s: nothing came back. %s", askTimeout, hint)
 	}
-	return parseAskAnswer(stdout.Bytes(), stderr.String(), runErr)
+	return parseAskAnswer(stdout.Bytes(), stderr.String(), runErr, hint)
 }
 
-// parseAskAnswer reads claude -p --output-format json's result object.
-func parseAskAnswer(stdout []byte, stderr string, runErr error) (*askPlan, error) {
+// askCommand builds the claude child: claude itself, or, for an account
+// whose token is a secret reference, the secret helper, which sets the
+// token and execs claude, as at launch. The reference travels on the
+// helper's argv; the value never reaches cpb.
+func askCommand(ctx context.Context, signIn askSignIn, claudePath string, args, env []string) (*exec.Cmd, error) {
+	a := signIn.account
+	if signIn.mode != askLoginAccount || a == nil || a.Auth.Ref == "" {
+		c := exec.CommandContext(ctx, claudePath, args...)
+		c.Env = env
+		return c, nil
+	}
+	_, helper, err := resolveHelper()
+	if err != nil {
+		return nil, fmt.Errorf("account %s's Claude token is a secret reference, and %w: nothing was sent", a.Name, err)
+	}
+	argv := append([]string{auth.OAuthTokenEnv + "=" + a.Auth.Ref, "--", claudePath}, args...)
+	c := exec.CommandContext(ctx, helper, argv...)
+	c.Env = withoutKeys(env, []string{auth.OAuthTokenEnv})
+	return c, nil
+}
+
+// parseAskAnswer reads claude -p --output-format json's result object;
+// hint ends a failure.
+func parseAskAnswer(stdout []byte, stderr string, runErr error, hint string) (*askPlan, error) {
 	var res struct {
 		IsError          bool            `json:"is_error"`
 		Result           string          `json:"result"`
@@ -389,14 +446,14 @@ func parseAskAnswer(stdout []byte, stderr string, runErr error) (*askPlan, error
 		if why == "" && runErr != nil {
 			why = runErr.Error()
 		}
-		return nil, fmt.Errorf("Claude Code did not answer (%s). %s", why, askLoginHint)
+		return nil, fmt.Errorf("Claude Code did not answer (%s). %s", why, hint)
 	}
 	if res.IsError || runErr != nil {
 		why := firstLine(res.Result)
 		if why == "" {
 			why = firstLine(stderr)
 		}
-		return nil, fmt.Errorf("Claude Code answered with an error: %s. %s", why, askLoginHint)
+		return nil, fmt.Errorf("Claude Code answered with an error: %s. %s", why, hint)
 	}
 	raw := res.StructuredOutput
 	if len(raw) == 0 || string(raw) == "null" {
