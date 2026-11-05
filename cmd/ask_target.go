@@ -55,15 +55,23 @@ func askSplitArgs(root string, args []string) (*playbook.Playbook, string, error
 }
 
 // askTargetSignIn decides how a question addressed to pb signs in: as a
-// launch of pb would, on Anthropic only, with no fallback to another login.
+// launch of pb would, on Anthropic only (a gateway account too with
+// allowOther, --allow-other-provider), with no fallback to another login.
 // flag is the --account the question names ("" for none): the sign-in is
 // then decided on that account, as `cpb run --account <flag> <pb>` decides
 // it.
-func askTargetSignIn(root string, pb *playbook.Playbook, flag string) (askSignIn, error) {
+func askTargetSignIn(root string, pb *playbook.Playbook, flag string, allowOther bool) (askSignIn, error) {
 	var a *account.Account
 	if flag == "" {
 		if route := askPlaybookRoute(pb.Path); route != "anthropic" {
-			return askSignIn{}, fmt.Errorf("%s sends its requests away from Anthropic (route %s), and cpb ask asks Anthropic only: nothing was sent. Ask without naming it: cpb ask \"<request>\"", pb.Name, route)
+			hint := ""
+			if a := askPlaybookAccount(pb.Path, pb.Name); a != nil && a.Provider != account.Anthropic {
+				if allowOther {
+					return askOtherSignIn(a)
+				}
+				hint = fmt.Sprintf(" It runs on account %s (provider %s).%s", a.Name, a.Provider, askOtherHint(a))
+			}
+			return askSignIn{}, fmt.Errorf("%s sends its requests away from Anthropic (route %s), and cpb ask asks Anthropic only: nothing was sent. Ask without naming it: cpb ask \"<request>\".%s", pb.Name, route, hint)
 		}
 		a = askPlaybookAccount(pb.Path, pb.Name)
 	} else {
@@ -78,6 +86,9 @@ func askTargetSignIn(root string, pb *playbook.Playbook, flag string) (askSignIn
 			return askSignIn{}, fmt.Errorf("%w: nothing was sent", err)
 		}
 		if a = sel.Account; a != nil {
+			if a.Provider != account.Anthropic && allowOther {
+				return askOtherSignIn(a)
+			}
 			if err := askAccountUsable(a); err != nil {
 				return askSignIn{}, err
 			}

@@ -63,13 +63,14 @@ func askRun(t *testing.T, flags map[string]string, request ...string) (string, e
 	// --account counts only when given (Changed): each run starts without.
 	askCmd.Flags().Set("account", "")
 	askCmd.Flags().Lookup("account").Changed = false
+	askCmd.Flags().Set(askAllowOtherFlag, "false")
 	for k, v := range flags {
 		if err := askCmd.Flags().Set(k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() {
-		for _, k := range []string{"json", "no-history"} {
+		for _, k := range []string{"json", "no-history", askAllowOtherFlag} {
 			askCmd.Flags().Set(k, "false")
 		}
 		askCmd.Flags().Set("model", "")
