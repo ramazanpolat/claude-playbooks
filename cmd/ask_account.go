@@ -10,8 +10,9 @@ import (
 )
 
 // cpb ask --account <name>: the question signs in on an account, as a
-// launch on it would, on Anthropic only. An account cpb ask can sign in on
-// is an Anthropic one, at Anthropic's own address, with no request headers
+// launch on it would, on Anthropic only unless --allow-other-provider
+// (ask_provider.go) lets it go to a gateway account. An account cpb ask can
+// sign in on otherwise is an Anthropic one, at Anthropic's own address, with no request headers
 // of its own, that signs in with a Claude token (claude_token) or a Claude
 // login (claude_login). Its token goes into the child's environment only,
 // through the secret helper when it is a reference, as at launch: cpb never
@@ -25,12 +26,12 @@ const askLoginAccount = "account"
 // addressed to pb (nil for none). With a playbook, it signs in as `cpb run
 // --account <name> <pb>` would: the account must be one pb may run on, and
 // the login is decided on it (askTargetSignIn).
-func askAccountSignIn(root string, pb *playbook.Playbook, name string) (askSignIn, error) {
+func askAccountSignIn(root string, pb *playbook.Playbook, name string, allowOther bool) (askSignIn, error) {
 	if err := manifest.ValidateAccountName(name); err != nil {
 		return askSignIn{}, askUsage("--account: " + err.Error())
 	}
 	if pb != nil {
-		return askTargetSignIn(root, pb, name)
+		return askTargetSignIn(root, pb, name, allowOther)
 	}
 	if name == account.Machine {
 		// The implicit account: the way a question signs in without one.
@@ -46,6 +47,12 @@ func askAccountSignIn(root string, pb *playbook.Playbook, name string) (askSignI
 	}
 	if a.Listed() {
 		return askSignIn{}, fmt.Errorf("account %s is access = 'listed': it runs only for a playbook that lists it, so a question on it names one: cpb ask <playbook> --account %s \"<request>\". Nothing was sent", name, name)
+	}
+	if a.Provider != account.Anthropic {
+		if allowOther {
+			return askOtherSignIn(a)
+		}
+		return askSignIn{}, askAwayRefusal(a)
 	}
 	if a.Auth.Kind == account.ClaudeLogin {
 		// A Claude login, and no playbook to hold one: Claude Code's own
@@ -77,7 +84,7 @@ func askTokenAccountSignIn(a *account.Account) (askSignIn, error) {
 // goes to Anthropic's API as every question does.
 func askAccountUsable(a *account.Account) error {
 	if a.Provider != account.Anthropic {
-		return fmt.Errorf("account %s sends its requests away from Anthropic (provider %s), and cpb ask asks Anthropic only: nothing was sent", a.Name, a.Provider)
+		return askAwayRefusal(a)
 	}
 	if n := a.HeaderNames(); len(n) > 0 {
 		return fmt.Errorf("account %s sends request headers of its own (%s), which cpb ask does not send: nothing was sent", a.Name, strings.Join(n, ", "))
@@ -108,10 +115,14 @@ func askOtherAccounts(root, except string) []string {
 func askFailureHint(root string, signIn askSignIn) string {
 	var hint string
 	except := ""
-	if signIn.mode == askLoginAccount && signIn.account != nil {
+	switch {
+	case signIn.mode == askLoginAccount && signIn.account != nil:
 		except = signIn.account.Name
 		hint = fmt.Sprintf("cpb ask signed in on account %s, with its Claude token", except)
-	} else {
+	case signIn.mode == askLoginOther && signIn.account != nil:
+		except = signIn.account.Name
+		hint = fmt.Sprintf("cpb ask asked %s, with the account's own credential", askOtherWhere(signIn.account))
+	default:
 		hint = askLoginHint
 	}
 	if others := askOtherAccounts(root, except); len(others) > 0 {

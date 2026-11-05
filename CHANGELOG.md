@@ -19,6 +19,14 @@
   statement that lists older ones; one record in full; `--json` for both.
   The model reads the history through its tool with the same statements.
   They reserve no word.
+- **`cpb ask --allow-other-provider`.** A question on a gateway account, by
+  `--account` or by the account a named playbook runs on, was refused with
+  no way past it. The refusal now says how to ask there anyway and what
+  that sends, and the flag does it: the question goes to the account's
+  address with its own credential and models, as a launch on it would, from
+  a fresh config directory with no Anthropic key or Claude token. An
+  account that would send your Claude credential to a gateway stays
+  refused, as do Bedrock, Vertex and Foundry accounts.
 
 ## [v4.4.0] -- 2026-11-04
 

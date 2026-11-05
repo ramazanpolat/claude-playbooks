@@ -15,7 +15,7 @@ import (
 // cpb checks every step and shows it. cpb ask never runs a step: the user
 // copies what they want to run.
 var askCmd = &cobra.Command{
-	Use:   `ask [<playbook>] [--json] [--no-history] [--model <model>] [--account <account>] "<request>"`,
+	Use:   `ask [<playbook>] [--json] [--no-history] [--model <model>] [--account <account>] [--allow-other-provider] "<request>"`,
 	Short: "Ask in plain words for the cpb command that does it",
 	Long: `ask answers a request in plain words with the cpb command or commands that do it.
 It shows them; it never runs them.
@@ -31,9 +31,10 @@ playbook on an Anthropic account that signs in with a Claude token asks with
 that token. A playbook on an account that is not Anthropic's, or on one that
 signs in with a key or a token of another kind, is refused.
 
-It asks Claude through this machine's Claude Code login (claude -p), always on
+It asks Claude through this machine's Claude Code login (claude -p), on
 Anthropic's API: no env set, DEFAULTS or account of yours applies to the question
-unless --account names one.
+unless --account names one, and nothing leaves Anthropic without
+--allow-other-provider.
 What it sends, to Anthropic: the request, and the names of your playbooks,
 launchers and env sets, with whether each routes away from Anthropic (a
 playbook by the account it runs on). Never a
@@ -49,6 +50,16 @@ token (auth = claude_token) or a Claude login. Use it when your login has hit
 its limit. With a playbook named, the account must be one it may run on.
 Only the account's credential is used: its token reaches Claude Code's
 environment alone, through your secret helper when it is a reference.
+
+--allow-other-provider lets the question leave Anthropic: on a gateway
+account (provider = 'gateway'), named with --account or the one the
+playbook runs on, it goes to that account's address, signed in with the
+account's own credential and on its own models, as a launch on it would.
+The request, your ask context and history, and the names of your
+playbooks, launchers, env sets and accounts then go to that provider.
+Without it such an account is refused, and the refusal says so. A Claude
+login or token never goes along: an account that would send one to a
+gateway is refused, with the flag or without.
 
 A request that holds a credential (KEY=value with a secret-looking key, a
 token-shaped word, a URL with a password) is refused before anything is
@@ -74,7 +85,8 @@ func init() {
 	askCmd.Flags().Bool("json", false, "print the checked plan as JSON")
 	askCmd.Flags().Bool("no-history", false, "neither read the ask history nor add this ask to it")
 	askCmd.Flags().String("model", "", "the Claude model that answers (default: $CPB_ASK_MODEL, else "+defaultAskModel+")")
-	askCmd.Flags().String("account", "", "sign in on this account: an Anthropic one with a Claude token or login (default: as the playbook would, else Claude Code's own login)")
+	askCmd.Flags().String("account", "", "sign in on this account: an Anthropic one with a Claude token or login, or a gateway one with --"+askAllowOtherFlag+" (default: as the playbook would, else Claude Code's own login)")
+	askCmd.Flags().Bool(askAllowOtherFlag, false, "let the question go to a gateway account, away from Anthropic: the request, your ask context and history, and the names of your playbooks, env sets and accounts go there")
 	rootCmd.AddCommand(askCmd)
 }
 
@@ -89,6 +101,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	noHistory, _ := cmd.Flags().GetBool("no-history")
 	model, _ := cmd.Flags().GetString("model")
 	acctName, _ := cmd.Flags().GetString("account")
+	allowOther, _ := cmd.Flags().GetBool(askAllowOtherFlag)
 	root := config.ResolvePlaybooksDir()
 	target, request, err := askSplitArgs(root, args)
 	if err != nil {
@@ -110,15 +123,20 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		// --account decides how the question signs in, with or without a
 		// playbook named. Given empty (an unset variable) it is refused:
 		// a login the person did not name never stands in for one they did.
-		if signIn, err = askAccountSignIn(root, target, acctName); err != nil {
+		if signIn, err = askAccountSignIn(root, target, acctName, allowOther); err != nil {
 			return err
 		}
 	case target != nil:
 		// The playbook decides how its question signs in; CPB_ASK_LOGIN is
 		// for questions addressed to no playbook.
-		if signIn, err = askTargetSignIn(root, target, ""); err != nil {
+		if signIn, err = askTargetSignIn(root, target, "", allowOther); err != nil {
 			return err
 		}
+	}
+	if model == "" && signIn.mode == askLoginOther {
+		// Another provider's models are its account's: CPB_ASK_MODEL names
+		// a Claude model.
+		model = signIn.account.DefaultModel
 	}
 	if model == "" {
 		model = os.Getenv("CPB_ASK_MODEL")
@@ -153,6 +171,9 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		if past != "" {
 			prelude += past + "\n"
 		}
+	}
+	if signIn.mode == askLoginOther {
+		fmt.Fprintf(os.Stderr, "cpb ask: --%s: asking %s, not Anthropic.\n", askAllowOtherFlag, askOtherWhere(signIn.account))
 	}
 	plan, err := askViaClaude(model, signIn, root, state, prelude, request)
 	if err != nil {
