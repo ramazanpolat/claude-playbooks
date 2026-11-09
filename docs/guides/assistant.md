@@ -222,12 +222,15 @@ Everything it keeps is under `~/.claude-playbooks/.ask/`:
   one. Each ask sends the last 20 headings
   and the last record; the model reads further back only when your request
   points there. A refused ask is never recorded, and a part that looks like
-  a credential is written as withheld.
+  a credential is written as withheld. A record keeps what you asked and
+  what came back as it was shown, a path in a command among them, so treat
+  the file like your shell history.
 - `CLAUDE.md`: write it yourself, in your own words: what you call things,
   how you like answers. It goes with every ask. cpb never writes it, and one
   that holds a credential refuses the ask.
 
-`--no-history` keeps one ask out: it reads no history and adds nothing.
+`--no-history` keeps one ask out: it reads no history and adds nothing, and
+the model's tool cannot read the history for that ask either.
 
 To look back yourself:
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
@@ -35,8 +37,8 @@ const (
 
 func askStoreDir(root string) string { return filepath.Join(root, askStoreDirName) }
 
-// askEntry is one record read back: its heading's fields, the first line of
-// what was asked, and the record's text.
+// askEntry is one record read back: its heading's fields, what was asked
+// (on one line, as it was recorded), and the record's text.
 type askEntry struct {
 	Time  string `json:"time"`
 	Tag   string `json:"playbook"`
@@ -47,10 +49,20 @@ type askEntry struct {
 
 var askHeading = regexp.MustCompile(`^## (\S+) · (\S+) · (` + strings.Trim(grammar.AskRecordID.String(), "^$") + `)$`)
 
-// askStoreFile says whether path is there to read, refusing anything but a
-// regular file: a link could point at anything, and what is read is sent. A
-// missing file is (false, nil).
+// askStoreFile says whether path, a file in the ask store, is there to
+// read, refusing anything but a regular file in a real directory: a link,
+// at the file or at .ask itself, could point at anything, and what is read
+// is sent. A missing file is (false, nil). The file is then opened with
+// askStoreOpen, which does not follow a link either.
 func askStoreFile(path string) (bool, error) {
+	dir := filepath.Dir(path)
+	if info, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false, fmt.Errorf("%s is not a directory (a link, say): cpb ask reads and writes only its own directory there, so nothing was sent. Replace it with a directory", dir)
+	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -73,7 +85,7 @@ func askStanding(root string) (string, error) {
 	if !ok || err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	data, err := askStoreRead(path)
 	if err != nil {
 		return "", err
 	}
@@ -82,21 +94,37 @@ func askStanding(root string) (string, error) {
 		return "", fmt.Errorf("%s looks like it holds a credential (%s): nothing was sent. Leave the value out and name it instead", path, found)
 	}
 	if len(text) > askStandingLimit {
-		text = text[:askStandingLimit] + "\n[cut: the file is longer than 8 KB]"
+		cut := askStandingLimit
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut] + "\n[cut: the file is longer than 8 KB]"
 	}
 	return text, nil
 }
 
+// askStoreRead reads a file of the ask store without following a link.
+func askStoreRead(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
+
 // readAskHistory reads every record, oldest first. A missing file is no
-// history; a record whose heading does not parse (a torn last append) is
-// skipped.
+// history. A record starts at a line that parses as a record heading and
+// runs to the next one; any other line, a markdown heading in an answer
+// among them, is part of the record it is in. Lines before the first
+// heading are skipped.
 func readAskHistory(root string) ([]askEntry, error) {
 	path := filepath.Join(askStoreDir(root), askHistoryName)
 	ok, err := askStoreFile(path)
 	if !ok || err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := askStoreRead(path)
 	if err != nil {
 		return nil, err
 	}
@@ -111,12 +139,10 @@ func readAskHistory(root string) ([]askEntry, error) {
 		cur, body = nil, nil
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "## ") {
+		if m := askHeading.FindStringSubmatch(line); m != nil {
 			flush()
-			if m := askHeading.FindStringSubmatch(line); m != nil {
-				cur = &askEntry{Time: m[1], Tag: m[2], ID: m[3]}
-				body = []string{line}
-			}
+			cur = &askEntry{Time: m[1], Tag: m[2], ID: m[3]}
+			body = []string{line}
 			continue
 		}
 		if cur == nil {
@@ -159,9 +185,12 @@ func askHistoryPrelude(root, tag string) (string, error) {
 	return b.String(), nil
 }
 
-// askRecordText is the record of an answered ask. A part that looks like it
-// holds a credential is withheld: the request passed the same check before
-// it was sent, so only the model's own words can trip it.
+// askRecordText is the record of an answered ask. Every part written after
+// what was asked, the guards and the reasons a step was not proposed among
+// them, is withheld when it looks like it holds a credential: the request
+// passed the same check before it was sent. A line of the record that
+// starts with "#" is written as "\#", so nothing the model wrote can start a
+// record of its own or end this one.
 func askRecordText(now time.Time, tag, id, request string, p *askPlan) string {
 	clean := func(s string) string {
 		if askRequestCredential(s) != "" {
@@ -173,7 +202,6 @@ func askRecordText(now time.Time, tag, id, request string, p *askPlan) string {
 		tag = "-"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "## %s · %s · %s\n\n", now.Format(time.RFC3339), tag, id)
 	fmt.Fprintf(&b, "**Asked:** %s\n\n", strings.Join(strings.Fields(request), " "))
 	if a := strings.TrimSpace(p.Answer); a != "" {
 		fmt.Fprintf(&b, "**Answer:** %s\n\n", clean(a))
@@ -184,9 +212,9 @@ func askRecordText(now time.Time, tag, id, request string, p *askPlan) string {
 			line := "`" + clean(s.Command) + "`"
 			switch s.Status {
 			case stepRejected:
-				line += " not proposed: " + s.Reason
+				line += " not proposed: " + clean(s.Reason)
 			case stepPlaceholder:
-				line += " " + s.Reason
+				line += " " + clean(s.Reason)
 			default:
 				if why := strings.TrimSpace(s.Why); why != "" {
 					line += ": " + clean(why)
@@ -194,7 +222,7 @@ func askRecordText(now time.Time, tag, id, request string, p *askPlan) string {
 			}
 			b.WriteString("- " + line + "\n")
 			for _, g := range s.Guards {
-				b.WriteString("  - ! " + g.What + "\n")
+				b.WriteString("  - ! " + clean(g.What) + "\n")
 			}
 		}
 		b.WriteString("\n")
@@ -206,7 +234,13 @@ func askRecordText(now time.Time, tag, id, request string, p *askPlan) string {
 		}
 		b.WriteString("\n")
 	}
-	return b.String()
+	lines := strings.Split(b.String(), "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "#") {
+			lines[i] = "\\" + l
+		}
+	}
+	return fmt.Sprintf("## %s · %s · %s\n\n", now.Format(time.RFC3339), tag, id) + strings.Join(lines, "\n")
 }
 
 // newAskRecordID is r-<stamp>-<4 hex>: unique, and sorted by time.
@@ -218,7 +252,8 @@ func newAskRecordID(now time.Time) string {
 
 // appendAskRecord appends one record to <root>/.ask/history.md: the
 // directory 0700, the file 0600 when it is made, one write under an
-// exclusive lock. It returns the record's id.
+// exclusive lock, starting on a line of its own when an earlier write was
+// cut off before its last newline. It returns the record's id.
 func appendAskRecord(root, tag, request string, p *askPlan) (string, error) {
 	dir := askStoreDir(root)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -237,13 +272,27 @@ func appendAskRecord(root, tag, request string, p *askPlan) (string, error) {
 		return "", err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return "", err
 	}
 	now := time.Now()
 	id := newAskRecordID(now)
-	if _, err := f.WriteString(askRecordText(now, tag, id, request, p)); err != nil {
+	text := askRecordText(now, tag, id, request, p)
+	if info, err := f.Stat(); err != nil {
+		f.Close()
+		return "", err
+	} else if n := info.Size(); n > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, n-1); err != nil {
+			f.Close()
+			return "", err
+		}
+		if last[0] != '\n' {
+			text = "\n" + text
+		}
+	}
+	if _, err := f.WriteString(text); err != nil {
 		f.Close()
 		return "", err
 	}

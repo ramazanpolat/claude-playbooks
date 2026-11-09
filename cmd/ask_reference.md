@@ -49,8 +49,9 @@ It accepts `SHOW PLAYBOOKS`, `SHOW PLAYBOOK <name>`, `SHOW ENVS`, `SHOW ENV <nam
 `SHOW DEFAULTS`, `SHOW SESSIONS [FOR PLAYBOOK <name>]`, `EXPLAIN PLAYBOOK <name>` and the
 history statements below, nothing else. What it returns is cut down: names, launchers, attached env sets, a route (`anthropic`
 or `away`), versions, plugins, MCP server and skill names, and for sessions a count and each
-session's kind, status, start, last activity and model. It never returns values, paths,
-session folders or titles, or credentials, so do not ask it for them.
+session's kind, status, start, last activity and model. Apart from the history
+statements, which return earlier answers as they were recorded, it never returns values,
+paths, session folders or titles, or credentials, so do not ask it for them.
 
 - Use it when the answer depends on the current state: how many sessions run, what a
   playbook has, which env sets exist. Answer such a question in `answer`, from what the tool

@@ -3515,19 +3515,26 @@ from one ask to the next; nothing else in cpb reads it.
   <id>`: the time in RFC 3339, the playbook the ask was addressed to (`-` for
   none), and an id `r-<YYYYMMDD-HHMMSS>-<4 hex>`. Below it: `**Asked:**`, the
   answer, the steps as shown (a rejected one with cpb's reason, a step's `!`
-  lines kept) and the notes. A part that looks like it holds a credential is
-  written as `<withheld: it looked like it held a credential>`. Nothing is
-  written for an ask that is refused or gets no answer.
+  lines kept) and the notes. Every part after `**Asked:**`, a step's `!` lines
+  and the reason it was not proposed among them, that looks like it holds a
+  credential is written as `<withheld: it looked like it held a credential>`.
+  A line of the record that starts with `#` is written as `\#`, so nothing in
+  an answer can start a record or end one; a record runs from its heading to
+  the next line that parses as one. A write cut off before its last newline
+  leaves that record short, and the next write starts on a line of its own.
+  Nothing is written for an ask that is refused or gets no answer.
 
 Every ask hands the model, after the installed state, the index lines of the
-last 20 records (newest first, each with the first line of what was asked)
+last 20 records (newest first, each with what was asked, on one line)
 and the last record in full, the last addressed to the same playbook when the
 ask names one. The model's tool reads further back with `SHOW ASK` (below),
 so the model decides how far. History is the past: the installed state is the
 present, and the reference tells the model so. `--no-history` keeps one ask out: it
-neither reads the history nor adds to it. With `--json` the plan carries
+neither reads the history nor adds to it, and the model's tool offers no `SHOW ASK` and
+refuses one. With `--json` the plan carries
 `record`, the id it was written as. A `CLAUDE.md` or `history.md` that is not
-a regular file (a link) is refused, naming it: what is read is sent. A record
+a regular file (a link), or a `.ask` that is not a directory (a link), is refused,
+naming it: what is read is sent. The files are opened without following a link. A record
 that cannot be written is a warning; the plan is still shown.
 
 **Reading it: `SHOW ASK`.** The same two statements read the history from the
@@ -3539,7 +3546,7 @@ SHOW ASK RECORD <id> [--json]
 ```
 
 - **`SHOW ASK HISTORY`** lists index lines, newest first: `TIME PLAYBOOK ID
-  ASKED`, the first line of what was asked. `FOR PLAYBOOK` keeps the asks
+  ASKED`, what was asked, on one line. `FOR PLAYBOOK` keeps the asks
   addressed to that playbook (one that is gone too: history is the past);
   `BEFORE <id>` starts after that record; `LIMIT` is 20 by default, a whole
   number from 1 to 200. When older records match, a last line names the
@@ -3553,7 +3560,10 @@ SHOW ASK RECORD <id> [--json]
   error, never quoted back; one that is not in the history is refused, `no
   record <id> in the ask history`. They read `<root>/.ask/history.md` and
   nothing else, the same file checks as an ask (a link is refused). The
-  tool returns their `--json`: a record holds no path, and a part that looked
+  tool returns their `--json`. A record holds what was asked and answered, as
+  it was recorded: a step's command as it was shown, a path in it among them.
+  It holds nothing of the installed state that the tool's cut-down views would
+  have withheld unless the user or the model wrote it, and a part that looked
   like a credential was withheld when it was written.
 - Like `SHOW SESSIONS`, `SHOW ASK` reserves no word: `ask`, `history`,
   `record` and `limit` can still name a playbook. A playbook file cannot

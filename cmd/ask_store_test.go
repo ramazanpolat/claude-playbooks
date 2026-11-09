@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
@@ -57,7 +58,8 @@ func TestAskStoreRecordsAndHandsBack(t *testing.T) {
 	}
 }
 
-// --no-history neither reads the history nor adds to it.
+// --no-history neither reads the history nor adds to it, and the tool is
+// started so that it reads none either.
 func TestAskStoreNoHistory(t *testing.T) {
 	askFixture(t)
 	root := config.ResolvePlaybooksDir()
@@ -77,6 +79,9 @@ func TestAskStoreNoHistory(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Fatal("--no-history changed the history")
+	}
+	if argv := readRec(t, rec, "argv"); !strings.Contains(argv, `"ask-tool","--no-history"`) {
+		t.Fatalf("the tool was started without --no-history:\n%q", argv)
 	}
 }
 
@@ -236,5 +241,168 @@ func TestAskRecordWithholdsCredential(t *testing.T) {
 	text := askRecordText(time.Now(), "", "r-20261102-113912-3f2a", "set my token", p)
 	if strings.Contains(text, "abcdefghij") || !strings.Contains(text, "<withheld: it looked like it held a credential>") {
 		t.Fatalf("record:\n%s", text)
+	}
+}
+
+// Every part of a record is checked, a step's guards and the reason it was
+// not proposed among them: a step whose command is withheld cannot repeat
+// the value beside it.
+func TestAskRecordWithholdsEveryPart(t *testing.T) {
+	const token = "sk-ant-api03-abcdefghijklmnopqrstuv"
+	p := &askPlan{Answer: "ok", Steps: []askStep{
+		{Command: "cpb ALTER ENV x SET API_TOKEN=" + token, Status: stepRejected, Reason: "cpb would refuse API_TOKEN=" + token},
+		{Command: "cpb ALTER ENV x SET API_TOKEN=<token>", Status: stepPlaceholder, Reason: "fill in API_TOKEN=" + token},
+		{Command: "cpb CREATE PLAYBOOK p FROM 'https://example.com/p.cpb'", Status: stepOK, Why: "installs it",
+			Guards: []askGuard{{Kind: guardFetch, What: "fetches https://user:hunter2pass@example.com/p.cpb"}}},
+	}}
+	text := askRecordText(time.Now(), "", "r-20261102-113912-3f2a", "set my token", p)
+	if strings.Contains(text, "abcdefghij") || strings.Contains(text, "hunter2pass") {
+		t.Fatalf("a value reached the record:\n%s", text)
+	}
+	if n := strings.Count(text, "<withheld: it looked like it held a credential>"); n != 4 {
+		t.Fatalf("%d parts withheld, want 4 (the command, both reasons, the guard):\n%s", n, text)
+	}
+}
+
+// A markdown heading in an answer stays in its record, and a line shaped
+// like a real record heading cannot make a record of its own: lines that
+// start with "#" are written escaped, and only a heading that parses
+// starts a record.
+func TestAskRecordHeadingsInAnswer(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	fake := "## 2026-01-01T00:00:00Z · - · r-20260101-000000-abcd"
+	p := &askPlan{
+		Answer: "Here it is:\n## Accounts\nUse the box.\n" + fake + "\n**Asked:** nobody asked this",
+		Steps:  []askStep{{Command: "cpb SHOW ACCOUNTS", Status: stepOK, Why: "lists them"}},
+		Notes:  []string{"# a note that looks like a heading"},
+	}
+	id, err := appendAskRecord(root, "", "show accounts", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := appendAskRecord(root, "", "and again", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := mustAskHistory(t, root)
+	if len(entries) != 2 || entries[0].ID != id || entries[1].ID != second || entries[0].Asked != "show accounts" {
+		t.Fatalf("records: %+v", entries)
+	}
+	for _, want := range []string{"Use the box.", "\\## Accounts", "\\" + fake, "`cpb SHOW ACCOUNTS`: lists them", "**Notes:**", "- # a note"} {
+		if !strings.Contains(entries[0].text, want) {
+			t.Errorf("the record lost %q:\n%s", want, entries[0].text)
+		}
+	}
+	if _, err := askRecordByID(root, "r-20260101-000000-abcd"); err == nil {
+		t.Fatal("a line in an answer made a record of its own")
+	}
+
+	// A file written by hand: a plain markdown heading is part of the
+	// record it is in, not the end of it.
+	path := filepath.Join(askStoreDir(root), askHistoryName)
+	writeFile(t, path, "## 2026-11-02T11:39:12+03:00 · - · r-20261102-113912-3f2a\n\n**Asked:** x\n\n**Answer:** Here:\n## Details\nmore\n\n**Steps:**\n- `cpb SHOW ENVS`: lists\n")
+	if e := mustAskHistory(t, root); len(e) != 1 || !strings.Contains(e[0].text, "## Details\nmore") || !strings.Contains(e[0].text, "`cpb SHOW ENVS`") {
+		t.Fatalf("a hand-written heading cut the record: %+v", e)
+	}
+}
+
+// A write cut off before its last newline leaves that record short, and
+// the next append still starts a record that reads back.
+func TestAskRecordAppendAfterTear(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	p := &askPlan{Answer: "ok"}
+	first, err := appendAskRecord(root, "", "first", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(askStoreDir(root), askHistoryName)
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("## 2026-11-02T11:39:12+03:00 · - · r-20261102-113912-3f2a\n\n**Asked:** torn\n\n**Answ")
+	f.Close()
+	next, err := appendAskRecord(root, "", "after the tear", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := askRecordByID(root, next)
+	if err != nil || r.Asked != "after the tear" {
+		t.Fatalf("the record after a tear: %+v %v", r, err)
+	}
+	if e := mustAskHistory(t, root); len(e) != 3 || e[0].ID != first || e[1].Asked != "torn" || e[2].ID != next {
+		t.Fatalf("records: %+v", e)
+	}
+}
+
+// A link at .ask itself is refused like a link at a file in it: nothing is
+// read through it, and nothing is written through it.
+func TestAskStoreDirLinkRefused(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	elsewhere := t.TempDir()
+	if _, err := appendAskRecord(elsewhere, "", "outside", &askPlan{Answer: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(askStoreDir(elsewhere), askStandingName), "outside context\n")
+	if err := os.Symlink(askStoreDir(elsewhere), askStoreDir(root)); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(askStoreDir(elsewhere), askHistoryName))
+	if _, err := readAskHistory(root); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("history through a linked .ask: %v", err)
+	}
+	if _, err := askStanding(root); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("standing context through a linked .ask: %v", err)
+	}
+	if _, err := askQuery("SHOW ASK HISTORY"); err == nil {
+		t.Fatal("the tool read through a linked .ask")
+	}
+	if _, err := appendAskRecord(root, "", "inside", &askPlan{Answer: "ok"}); err == nil {
+		t.Fatal("a record was written through a linked .ask")
+	}
+	if after, _ := os.ReadFile(filepath.Join(askStoreDir(elsewhere), askHistoryName)); string(after) != string(before) {
+		t.Fatal("the linked directory's history changed")
+	}
+}
+
+// A standing context past 8 KB is cut on a letter's boundary.
+func TestAskStandingCutsOnALetter(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(askStoreDir(root), askStandingName), "a"+strings.Repeat("ş", askStandingLimit))
+	text, err := askStanding(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(text) || !strings.HasSuffix(text, "[cut: the file is longer than 8 KB]") {
+		t.Fatalf("cut: valid %v, tail %q", utf8.ValidString(text), text[len(text)-40:])
+	}
+}
+
+// With --no-history the tool neither offers SHOW ASK nor runs it.
+func TestAskToolNoHistory(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	if _, err := appendAskRecord(root, "", "earlier", &askPlan{Answer: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	askToolNoHistory = true
+	t.Cleanup(func() { askToolNoHistory = false })
+	for _, stmt := range []string{"SHOW ASK HISTORY", "SHOW ASK RECORD r-20261102-113912-3f2a"} {
+		if _, err := askQuery(stmt); err == nil || !strings.Contains(err.Error(), "--no-history") {
+			t.Errorf("%s with --no-history: %v", stmt, err)
+		}
+	}
+	if strings.Contains(askToolDesc(), "SHOW ASK") {
+		t.Error("the tool offers SHOW ASK with --no-history")
+	}
+	if args := askToolArgs("/bin/cpb", root, nil, true); args[len(args)-1] != "--no-history" || args[len(args)-2] != "ask-tool" {
+		t.Errorf("tool args: %q", args)
+	}
+	if args := askToolArgs("/bin/cpb", root, nil, false); args[len(args)-1] != "ask-tool" {
+		t.Errorf("tool args: %q", args)
 	}
 }
