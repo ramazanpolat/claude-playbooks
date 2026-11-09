@@ -46,7 +46,12 @@ var askToolCmd = &cobra.Command{
 	},
 }
 
+// askToolNoHistory is set for an ask run with --no-history: the tool then
+// reads no history either, and does not offer to.
+var askToolNoHistory bool
+
 func init() {
+	askToolCmd.Flags().BoolVar(&askToolNoHistory, "no-history", false, "read no ask history")
 	rootCmd.AddCommand(askToolCmd)
 }
 
@@ -58,9 +63,26 @@ var askToolParent = os.Getppid
 const askToolName = "query"
 
 const askToolDescription = "Read cpb's state. statement is one of: SHOW PLAYBOOKS; SHOW PLAYBOOK <name>; SHOW ENVS; " +
+	"SHOW ENV <name>; SHOW DEFAULTS; SHOW SESSIONS [FOR PLAYBOOK <name>]; EXPLAIN PLAYBOOK <name>; " +
+	"SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>]; SHOW ASK RECORD <id>. " +
+	"Returns JSON with names, launchers, env set names, a route (anthropic or away), versions, and for " +
+	"sessions their kind, status, start, last activity and model. Apart from SHOW ASK, it never returns values, paths or credentials. " +
+	"SHOW ASK reads your earlier answers as they were recorded, what was asked and answered: their index lines newest first, or one record in full."
+
+// askToolDescriptionNoHistory is the description for an ask run with
+// --no-history: no SHOW ASK.
+const askToolDescriptionNoHistory = "Read cpb's state. statement is one of: SHOW PLAYBOOKS; SHOW PLAYBOOK <name>; SHOW ENVS; " +
 	"SHOW ENV <name>; SHOW DEFAULTS; SHOW SESSIONS [FOR PLAYBOOK <name>]; EXPLAIN PLAYBOOK <name>. " +
 	"Returns JSON with names, launchers, env set names, a route (anthropic or away), versions, and for " +
 	"sessions their kind, status, start, last activity and model. It never returns values, paths or credentials."
+
+// askToolDesc is the tool's description for this ask.
+func askToolDesc() string {
+	if askToolNoHistory {
+		return askToolDescriptionNoHistory
+	}
+	return askToolDescription
+}
 
 // askToolDropCredentials removes from this process what Claude Code hands
 // every MCP server, its credentials among them: nothing the tool reads
@@ -142,7 +164,7 @@ func askToolHandle(req rpcRequest) (any, *rpcError) {
 	case "tools/list":
 		return map[string]any{"tools": []any{map[string]any{
 			"name":        askToolName,
-			"description": askToolDescription,
+			"description": askToolDesc(),
 			"inputSchema": map[string]any{
 				"type":                 "object",
 				"properties":           map[string]any{"statement": map[string]any{"type": "string"}},
@@ -171,7 +193,7 @@ func askToolHandle(req rpcRequest) (any, *rpcError) {
 
 // askToolViews are the statements the tool runs, and how their output is
 // cut down.
-const askToolRefusal = "the tool reads only: SHOW PLAYBOOKS, SHOW PLAYBOOK <name>, SHOW ENVS, SHOW ENV <name>, SHOW DEFAULTS, SHOW SESSIONS [FOR PLAYBOOK <name>], EXPLAIN PLAYBOOK <name>"
+const askToolRefusal = "the tool reads only: SHOW PLAYBOOKS, SHOW PLAYBOOK <name>, SHOW ENVS, SHOW ENV <name>, SHOW DEFAULTS, SHOW SESSIONS [FOR PLAYBOOK <name>], EXPLAIN PLAYBOOK <name>, SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>], SHOW ASK RECORD <id>"
 
 // askQuery runs one read statement and returns its cut-down JSON.
 func askQuery(statement string) (string, error) {
@@ -204,6 +226,16 @@ func askQuery(statement string) (string, error) {
 			if st.For != "" {
 				args = append(args, "FOR", "PLAYBOOK", st.For)
 			}
+		case grammar.AskHistory, grammar.AskRecord:
+			// The ask store holds what was asked and answered, as it was
+			// recorded: a step's command as it was shown, a path in it
+			// among them. A part that looked like it held a credential
+			// was withheld when it was written. What SHOW ASK prints as
+			// JSON is the view; with --no-history, the tool reads none.
+			if askToolNoHistory {
+				return "", errors.New("this ask was run with --no-history: the tool reads no ask history")
+			}
+			return askToolStore(st)
 		}
 	case st.Verb == grammar.Explain && st.Object == grammar.Playbook:
 		v, err := askToolExplain(st.Name)
@@ -383,4 +415,26 @@ func askNames(v any, key string) []any {
 		}
 	}
 	return askEmpty(out)
+}
+
+// askToolStore answers SHOW ASK HISTORY and SHOW ASK RECORD with what they
+// print as JSON.
+func askToolStore(st *grammar.Stmt) (string, error) {
+	root := config.ResolvePlaybooksDir()
+	var v any
+	if st.Object == grammar.AskRecord {
+		r, err := askRecordByID(root, st.Name)
+		if err != nil {
+			return "", err
+		}
+		v = r
+	} else {
+		page, _, err := askHistoryPage(root, st.For, st.HistoryBefore, st.HistoryLimit)
+		if err != nil {
+			return "", err
+		}
+		v = page
+	}
+	out, err := json.Marshal(v)
+	return string(out), err
 }

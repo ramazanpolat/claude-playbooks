@@ -38,6 +38,10 @@ const (
 	Accounts  Object = "ACCOUNTS" // SHOW ACCOUNTS
 	All       Object = "ALL"      // SHOW CREATE ALL
 	Sessions  Object = "SESSIONS" // SHOW SESSIONS: the live Claude Code sessions of cpb's config dirs
+	// The cpb ask store: SHOW ASK HISTORY lists the records of answered
+	// asks, newest first; SHOW ASK RECORD <id> shows one in full.
+	AskHistory Object = "ASK HISTORY"
+	AskRecord  Object = "ASK RECORD"
 )
 
 // Kind names a clause. The values are the clause as written, so a test
@@ -196,8 +200,13 @@ type Stmt struct {
 	Dir    string
 	DryRun bool // APPLY <file> --dry-run
 
-	// For: SHOW SESSIONS … FOR PLAYBOOK <name>.
+	// For: SHOW SESSIONS … FOR PLAYBOOK <name>, SHOW ASK HISTORY … FOR
+	// PLAYBOOK <name>.
 	For string
+	// SHOW ASK HISTORY … BEFORE <id> LIMIT <n>: the records older than
+	// <id>, at most <n> of them (0: the default).
+	HistoryBefore string
+	HistoryLimit  int
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
 	Yes         bool // DROP PLAYBOOK ... --yes, APPLY ... --yes

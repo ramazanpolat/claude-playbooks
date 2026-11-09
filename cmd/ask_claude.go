@@ -50,9 +50,9 @@ const askMaxTurns = "8"
 // askClaudeArgs are the flags of the one claude -p call. Its one MCP server
 // is this cpb's read-only tool (ask-tool), granted alone; Claude Code's own
 // tools stay off.
-func askClaudeArgs(model, self, root string) []string {
+func askClaudeArgs(model, self, root string, noHistory bool) []string {
 	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"cpb": map[string]any{
-		"type": "stdio", "command": askEnvCommand(), "args": askToolArgs(self, root, os.Environ()),
+		"type": "stdio", "command": askEnvCommand(), "args": askToolArgs(self, root, os.Environ(), noHistory),
 	}}})
 	return []string{"-p",
 		"--setting-sources", "project",
@@ -85,8 +85,9 @@ func askEnvCommand() string {
 }
 
 // askToolArgs starts the tool server with a clean environment: env's -i,
-// then the kept variables from environ, then cpb ask-tool.
-func askToolArgs(self, root string, environ []string) []string {
+// then the kept variables from environ, then cpb ask-tool, with
+// --no-history when the ask reads no history.
+func askToolArgs(self, root string, environ []string, noHistory bool) []string {
 	args := []string{"-i"}
 	for _, k := range askToolEnvKeep {
 		for _, kv := range environ {
@@ -96,7 +97,11 @@ func askToolArgs(self, root string, environ []string) []string {
 			}
 		}
 	}
-	return append(args, self, "--playbooks-dir", root, "ask-tool")
+	args = append(args, self, "--playbooks-dir", root, "ask-tool")
+	if noHistory {
+		args = append(args, "--no-history")
+	}
+	return args
 }
 
 // askSelf is this cpb binary, the tool's command; a variable for tests.
@@ -354,7 +359,10 @@ var askTimeout = 3 * time.Minute
 const askLoginHint = "cpb ask asks Claude through your Claude Code login: run claude and /login, or set ANTHROPIC_API_KEY"
 
 // askAsk sends the installed state and the request, and returns the plan.
-func askViaClaude(model string, signIn askSignIn, root string, state *askContext, request string) (*askPlan, error) {
+// prelude is what the ask store adds before the request: the user's
+// standing context and the history (askStanding, askHistoryPrelude). With
+// noHistory, the tool reads no history either.
+func askViaClaude(model string, signIn askSignIn, root string, state *askContext, prelude, request string, noHistory bool) (*askPlan, error) {
 	if p := askProxy(os.Environ()); p != "" {
 		return nil, fmt.Errorf("cpb ask does not run through a proxy yet, and %s is set here: nothing was sent. If Anthropic's API is reachable without it, run: env -u %s cpb ask ...", p, p)
 	}
@@ -391,12 +399,12 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	if err != nil {
 		return nil, err
 	}
-	c, err := askCommand(ctx, signIn, path, askClaudeArgs(model, self, root), env)
+	c, err := askCommand(ctx, signIn, path, askClaudeArgs(model, self, root, noHistory), env)
 	if err != nil {
 		return nil, err
 	}
 	c.Dir = dir
-	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\nRequest: " + request + "\n")
+	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\n" + prelude + "Request: " + request + "\n")
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	runErr := c.Run()

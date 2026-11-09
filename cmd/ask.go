@@ -15,7 +15,7 @@ import (
 // cpb checks every step and shows it. cpb ask never runs a step: the user
 // copies what they want to run.
 var askCmd = &cobra.Command{
-	Use:   `ask [<playbook>] [--json] [--model <model>] [--account <account>] "<request>"`,
+	Use:   `ask [<playbook>] [--json] [--no-history] [--model <model>] [--account <account>] "<request>"`,
 	Short: "Ask in plain words for the cpb command that does it",
 	Long: `ask answers a request in plain words with the cpb command or commands that do it.
 It shows them; it never runs them.
@@ -54,6 +54,16 @@ A request that holds a credential (KEY=value with a secret-looking key, a
 token-shaped word, a URL with a password) is refused before anything is
 sent: name the key instead, and leave the value out.
 
+What it keeps, in <root>/.ask/: CLAUDE.md, your standing context in your own
+words, which cpb only reads and sends with every ask; and history.md, one
+record per answered ask, appended and never rewritten (delete it to forget).
+Each ask sends the last 20 records' headings and the last record, and the
+model can read further back. --no-history keeps one ask out of it: that ask
+reads no history, its model's tool none either, and adds nothing. A record
+keeps what was asked and answered as shown, commands and their paths among
+them. Read it with cpb SHOW ASK HISTORY, and one record with
+cpb SHOW ASK RECORD <id>.
+
 A line marked ! says what a step removes, forgets or replaces, which
 credential or login it touches, or what code it fetches: read it before you
 run the step.
@@ -65,6 +75,7 @@ Exit codes: 0 shown; 1 refused, or no answer from Claude; 2 a usage error.`,
 
 func init() {
 	askCmd.Flags().Bool("json", false, "print the checked plan as JSON")
+	askCmd.Flags().Bool("no-history", false, "neither read the ask history nor add this ask to it")
 	askCmd.Flags().String("model", "", "the Claude model that answers (default: $CPB_ASK_MODEL, else "+defaultAskModel+")")
 	askCmd.Flags().String("account", "", "sign in on this account: an Anthropic one with a Claude token or login (default: as the playbook would, else Claude Code's own login)")
 	rootCmd.AddCommand(askCmd)
@@ -78,6 +89,7 @@ func askUsage(msg string) error {
 
 func runAsk(cmd *cobra.Command, args []string) error {
 	asJSON, _ := cmd.Flags().GetBool("json")
+	noHistory, _ := cmd.Flags().GetBool("no-history")
 	model, _ := cmd.Flags().GetString("model")
 	acctName, _ := cmd.Flags().GetString("account")
 	root := config.ResolvePlaybooksDir()
@@ -121,14 +133,42 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	tag := ""
 	if target != nil {
 		state.Addressed = target.Name
+		tag = target.Name
 	}
-	plan, err := askViaClaude(model, signIn, root, state, request)
+	// The ask store: the user's standing context always, the history
+	// unless --no-history.
+	prelude := ""
+	standing, err := askStanding(root)
+	if err != nil {
+		return err
+	}
+	if standing != "" {
+		prelude += "Your standing context, the user's own words (.ask/CLAUDE.md):\n" + standing + "\n\n"
+	}
+	if !noHistory {
+		past, err := askHistoryPrelude(root, tag)
+		if err != nil {
+			return err
+		}
+		if past != "" {
+			prelude += past + "\n"
+		}
+	}
+	plan, err := askViaClaude(model, signIn, root, state, prelude, request, noHistory)
 	if err != nil {
 		return err
 	}
 	checkAskPlan(plan, root)
+	if !noHistory {
+		if id, err := appendAskRecord(root, tag, request, plan); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: this ask was not added to the history: %v\n", err)
+		} else {
+			plan.Record = id
+		}
+	}
 	if asJSON {
 		out, err := json.MarshalIndent(plan, "", "  ")
 		if err != nil {

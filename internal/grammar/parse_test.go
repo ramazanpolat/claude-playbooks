@@ -524,7 +524,7 @@ func TestExpect(t *testing.T) {
 		{w("ALTER ENV e SET A=1 AS"), []string{"PLAINTEXT"}},
 		{w("ALTER DEFAULTS"), defaultsStarters},
 		{w("ALTER DEFAULTS SET"), []string{"secret_helper"}},
-		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "--json"}},
+		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "ASK", "--json"}},
 		{w("SHOW SESSIONS"), []string{"FOR", "--json"}},
 		{w("APPLY f"), []string{"<file>", "--dry-run", "--yes", "--json"}},
 		{w("CREATE PLAYBOOK x BRANCH main"), createPlaybookStarters}, // FROM may still follow
