@@ -125,7 +125,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 
 ## Built to be relied on
 
-- **Tested on every change:** CI applies all 23 examples and, on Linux and
+- **Tested on every change:** CI applies all 24 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
   same. A full arena regression runs on the exact commit each release is
   tagged from.

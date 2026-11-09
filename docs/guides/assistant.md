@@ -298,7 +298,8 @@ cpb SHOW ASK RECORD r-20261102-113912-3f2a             # one in full
 `SHOW ASK HISTORY` prints `TIME PLAYBOOK ID ASKED`, and when there is more
 a last line with the statement that lists the older ones (`BEFORE <id>`).
 Both take `--json`. The model reads the history with the same two
-statements, through its read-only tool.
+statements, through its read-only tool. [Example 24](../../examples/24-ask-history/)
+reads a history back.
 
 ## Choosing the model
 
