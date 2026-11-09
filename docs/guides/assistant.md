@@ -159,7 +159,8 @@ refused by default, because the question would leave Anthropic:
 cpb ask --account glm "list my env sets"
 # Error: account glm sends its requests away from Anthropic (provider gateway),
 # and cpb ask asks Anthropic only: nothing was sent. To ask there anyway, add
-# --allow-other-provider: ...
+# --allow-other-provider. Then account glm's gateway at https://gw.example.net
+# receives, signed in with the account's own credential: ...
 ```
 
 Add `--allow-other-provider` to send it there anyway:
@@ -171,14 +172,33 @@ cpb ask glm-work --allow-other-provider "how many of your sessions are live?"
 
 The question then goes to the account's address, signed in with the
 account's own key or token and on its own `model`, as a launch on it would.
-What goes there is what every ask sends: the request, your `.ask/CLAUDE.md`
-and history, and the names of what is installed. Before sending, cpb says
-where on stderr (`asking account glm's gateway at gw.example.net, not
-Anthropic`). Your Claude login and tokens never go along: `claude` starts
+What goes there:
+
+- the request;
+- the names of your playbooks, launchers, env sets, defaults and accounts,
+  with each playbook's route, account and login class and each account's
+  provider and login class;
+- the cpb version and the playbooks root (with `~` for your home, in full
+  when it is outside it);
+- whatever the model reads through cpb's tool: versions, plugin, MCP server
+  and skill names, and session counts, kinds, statuses, times and models;
+- what Claude Code itself sends, the platform and OS version among them.
+
+Your ask history and `.ask/CLAUDE.md` do not go, with or without
+`--no-history`, and the ask is not recorded: another provider's answer
+never reaches a later ask. The cost is that a follow-up which leans on an
+earlier answer ("I meant accounts") does not work on these asks.
+
+Before sending, cpb says where on stderr (`asking account glm's gateway at
+https://gw.example.net, not Anthropic, without your ask history or
+.ask/CLAUDE.md`); an `http://` address there means the credential goes
+unencrypted. Your Claude login and tokens never go along: `claude` starts
 with a new, empty config directory and no Anthropic key or Claude token, and
 an account that would send your Claude credential to the gateway
 (`claude_login_trusted`) is refused, with the flag or without. Bedrock,
-Vertex and Foundry accounts are refused too.
+Vertex and Foundry accounts are refused too, and so is a playbook that
+something besides its account routes (its settings, say): the flag lifts
+only a refusal the account alone causes.
 
 How well another model answers is up to it. Its answer is checked like any
 other: a step cpb would refuse is marked as rejected, with the reason.

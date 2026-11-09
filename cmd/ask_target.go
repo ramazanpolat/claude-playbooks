@@ -64,12 +64,19 @@ func askTargetSignIn(root string, pb *playbook.Playbook, flag string, allowOther
 	var a *account.Account
 	if flag == "" {
 		if route := askPlaybookRoute(pb.Path); route != "anthropic" {
+			// --allow-other-provider lifts the refusal only when the
+			// account alone sends the playbook away: a route a layer or a
+			// settings file states, or one that does not resolve, stays
+			// refused.
 			hint := ""
-			if a := askPlaybookAccount(pb.Path, pb.Name); a != nil && a.Provider != account.Anthropic {
+			alone, aloneErr := askAccountAlone(pb, "")
+			if a := alone; aloneErr == nil && a != nil && a.Provider != account.Anthropic {
 				if allowOther {
 					return askOtherSignIn(a)
 				}
 				hint = fmt.Sprintf(" It runs on account %s (provider %s).%s", a.Name, a.Provider, askOtherHint(a))
+			} else if a := askPlaybookAccount(pb.Path, pb.Name); a != nil && a.Provider != account.Anthropic {
+				hint = fmt.Sprintf(" It runs on account %s (provider %s), but more than the account routes it, so --%s does not lift this.", a.Name, a.Provider, askAllowOtherFlag)
 			}
 			return askSignIn{}, fmt.Errorf("%s sends its requests away from Anthropic (route %s), and cpb ask asks Anthropic only: nothing was sent. Ask without naming it: cpb ask \"<request>\".%s", pb.Name, route, hint)
 		}
@@ -87,6 +94,13 @@ func askTargetSignIn(root string, pb *playbook.Playbook, flag string, allowOther
 		}
 		if a = sel.Account; a != nil {
 			if a.Provider != account.Anthropic && allowOther {
+				// As without --account: the account alone must decide
+				// where a launch of pb on it goes.
+				if alone, err := askAccountAlone(pb, flag); err != nil {
+					return askSignIn{}, fmt.Errorf("%s on account %s: %w: nothing was sent", pb.Name, a.Name, err)
+				} else if alone == nil || alone.Name != a.Name {
+					return askSignIn{}, fmt.Errorf("%s on account %s routes by more than the account, so --%s does not lift its refusal: nothing was sent", pb.Name, a.Name, askAllowOtherFlag)
+				}
 				return askOtherSignIn(a)
 			}
 			if err := askAccountUsable(a); err != nil {

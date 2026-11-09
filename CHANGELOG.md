@@ -24,9 +24,12 @@
   no way past it. The refusal now says how to ask there anyway and what
   that sends, and the flag does it: the question goes to the account's
   address with its own credential and models, as a launch on it would, from
-  a fresh config directory with no Anthropic key or Claude token. An
+  a fresh config directory with no Anthropic key or Claude token. Such an
+  ask neither reads nor writes the ask history or `.ask/CLAUDE.md`, so a
+  follow-up that leans on an earlier answer does not work there. An
   account that would send your Claude credential to a gateway stays
-  refused, as do Bedrock, Vertex and Foundry accounts.
+  refused, as do Bedrock, Vertex and Foundry accounts and a playbook that
+  more than its account routes.
 
 ## [v4.4.0] -- 2026-11-04
 

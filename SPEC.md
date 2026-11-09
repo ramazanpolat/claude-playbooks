@@ -3321,7 +3321,7 @@ refusal says how to ask there anyway and what goes:
 
 ```
 $ cpb ask --account glm "list my env sets"
-Error: account glm sends its requests away from Anthropic (provider gateway), and cpb ask asks Anthropic only: nothing was sent. To ask there anyway, add --allow-other-provider: the request, your ask context (.ask/CLAUDE.md and the history), and the names of your playbooks, launchers, env sets and accounts then go to account glm's gateway at gw.example.net, signed in with the account's own credential.
+Error: account glm sends its requests away from Anthropic (provider gateway), and cpb ask asks Anthropic only: nothing was sent. To ask there anyway, add --allow-other-provider. Then account glm's gateway at https://gw.example.net receives, signed in with the account's own credential: the request; the names of your playbooks, launchers, env sets, defaults and accounts, each playbook's route, account and login class, and each account's provider and login class; the cpb version and the playbooks root (with ~ for your home, in full when it is outside it); what the model reads through cpb's tool (versions, plugin, MCP server and skill names, and session counts, kinds, statuses, times and models); and what Claude Code itself sends, the platform and OS version among them. It neither reads nor writes your ask history and does not send .ask/CLAUDE.md, with or without --no-history, so a follow-up that leans on an earlier answer does not work there.
 ```
 
 With the flag:
@@ -3332,13 +3332,21 @@ With the flag:
   Foundry account is refused (`--allow-other-provider asks a gateway
   account only`), and so is one that would send your Claude login or token
   to the gateway (`claude_login_trusted`): a Claude credential stays on
-  Anthropic, with the flag or without. A playbook routed away by anything
-  but its account is refused as before.
+  Anthropic, with the flag or without. The flag lifts a playbook's refusal
+  only when its account alone sends it away: a launch of it on that account
+  must plan cleanly, with no layer, settings file or reserved variable
+  routing or signing it in beside the account, and the account must be a
+  named one, not one derived from a layer's route. A playbook routed by
+  more than its account, or whose route does not resolve, is refused as
+  before, with `--account` as without.
 - **The child's environment** is the allowlist below, without any
   Anthropic key or Claude token, plus what a launch on the account sets:
   `ANTHROPIC_BASE_URL`, its model variables and its credential, with a new,
   empty `CLAUDE_CONFIG_DIR`, removed afterwards, so no stored login can be
-  reached, and an empty `ANTHROPIC_CONFIG_DIR` inside it. A credential or a
+  reached, and an empty `ANTHROPIC_CONFIG_DIR` inside it. A keyless account
+  (`auth = 'none'`) gets `ANTHROPIC_AUTH_TOKEN=cpb-no-credential`, the
+  fixed, non-secret placeholder a launch on it gets, since Claude Code does
+  not start with no credential at all. A credential or a
   header by reference is set by your secret helper, the headers joined by
   cpb's header step, and an `apiKeyHelper` is passed as a call-only
   `--settings`, as at launch. No value is on an argument list.
@@ -3346,12 +3354,28 @@ With the flag:
   `CPB_ASK_MODEL`, else `sonnet` (the account's `sonnet_model` names it).
 - **A notice** on stderr says where the question goes before it is sent:
   `cpb ask: --allow-other-provider: asking account glm's gateway at
-  gw.example.net, not Anthropic.` A failure ends with the same place.
+  https://gw.example.net, not Anthropic, without your ask history or
+  .ask/CLAUDE.md.` It names the scheme and host only: `http://` says the
+  credential goes unencrypted. A failure ends with the same place.
 - **The gate** below allows the account's `ANTHROPIC_BASE_URL` and nothing
   else; the proxy refusal stands.
 
-What is sent is what every ask sends, and the history records the ask as
-any other. The flag changes nothing for an Anthropic account.
+**What goes there:** the request; the names of your playbooks, launchers,
+env sets, defaults and accounts, with each playbook's route, account and
+login class and each account's provider and login class; the cpb version
+and the playbooks root (spelled with `~` below your home, in full outside
+it); whatever the model reads through cpb's tool (versions, plugin, MCP
+server and skill names, session counts, kinds, statuses, times and models);
+and what Claude Code itself sends, the platform and OS version among them.
+
+**What does not:** the ask store. Such an ask neither reads nor writes it,
+with or without `--no-history`: no history and no `.ask/CLAUDE.md` in the
+prompt, a tool that offers and runs no `SHOW ASK`, and nothing recorded, so
+`history.md` is left byte for byte as it was and another provider's answer
+never reaches a later ask. The cost: a follow-up that leans on an earlier
+answer ("I meant accounts") does not work on these asks.
+
+The flag changes nothing for an Anthropic account.
 
 Only the playbook's login is used: its `CLAUDE.md`, settings, hooks, plugins
 and MCP servers stay out (`--setting-sources project`, as below), and its

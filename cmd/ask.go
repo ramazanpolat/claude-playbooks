@@ -55,9 +55,17 @@ environment alone, through your secret helper when it is a reference.
 account (provider = 'gateway'), named with --account or the one the
 playbook runs on, it goes to that account's address, signed in with the
 account's own credential and on its own models, as a launch on it would.
-The request, your ask context and history, and the names of your
-playbooks, launchers, env sets and accounts then go to that provider.
-Without it such an account is refused, and the refusal says so. A Claude
+That provider then receives the request; the names of your playbooks,
+launchers, env sets, defaults and accounts, with each playbook's route,
+account and login class and each account's provider and login class; the
+cpb version and the playbooks root; whatever the model reads through cpb's
+tool (versions, plugin, MCP server and skill names, session counts, kinds,
+statuses, times and models); and what Claude Code itself sends, the
+platform and OS version among them. Such an ask neither reads nor writes
+your ask history or .ask/CLAUDE.md, with or without --no-history, so a
+follow-up that leans on an earlier answer does not work there. Without the
+flag such an account is refused, and the refusal says all this. The flag
+lifts only a refusal the account alone causes. A Claude
 login or token never goes along: an account that would send one to a
 gateway is refused, with the flag or without.
 
@@ -89,7 +97,7 @@ func init() {
 	askCmd.Flags().Bool("no-history", false, "neither read the ask history nor add this ask to it")
 	askCmd.Flags().String("model", "", "the Claude model that answers (default: $CPB_ASK_MODEL, else "+defaultAskModel+")")
 	askCmd.Flags().String("account", "", "sign in on this account: an Anthropic one with a Claude token or login, or a gateway one with --"+askAllowOtherFlag+" (default: as the playbook would, else Claude Code's own login)")
-	askCmd.Flags().Bool(askAllowOtherFlag, false, "let the question go to a gateway account, away from Anthropic: the request, your ask context and history, and the names of your playbooks, env sets and accounts go there")
+	askCmd.Flags().Bool(askAllowOtherFlag, false, "let the question go to a gateway account, away from Anthropic: the request and the names and classes of what is installed go there; no ask history or .ask/CLAUDE.md, and nothing is recorded")
 	rootCmd.AddCommand(askCmd)
 }
 
@@ -157,11 +165,18 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		tag = target.Name
 	}
 	// The ask store: the user's standing context always, the history
-	// unless --no-history.
+	// unless --no-history. An ask on another provider uses neither and
+	// records nothing (askOtherNoStore).
+	other := signIn.mode == askLoginOther
+	if other {
+		noHistory = true
+	}
 	prelude := ""
-	standing, err := askStanding(root)
-	if err != nil {
-		return err
+	standing := ""
+	if !other {
+		if standing, err = askStanding(root); err != nil {
+			return err
+		}
 	}
 	if standing != "" {
 		prelude += "Your standing context, the user's own words (.ask/CLAUDE.md):\n" + standing + "\n\n"
@@ -175,8 +190,8 @@ func runAsk(cmd *cobra.Command, args []string) error {
 			prelude += past + "\n"
 		}
 	}
-	if signIn.mode == askLoginOther {
-		fmt.Fprintf(os.Stderr, "cpb ask: --%s: asking %s, not Anthropic.\n", askAllowOtherFlag, askOtherWhere(signIn.account))
+	if other {
+		fmt.Fprintf(os.Stderr, "cpb ask: --%s: asking %s, not Anthropic, without your ask history or .ask/CLAUDE.md.\n", askAllowOtherFlag, askOtherWhere(signIn.account))
 	}
 	plan, err := askViaClaude(model, signIn, root, state, prelude, request, noHistory)
 	if err != nil {

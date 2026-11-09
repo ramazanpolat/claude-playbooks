@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
 
@@ -25,6 +27,8 @@ func askGatewayFixture(t *testing.T) {
 	putAccount(t, account.Account{Name: "gwkey", Provider: account.Gateway, BaseURL: "http://127.0.0.1:9/v1", Auth: account.Auth{Kind: account.APIKey, Value: "plain-gw-key"}})
 	putAccount(t, account.Account{Name: "fwd", Provider: account.Gateway, BaseURL: "https://fwd.example.net/v1", ClaudeLoginTrusted: true, Auth: account.Auth{Kind: account.ClaudeToken, Value: "CANARY-claude-token"}})
 	putAccount(t, account.Account{Name: "bed", Provider: account.Bedrock, Auth: account.Auth{Kind: account.Cloud}})
+	putAccount(t, account.Account{Name: "gwnone", Provider: account.Gateway, BaseURL: "http://127.0.0.1:9/v1", Auth: account.Auth{Kind: account.None}})
+	putAccount(t, account.Account{Name: "gwhelper", Provider: account.Gateway, BaseURL: "https://gw.example.net/v1", Auth: account.Auth{Kind: account.Helper, Helper: "/usr/local/bin/print-gw-key"}})
 	t.Setenv("ANTHROPIC_API_KEY", "CANARY-shell-key")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "CANARY-shell-token")
 	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
@@ -44,7 +48,9 @@ func TestAskOtherProviderRefused(t *testing.T) {
 		allow bool
 		want  []string
 	}{
-		{"gw", false, []string{"away from Anthropic (provider gateway)", "nothing was sent", "To ask there anyway, add --allow-other-provider", "the history", "account gw's gateway at gw.example.net"}},
+		{"gw", false, []string{"away from Anthropic (provider gateway)", "nothing was sent", "To ask there anyway, add --allow-other-provider",
+			"account gw's gateway at https://gw.example.net receives", "the playbooks root", "session counts", "the platform and OS version",
+			"neither reads nor writes your ask history and does not send .ask/CLAUDE.md", "a follow-up that leans on an earlier answer does not work"}},
 		{"fwd", false, []string{"away from Anthropic", "does not lift this"}},
 		{"fwd", true, []string{"would send your Claude credential to a gateway", "--allow-other-provider or not", "nothing was sent"}},
 		{"bed", false, []string{"away from Anthropic (provider bedrock)", "asks a gateway account only"}},
@@ -84,7 +90,7 @@ func TestAskOtherProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stderr, "--allow-other-provider: asking account gw's gateway at gw.example.net, not Anthropic") {
+	if !strings.Contains(stderr, "--allow-other-provider: asking account gw's gateway at https://gw.example.net, not Anthropic, without your ask history or .ask/CLAUDE.md") {
 		t.Errorf("no notice of where the question went:\n%s", stderr)
 	}
 	env := childEnv(t, rec)
@@ -162,6 +168,128 @@ func TestAskOtherProvider(t *testing.T) {
 	}
 }
 
+// A keyless gateway account (auth = 'none') gets cpb's fixed, non-secret
+// placeholder, as a launch does; an apiKeyHelper account passes its helper
+// as a call-only setting, never as a value.
+func TestAskOtherProviderKeylessAndHelper(t *testing.T) {
+	askGatewayFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
+	var err error
+	captureStderr(t, func() {
+		_, err = askRun(t, map[string]string{"account": "gwnone", askAllowOtherFlag: "true"}, "list")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := childEnv(t, rec)
+	if env["ANTHROPIC_AUTH_TOKEN"] != auth.NoCredentialPlaceholder || env["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:9/v1" {
+		t.Errorf("gwnone: token %q, base %q", env["ANTHROPIC_AUTH_TOKEN"], env["ANTHROPIC_BASE_URL"])
+	}
+	if _, ok := env["ANTHROPIC_API_KEY"]; ok {
+		t.Error("gwnone got an API key")
+	}
+
+	captureStderr(t, func() {
+		_, err = askRun(t, map[string]string{"account": "gwhelper", askAllowOtherFlag: "true"}, "list")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if argv := readRec(t, rec, "argv"); !strings.Contains(argv, "--settings\x00{\"apiKeyHelper\":\"/usr/local/bin/print-gw-key\"}\x00") {
+		t.Errorf("gwhelper: no apiKeyHelper setting:\n%q", argv)
+	}
+	env = childEnv(t, rec)
+	for _, k := range []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if _, ok := env[k]; ok {
+			t.Errorf("gwhelper: %s set beside the helper", k)
+		}
+	}
+	if env["ANTHROPIC_BASE_URL"] != "https://gw.example.net/v1" {
+		t.Errorf("gwhelper: base %q", env["ANTHROPIC_BASE_URL"])
+	}
+}
+
+// An ask on another provider neither reads nor writes the ask store: no
+// standing context and no history in the prompt, a tool that reads none,
+// and history.md byte-identical afterwards, with or without --no-history.
+func TestAskOtherProviderNoStore(t *testing.T) {
+	askGatewayFixture(t)
+	root := config.ResolvePlaybooksDir()
+	rec := fakeAskClaude(t, askListPlan)
+	id, err := appendAskRecord(root, "", "an earlier CANARY-history question", &askPlan{Answer: "CANARY-history answer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(askStoreDir(root), askStandingName), "CANARY-standing context\n")
+	path := filepath.Join(askStoreDir(root), askHistoryName)
+	before, _ := os.ReadFile(path)
+	out := captureStdout(t, func() {
+		captureStderr(t, func() {
+			_, err = askRun(t, map[string]string{"account": "gw", askAllowOtherFlag: "true", "json": "true"}, "what did I ask before?")
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin := readRec(t, rec, "stdin")
+	for _, c := range []string{"CANARY-history", "CANARY-standing", id, "History of your earlier answers", "standing context"} {
+		if strings.Contains(stdin, c) {
+			t.Errorf("%q reached the other provider's prompt", c)
+		}
+	}
+	if argv := readRec(t, rec, "argv"); !strings.Contains(argv, `"ask-tool","--no-history"`) || strings.Contains(argv, "CANARY") {
+		t.Errorf("the tool was started to read the history:\n%q", argv)
+	}
+	if strings.Contains(out, `"record"`) {
+		t.Errorf("the ask was recorded:\n%s", out)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Fatal("history.md changed")
+	}
+
+	// An ask on Anthropic still reads both.
+	if _, err := askRun(t, nil, "list"); err != nil {
+		t.Fatal(err)
+	}
+	if stdin := readRec(t, rec, "stdin"); !strings.Contains(stdin, "CANARY-standing") || !strings.Contains(stdin, "CANARY-history") {
+		t.Error("an ask on Anthropic lost the store")
+	}
+}
+
+// --allow-other-provider lifts a playbook's refusal only when its account
+// alone routes it: a settings file that routes it too, or a layer that does
+// not resolve, keeps it refused, with --account as without.
+func TestAskOtherProviderRouteBeyondAccount(t *testing.T) {
+	askGatewayFixture(t)
+	root := config.ResolvePlaybooksDir()
+	rec := fakeAskClaude(t, askListPlan)
+	mustStmt(t, "CREATE PLAYBOOK gwset SET launcher = '' USE ACCOUNT gw")
+	writeFile(t, filepath.Join(root, "gwset", "settings.json"), `{"env":{"ANTHROPIC_BASE_URL":"https://elsewhere.example.net"}}`)
+	mustStmt(t, "CREATE ENV ghost SET VAR GHOST_SETTING=1")
+	mustStmt(t, "CREATE PLAYBOOK gwghost SET launcher = '' USE ENV ghost USE ACCOUNT gw")
+	if err := os.Remove(filepath.Join(root, ".env-sets", "ghost.toml")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		pb, account string
+	}{{"gwset", ""}, {"gwset", "gw"}, {"gwghost", ""}} {
+		flags := map[string]string{askAllowOtherFlag: "true"}
+		if c.account != "" {
+			flags["account"] = c.account
+		}
+		var err error
+		captureStderr(t, func() {
+			_, err = askRun(t, flags, c.pb, "how many of your sessions are live?")
+		})
+		if err == nil || !strings.Contains(err.Error(), "nothing was sent") || strings.Contains(err.Error(), "To ask there anyway") {
+			t.Errorf("%s (account %q) with the flag: %v", c.pb, c.account, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Fatal("claude ran for a playbook routed by more than its account")
+	}
+}
+
 // A failure on a gateway account says where the question went.
 func TestAskOtherProviderFailure(t *testing.T) {
 	askGatewayFixture(t)
@@ -170,7 +298,7 @@ func TestAskOtherProviderFailure(t *testing.T) {
 	captureStderr(t, func() {
 		_, err = askRun(t, map[string]string{"account": "gwkey", askAllowOtherFlag: "true"}, "list")
 	})
-	if err == nil || !strings.Contains(err.Error(), "upstream refused the model") || !strings.Contains(err.Error(), "cpb ask asked account gwkey's gateway at 127.0.0.1:9, with the account's own credential") {
+	if err == nil || !strings.Contains(err.Error(), "upstream refused the model") || !strings.Contains(err.Error(), "cpb ask asked account gwkey's gateway at http://127.0.0.1:9, with the account's own credential") {
 		t.Fatalf("a failure on gwkey: %v", err)
 	}
 }

@@ -10,6 +10,9 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // cpb ask --allow-other-provider: the one way a question leaves Anthropic.
@@ -20,7 +23,9 @@ import (
 // it would. A Claude login or token never goes with it: an account that
 // would send one to a gateway (claude_login_trusted) is refused, flag or
 // not, and the child gets a new, empty config directory, so no stored
-// login can be reached either.
+// login can be reached either. Such an ask neither reads nor writes the
+// ask store: no history and no .ask/CLAUDE.md go there, and nothing is
+// recorded, so another provider's answer never reaches a later ask.
 
 // askAllowOtherFlag is the flag's name.
 const askAllowOtherFlag = "allow-other-provider"
@@ -28,8 +33,17 @@ const askAllowOtherFlag = "allow-other-provider"
 // askLoginOther signs in on a gateway account, with --allow-other-provider.
 const askLoginOther = "other"
 
-// askOtherSends is what a question on another provider sends there.
-const askOtherSends = "the request, your ask context (.ask/CLAUDE.md and the history), and the names of your playbooks, launchers, env sets and accounts"
+// askOtherSends is what a question on another provider sends there:
+// askContext, what the tool can return, and Claude Code's own.
+const askOtherSends = "the request; the names of your playbooks, launchers, env sets, defaults and accounts, " +
+	"each playbook's route, account and login class, and each account's provider and login class; " +
+	"the cpb version and the playbooks root (with ~ for your home, in full when it is outside it); " +
+	"what the model reads through cpb's tool (versions, plugin, MCP server and skill names, and session counts, kinds, statuses, times and models); " +
+	"and what Claude Code itself sends, the platform and OS version among them"
+
+// askOtherNoStore is what such an ask leaves out, and what that costs.
+const askOtherNoStore = "It neither reads nor writes your ask history and does not send .ask/CLAUDE.md, " +
+	"with or without --no-history, so a follow-up that leans on an earlier answer does not work there."
 
 // askOtherRefusal refuses an account --allow-other-provider cannot ask on:
 // nil for a gateway account that signs in with its own credential.
@@ -52,7 +66,7 @@ func askOtherHint(a *account.Account) string {
 	case a.UsesClaudeCredential():
 		return fmt.Sprintf(" It would send your Claude credential there, which stays on Anthropic, so --%s does not lift this.", askAllowOtherFlag)
 	}
-	return fmt.Sprintf(" To ask there anyway, add --%s: %s then go to %s, signed in with the account's own credential.", askAllowOtherFlag, askOtherSends, askOtherWhere(a))
+	return fmt.Sprintf(" To ask there anyway, add --%s. Then %s receives, signed in with the account's own credential: %s. %s", askAllowOtherFlag, askOtherWhere(a), askOtherSends, askOtherNoStore)
 }
 
 // askAwayRefusal refuses a question on a for going away from Anthropic, and
@@ -70,11 +84,12 @@ func askOtherSignIn(a *account.Account) (askSignIn, error) {
 	return askSignIn{mode: askLoginOther, account: a}, nil
 }
 
-// askOtherWhere names where a's requests go: its provider and host, never
-// a path, a query or anything else of the address.
+// askOtherWhere names where a's requests go: its scheme and host (http
+// says the credential goes unencrypted), never a path, a query or anything
+// else of the address.
 func askOtherWhere(a *account.Account) string {
-	if u, err := url.Parse(a.BaseURL); err == nil && u.Host != "" {
-		return fmt.Sprintf("account %s's gateway at %s", a.Name, u.Host)
+	if u, err := url.Parse(a.BaseURL); err == nil && u.Host != "" && u.Scheme != "" {
+		return fmt.Sprintf("account %s's gateway at %s://%s", a.Name, u.Scheme, u.Host)
 	}
 	return fmt.Sprintf("account %s's gateway", a.Name)
 }
@@ -84,7 +99,9 @@ func askOtherWhere(a *account.Account) string {
 // config directory, and what the account renders, as a launch on it sets
 // it: its address, its models, and a credential stored AS PLAINTEXT. A
 // credential or a header by reference is set by the secret helper
-// (askOtherCommand).
+// (askOtherCommand). A keyless account (auth = 'none') gets cpb's fixed,
+// non-secret placeholder, as a launch does: Claude Code does not start
+// with no credential at all.
 func askOtherEnv(a *account.Account, env []string, configDir string) []string {
 	out := make([]string, 0, len(env)+8)
 	for _, kv := range env {
@@ -99,7 +116,37 @@ func askOtherEnv(a *account.Account, env []string, configDir string) []string {
 	for _, k := range sortedKeys(r.Layer.Set) {
 		out = append(out, k+"="+r.Layer.Set[k])
 	}
+	if a.Auth.Kind == account.None {
+		out = auth.WithNoCredential(out)
+	}
 	return out
+}
+
+// askAccountAlone is the account a launch of pb on flag (its own choice
+// when "") runs on, when that account alone decides where it goes: the
+// launch plans cleanly (no layer, settings file or reserved variable routes
+// or signs it in beside the account), and the account is a named one, not
+// one a layer's route derives. A launch cpb would refuse returns the
+// refusal; any other route returns nil. It touches no credential.
+func askAccountAlone(pb *playbook.Playbook, flag string) (*account.Account, error) {
+	if _, err := auth.EffectiveBlock(pb.Path, nil); err != nil {
+		return nil, err
+	}
+	var layers []*manifest.Env
+	if flag != "" {
+		layers = []*manifest.Env{{Accounts: []string{flag}}}
+	}
+	saved := showAccount
+	showAccount = false
+	defer func() { showAccount = saved }()
+	acct, err := planAccount(pb.Path, pb.Name, layers, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	if acct.route != nil {
+		return nil, nil
+	}
+	return acct.sel.Account, nil
 }
 
 // askOtherCommand builds the claude child on a gateway account, as a launch
