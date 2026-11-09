@@ -18,7 +18,8 @@ import (
 )
 
 // How cpb ask asks (SPEC.md, "cpb ask"): Claude Code's own `claude -p`,
-// on the machine's login, always on Anthropic's API. The guarantees are
+// on the machine's login, on Anthropic's API (a gateway account's own
+// address only with --allow-other-provider, ask_provider.go). The guarantees are
 // built into the child process, not asked of the model:
 //
 //   - its environment is an allowlist (askEnv), so no route variable,
@@ -260,6 +261,9 @@ func askLogin() (string, error) {
 // to the other.
 func askLoginEnvFor(signIn askSignIn, env []string, configDir string) ([]string, error) {
 	mode := signIn.mode
+	if mode == askLoginOther {
+		return askOtherEnv(signIn.account, env, configDir), nil
+	}
 	if mode == askLoginAccount {
 		// The account's Claude token and no other credential: a literal
 		// stored AS PLAINTEXT goes in here; a reference is set by the
@@ -376,7 +380,7 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	}
 	defer os.RemoveAll(dir)
 	configDir := signIn.configDir
-	if signIn.mode == askLoginToken || signIn.mode == askLoginAccount {
+	if signIn.mode == askLoginToken || signIn.mode == askLoginAccount || signIn.mode == askLoginOther {
 		if configDir, err = askNeutralDir(); err != nil {
 			return nil, err
 		}
@@ -386,7 +390,11 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	if err != nil {
 		return nil, err
 	}
-	if err := askGate(env); err != nil {
+	gate := askGate
+	if signIn.mode == askLoginOther {
+		gate = askOtherGate
+	}
+	if err := gate(env); err != nil {
 		return nil, err
 	}
 	stateJSON, err := json.Marshal(state)
@@ -421,6 +429,9 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 // helper's argv; the value never reaches cpb.
 func askCommand(ctx context.Context, signIn askSignIn, claudePath string, args, env []string) (*exec.Cmd, error) {
 	a := signIn.account
+	if signIn.mode == askLoginOther && a != nil {
+		return askOtherCommand(ctx, a, claudePath, args, env)
+	}
 	if signIn.mode != askLoginAccount || a == nil || a.Auth.Ref == "" {
 		c := exec.CommandContext(ctx, claudePath, args...)
 		c.Env = env

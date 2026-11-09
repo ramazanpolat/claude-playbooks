@@ -123,7 +123,8 @@ that directory's path, the platform and the OS version.
 If Claude Code is not logged in, or its login has hit a usage limit, `cpb
 ask` says so and stops: run `claude` and `/login`, or set
 `ANTHROPIC_API_KEY`. When you have Claude token accounts, it names them
-too. It never asks another endpoint.
+too. It never asks another endpoint unless you say so with
+`--allow-other-provider` ([below](#asking-another-provider)).
 
 ## Asking on another account
 
@@ -146,7 +147,61 @@ With a playbook named, `cpb ask work --account work-claude "…"`, the question
 signs in as `cpb run --account work-claude work` would: the account must be
 one that playbook may run on, and a Claude login account uses the
 playbook's own login, or the machine's for a playbook that shares it. An account on another provider, or
-with request headers of its own, is refused before anything is sent.
+with request headers of its own, is refused before anything is sent; for a
+gateway account, the refusal says how to ask there anyway.
+
+## Asking another provider
+
+A gateway account, such as one for a model behind your own gateway, is
+refused by default, because the question would leave Anthropic:
+
+```bash
+cpb ask --account glm "list my env sets"
+# Error: account glm sends its requests away from Anthropic (provider gateway),
+# and cpb ask asks Anthropic only: nothing was sent. To ask there anyway, add
+# --allow-other-provider. Then account glm's gateway at https://gw.example.net
+# receives, signed in with the account's own credential: ...
+```
+
+Add `--allow-other-provider` to send it there anyway:
+
+```bash
+cpb ask --account glm --allow-other-provider "list my env sets"
+cpb ask glm-work --allow-other-provider "how many of your sessions are live?"
+```
+
+The question then goes to the account's address, signed in with the
+account's own key or token and on its own `model`, as a launch on it would.
+What goes there:
+
+- the request;
+- the names of your playbooks, launchers, env sets, defaults and accounts,
+  with each playbook's route, account and login class and each account's
+  provider and login class;
+- the cpb version and the playbooks root (with `~` for your home, in full
+  when it is outside it);
+- whatever the model reads through cpb's tool: versions, plugin, MCP server
+  and skill names, and session counts, kinds, statuses, times and models;
+- what Claude Code itself sends, the platform and OS version among them.
+
+Your ask history and `.ask/CLAUDE.md` do not go, with or without
+`--no-history`, and the ask is not recorded: another provider's answer
+never reaches a later ask. The cost is that a follow-up which leans on an
+earlier answer ("I meant accounts") does not work on these asks.
+
+Before sending, cpb says where on stderr (`asking account glm's gateway at
+https://gw.example.net, not Anthropic, without your ask history or
+.ask/CLAUDE.md`); an `http://` address there means the credential goes
+unencrypted. Your Claude login and tokens never go along: `claude` starts
+with a new, empty config directory and no Anthropic key or Claude token, and
+an account that would send your Claude credential to the gateway
+(`claude_login_trusted`) is refused, with the flag or without. Bedrock,
+Vertex and Foundry accounts are refused too, and so is a playbook that
+something besides its account routes (its settings, say): the flag lifts
+only a refusal the account alone causes.
+
+How well another model answers is up to it. Its answer is checked like any
+other: a step cpb would refuse is marked as rejected, with the reason.
 
 ## Signing in with cpb's token
 
@@ -248,7 +303,9 @@ statements, through its read-only tool.
 ## Choosing the model
 
 `--model <model>`, or `CPB_ASK_MODEL`, else `sonnet`. Any Claude model your
-login can use works; each question is one call.
+login can use works; each question is one call. On a gateway account
+(`--allow-other-provider`), the account's own `model` comes before
+`CPB_ASK_MODEL`.
 
 ## For scripts
 
