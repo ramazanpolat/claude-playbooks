@@ -1,0 +1,44 @@
+# cpb ask needs a Claude login, so two records are written here as cpb ask
+# writes them (SPEC.md, "The ask store"): a heading `## <time> · <playbook> ·
+# <id>`, then what was asked, the answer and the steps.
+root="$HOME/.claude-playbooks"
+# Nothing asked yet.
+cpb SHOW ASK HISTORY | grep -q '^No asks are recorded'
+cpb SHOW ASK HISTORY --json | python3 -c 'import json,sys; assert json.load(sys.stdin) == []'
+mkdir -p "$root/.ask"
+chmod 700 "$root/.ask"
+first=r-20261109-091500-3c4d
+second=r-20261109-093000-9a0b
+cat > "$root/.ask/history.md" <<EOF
+## 2026-11-09T09:15:00Z · - · $first
+
+**Asked:** list my playbooks
+
+**Answer:** One command lists them.
+
+**Steps:**
+- \`cpb SHOW PLAYBOOKS\`: lists every playbook
+
+## 2026-11-09T09:30:00Z · reviewer · $second
+
+**Asked:** which env sets do you run with?
+
+**Answer:** EXPLAIN shows them, in order.
+
+**Steps:**
+- \`cpb EXPLAIN PLAYBOOK reviewer\`: shows its env sets and its route
+EOF
+chmod 600 "$root/.ask/history.md"
+# Newest first, with the playbook each ask was addressed to.
+cpb SHOW ASK HISTORY --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert [(x["playbook"], x["asked"]) for x in r] == [("reviewer", "which env sets do you run with?"), ("-", "list my playbooks")], r'
+cpb SHOW ASK HISTORY FOR PLAYBOOK reviewer --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert [x["id"] for x in r] == [sys.argv[1]], r' "$second"
+# A page of one; its last line is the statement for the next page.
+cpb SHOW ASK HISTORY LIMIT 1 > "$HOME/page.out"
+grep -q "$second" "$HOME/page.out"
+grep -qx "1 older: cpb SHOW ASK HISTORY BEFORE $second LIMIT 1" "$HOME/page.out"
+cpb SHOW ASK HISTORY BEFORE "$second" | grep -q "$first"
+# One record in full.
+cpb SHOW ASK RECORD "$first" | grep -qx '\*\*Asked:\*\* list my playbooks'
+# An id that is not there is refused.
+if cpb SHOW ASK RECORD r-20000101-000000-0000 2> "$HOME/none.err"; then echo "a missing record was shown"; exit 1; fi
+grep -q 'no record r-20000101-000000-0000 in the ask history' "$HOME/none.err"

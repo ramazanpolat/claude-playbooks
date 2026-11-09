@@ -1,0 +1,4 @@
+-- A playbook to address asks to. cpb ask writes the ask history and SHOW ASK
+-- reads it; neither has a place in a playbook file, so this one only creates
+-- it.
+CREATE PLAYBOOK IF NOT EXISTS reviewer SET launcher = '';

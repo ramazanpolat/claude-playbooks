@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [v4.5.0] -- 2026-11-10
+
+v4.5.0 gives `cpb ask` a memory and a way to ask on a gateway account.
+Each answered ask is kept in `~/.claude-playbooks/.ask/history.md`, so a
+follow-up can revise the last answer, and `.ask/CLAUDE.md` is standing
+context sent with every ask; `SHOW ASK HISTORY` and `SHOW ASK RECORD` read
+the history back. `cpb ask --allow-other-provider` asks on a gateway
+account with that account's own credential and models, and such an ask
+neither reads nor writes the history. There is no upgrade step.
+
 ### Added
 
 - **`cpb ask` remembers.** `~/.claude-playbooks/.ask/history.md` keeps one
