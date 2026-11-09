@@ -69,8 +69,11 @@ What it keeps, in <root>/.ask/: CLAUDE.md, your standing context in your own
 words, which cpb only reads and sends with every ask; and history.md, one
 record per answered ask, appended and never rewritten (delete it to forget).
 Each ask sends the last 20 records' headings and the last record, and the
-model can read further back. --no-history keeps one ask out of it. Read it
-with cpb SHOW ASK HISTORY, and one record with cpb SHOW ASK RECORD <id>.
+model can read further back. --no-history keeps one ask out of it: that ask
+reads no history, its model's tool none either, and adds nothing. A record
+keeps what was asked and answered as shown, commands and their paths among
+them. Read it with cpb SHOW ASK HISTORY, and one record with
+cpb SHOW ASK RECORD <id>.
 
 A line marked ! says what a step removes, forgets or replaces, which
 credential or login it touches, or what code it fetches: read it before you
@@ -175,7 +178,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	if signIn.mode == askLoginOther {
 		fmt.Fprintf(os.Stderr, "cpb ask: --%s: asking %s, not Anthropic.\n", askAllowOtherFlag, askOtherWhere(signIn.account))
 	}
-	plan, err := askViaClaude(model, signIn, root, state, prelude, request)
+	plan, err := askViaClaude(model, signIn, root, state, prelude, request, noHistory)
 	if err != nil {
 		return err
 	}
