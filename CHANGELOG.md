@@ -20,8 +20,8 @@
   interface). It never runs with `--yes`, with `--trust-secret` for that
   reference, without a terminal, or inside an agent's session. `^C`, an empty
   answer, a closed terminal or a failing helper store nothing, and a stored
-  value is never replaced. It keeps the value out of command lines, cpb's
-  output and transcripts; it does not hide it from programs that run as you.
+  value is never replaced. It keeps the value out of command lines and
+  cpb's output; it does not hide it from programs that run as you.
   See *Secrets* in SPEC.md and [the play guide](docs/guides/play.md).
 
 ## [v4.6.0] -- 2026-11-10

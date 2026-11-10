@@ -663,9 +663,9 @@ No flag, environment variable or file ever supplies a value, and none may be
 added.
 
 **What the step does not cover.** It keeps the value out of argument lists,
-out of cpb's output and files, and out of an agent's transcript. It does not
-hide the value from the person's own processes. A program that drives a
-terminal of its own (a pseudo-terminal it started) can pass the terminal
+out of cpb's output and files, and so out of any log or transcript of them. It
+does not hide the value from the person's own processes. A program that drives
+a terminal of its own (a pseudo-terminal it started) can pass the terminal
 test. Any process of the same user can ask the operating system's store for
 the value, an agent's included. Keeping a secret from an agent that runs as
 you is a sandbox's job, not this step's.

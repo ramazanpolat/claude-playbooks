@@ -128,9 +128,9 @@ Type the value now (it is not shown), or press Enter to stop:
   run the command and type the value yourself.
 
 What this protects, and what it does not: the value stays out of command
-lines, out of cpb's output, and out of an agent's transcript. It does not hide
-the value from programs that run as you. Any of them can read it from the
-system's store, an agent's included.
+lines and out of cpb's output, so no log or transcript of them holds it. It
+does not hide the value from programs that run as you. Any of them can read it
+from the system's store, an agent's included.
 
 ## Sandboxed by default
 
