@@ -11,7 +11,7 @@ ALTER PLAYBOOK reviewer
   ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Read(~/.ssh/**)'
   SET statusline.command = 'bash ~/bin/statusline.sh'
-  SET model = 'claude-opus-5-5'
+  SET model = 'opus'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
 
@@ -58,7 +58,7 @@ UNSET` takes the keys whose default is no value (`model`, `agent`, the status
 line, the picker mode, the sandbox keys without a default; not `launcher`,
 `login` or `global_instructions`, which are never unset), and applies whole or
 not at all: `SET IF UNSET
-model = 'claude-opus-5-5', agent = 'reviewer'` changes neither on a playbook
+model = 'opus', agent = 'reviewer'` changes neither on a playbook
 that has a model, and says so.
 
 ## The model picker

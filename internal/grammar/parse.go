@@ -1122,9 +1122,18 @@ func (p *parser) defaultsClause() (*Clause, *Error) {
 		return nil, p.unexpected()
 	case "USE":
 		return c, p.useList(c)
-	case "DROP":
-		return c, p.envList(c, w)
-	case "ADD":
+	case "ADD", "DROP":
+		// ADD MODEL / DROP MODEL: the model picker rows every playbook's
+		// launch offers (SPEC.md, "Model picker").
+		if p.kw("MODEL") != "" {
+			return c, p.pickerModel(c, w)
+		}
+		if w == "DROP" {
+			if !p.at("ENV") {
+				return nil, p.fail("DROP takes ENV or MODEL: DROP ENV <env> ..., DROP MODEL '<id>'")
+			}
+			return c, p.envList(c, w)
+		}
 		return c, p.addEnv(c)
 	case "REPLACE":
 		return c, p.replaceEnv(c)
@@ -1180,7 +1189,7 @@ func (p *parser) envListRest(c *Clause, verb string) *Error {
 
 func (p *parser) addEnv(c *Clause) *Error {
 	if p.kw("ENV") == "" {
-		return p.fail("ADD takes ENV: ADD ENV <env>")
+		return p.fail("ADD takes ENV or MODEL: ADD ENV <env>, ADD MODEL '<id>'")
 	}
 	return p.addEnvRest(c)
 }

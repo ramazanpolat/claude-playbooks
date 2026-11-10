@@ -57,49 +57,50 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
-		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "login", "global_instructions",
+		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "login", "global_instructions", "model_picker_defaults",
 			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "model", "model_picker", "play", "apply",
 			"auth_mode", "token_source", "token_kind", "token_blocked", "accounts", "account"},
 		structure: "name String, version Nullable(String), description Nullable(String), homepage Nullable(String), author Nullable(String), " +
 			"path String, last_used Nullable(DateTime64(3, 'UTC')), source JSON, migrate Nullable(String), linked Nullable(String), " +
-			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, login String, global_instructions String, marketplaces Array(JSON), plugins Array(JSON), " +
+			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, login String, global_instructions String, model_picker_defaults String, marketplaces Array(JSON), plugins Array(JSON), " +
 			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline JSON, model Nullable(String), model_picker JSON, play JSON, apply JSON, " +
 			"auth_mode String, token_source String, token_kind Nullable(String), token_blocked Bool, accounts Array(String), account Nullable(String)",
 		comments: map[string]string{
-			"name":                "The playbook's name.",
-			"version":             "The manifest's version; null when it has none.",
-			"version_tuple":       "The numbers of the version's leading numeric part ([3, 12, 3] for v3.12.3-rc1), to compare and sort versions; computed.",
-			"description":         "The manifest's description; null when it has none.",
-			"homepage":            "The manifest's homepage; null when it has none.",
-			"author":              "The manifest's author; null when it has none.",
-			"path":                "The playbook's directory under the playbooks root: its config directory.",
-			"last_used":           "When the playbook's config directory last changed (UTC).",
-			"source":              "Where the playbook was installed from: url, branch, subdir; null for a playbook without one.",
-			"migrate":             "The declared migrate step ([update] migrate) that cpb update runs; null without one.",
-			"linked":              "The target directory of a linked playbook; null otherwise.",
-			"launcher":            "The command that runs the playbook, the one you type; null when no launcher is in place, as under SET launcher = ''.",
-			"envs":                "The env sets the playbook uses, in order.",
-			"vars":                "The playbook's own variables, each a value, a reference, a redacted credential or a block.",
-			"sandbox":             "The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills.",
-			"login":               "The login property: isolated when the playbook shares no login with the machine (a sandboxed playbook too), else shared.",
-			"global_instructions": "The global_instructions property: excluded when ~/.claude's CLAUDE.md and rules do not load into the playbook, else inherited.",
-			"marketplaces":        "The plugin marketplaces in the playbook's settings: name, source.",
-			"plugins":             "The plugins in the playbook's settings: id, enabled.",
-			"agent":               "The agent the playbook pins (SET agent); null when unset.",
-			"mcp_servers":         "The MCP servers: name, transport, command and args or url, env and headers as variables.",
-			"tools":               "The tool permission rules: allow, deny.",
-			"skills":              "The skills cpb recorded: name, source, branch, subdir, mode.",
-			"statusline":          "The status line: command (null for none), refresh in whole seconds (null when unset).",
-			"model":               "The playbook's default model (SET model); null when unset.",
-			"model_picker":        "The model picker: mode (only or append) and options; null when unset.",
-			"play":                "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
-			"apply":               "The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other.",
-			"auth_mode":           "How a launch authenticates: isolated-login, token, playbook-token, shared-login, account (the account's own credential, no Claude login), or error.",
-			"token_source":        "Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), or unknown.",
-			"token_kind":          "value or reference; null when the launch uses no token.",
-			"token_blocked":       "True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login.",
-			"accounts":            "The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook.",
-			"account":             "The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why).",
+			"name":                  "The playbook's name.",
+			"version":               "The manifest's version; null when it has none.",
+			"version_tuple":         "The numbers of the version's leading numeric part ([3, 12, 3] for v3.12.3-rc1), to compare and sort versions; computed.",
+			"description":           "The manifest's description; null when it has none.",
+			"homepage":              "The manifest's homepage; null when it has none.",
+			"author":                "The manifest's author; null when it has none.",
+			"path":                  "The playbook's directory under the playbooks root: its config directory.",
+			"last_used":             "When the playbook's config directory last changed (UTC).",
+			"source":                "Where the playbook was installed from: url, branch, subdir; null for a playbook without one.",
+			"migrate":               "The declared migrate step ([update] migrate) that cpb update runs; null without one.",
+			"linked":                "The target directory of a linked playbook; null otherwise.",
+			"launcher":              "The command that runs the playbook, the one you type; null when no launcher is in place, as under SET launcher = ''.",
+			"envs":                  "The env sets the playbook uses, in order.",
+			"vars":                  "The playbook's own variables, each a value, a reference, a redacted credential or a block.",
+			"sandbox":               "The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills.",
+			"login":                 "The login property: isolated when the playbook shares no login with the machine (a sandboxed playbook too), else shared.",
+			"global_instructions":   "The global_instructions property: excluded when ~/.claude's CLAUDE.md and rules do not load into the playbook, else inherited.",
+			"model_picker_defaults": "The model_picker_defaults property: excluded when the playbook's launches offer no DEFAULTS model row, else inherited.",
+			"marketplaces":          "The plugin marketplaces in the playbook's settings: name, source.",
+			"plugins":               "The plugins in the playbook's settings: id, enabled.",
+			"agent":                 "The agent the playbook pins (SET agent); null when unset.",
+			"mcp_servers":           "The MCP servers: name, transport, command and args or url, env and headers as variables.",
+			"tools":                 "The tool permission rules: allow, deny.",
+			"skills":                "The skills cpb recorded: name, source, branch, subdir, mode.",
+			"statusline":            "The status line: command (null for none), refresh in whole seconds (null when unset).",
+			"model":                 "The playbook's default model (SET model); null when unset.",
+			"model_picker":          "The model picker: mode (only or append) and options; null when unset.",
+			"play":                  "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
+			"apply":                 "The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other.",
+			"auth_mode":             "How a launch authenticates: isolated-login, token, playbook-token, shared-login, account (the account's own credential, no Claude login), or error.",
+			"token_source":          "Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), or unknown.",
+			"token_kind":            "value or reference; null when the launch uses no token.",
+			"token_blocked":         "True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login.",
+			"accounts":              "The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook.",
+			"account":               "The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why).",
 		},
 		rows: playbookRows,
 	},
@@ -157,13 +158,14 @@ var selectTables = map[string]selectTable{
 		rows: sessionRows,
 	},
 	"DEFAULTS": {
-		columns:   []string{"envs", "account", "secret_helper", "secret_helper_from"},
-		structure: "envs Array(String), account Nullable(String), secret_helper Nullable(String), secret_helper_from Nullable(String)",
+		columns:   []string{"envs", "account", "secret_helper", "secret_helper_from", "model_picker"},
+		structure: "envs Array(String), account Nullable(String), secret_helper Nullable(String), secret_helper_from Nullable(String), model_picker JSON",
 		comments: map[string]string{
 			"envs":               "The env sets every launch applies first, in order.",
 			"account":            "The DEFAULTS account (USE ACCOUNT), for playbooks that name none; null when none is set (they run on machine).",
 			"secret_helper":      "The command that resolves secret references (SET secret_helper); null when none is configured.",
 			"secret_helper_from": "Where the secret helper is set: setting or CPB_SECRET_HELPER; null when none is configured.",
+			"model_picker":       "The DEFAULTS model rows (ADD MODEL), offered by every launch on Anthropic's own API after the playbook's own rows: options; null when there are none.",
 		},
 		rows: defaultsRows,
 	},
@@ -288,6 +290,9 @@ func defaultsRows() ([]any, []playbook.Unreadable, error) {
 		return nil, nil, fmt.Errorf("the DEFAULTS account cannot be read: %w", err)
 	}
 	v.Account = optStr(def)
+	if err := withDefaultsPicker(&v, config.ResolvePlaybooksDir()); err != nil {
+		return nil, nil, err
+	}
 	return []any{v}, nil, nil
 }
 

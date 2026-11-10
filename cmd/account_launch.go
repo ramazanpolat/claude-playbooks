@@ -192,13 +192,16 @@ func (a *accountLaunch) prepare() error {
 	return nil
 }
 
-// claudeArgs are the arguments the account adds before claude's own: its
-// apiKeyHelper as a launch-only setting, never written into a file.
+// claudeArgs are the arguments a launch adds before claude's own: one
+// --settings, never written into a file, holding the account's apiKeyHelper
+// and the model picker with the DEFAULTS model rows (launchPicker), or
+// nothing at all when there is neither.
 func (a *accountLaunch) claudeArgs(args []string) []string {
-	if a.rendered.KeyHelper == "" {
+	p := launchPicker(config.ResolvePlaybooksDir(), a.configDir, a.sel, a.rendered, args)
+	s := launchSettings(a.rendered.KeyHelper, p)
+	if s == nil {
 		return args
 	}
-	s, _ := json.Marshal(map[string]string{"apiKeyHelper": a.rendered.KeyHelper})
 	return append([]string{"--settings", string(s)}, args...)
 }
 

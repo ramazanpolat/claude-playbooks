@@ -13,7 +13,7 @@ in three layers and one entry file. Everything it uses is in the repository.
 
 ```
 ALTER PLAYBOOK
-  SET model = 'claude-sonnet-5-5'
+  SET model = 'sonnet'
   ALLOW TOOL 'Bash(git diff *)' 'Bash(git log *)';
 ```
 

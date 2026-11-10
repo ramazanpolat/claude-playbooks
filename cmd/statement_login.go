@@ -20,6 +20,17 @@ func (r *stmtRun) isolated(name string, m *manifest.Manifest) bool {
 	return m != nil && m.IsolatedLogin
 }
 
+// pickerDefaultsExcluded reports whether a playbook keeps the DEFAULTS
+// model rows out of its launches (model_picker_defaults), as the run sees it.
+func (r *stmtRun) pickerDefaultsExcluded(name string, m *manifest.Manifest) bool {
+	if r.dry != nil {
+		if v, ok := r.dry.pickerExcluded[name]; ok {
+			return v
+		}
+	}
+	return m.ExcludesModelPickerDefaults()
+}
+
 // sandboxed reports whether a playbook always runs in a sandbox, as the run
 // sees it.
 func (r *stmtRun) sandboxed(name string, m *manifest.Manifest) bool {

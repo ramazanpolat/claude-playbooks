@@ -2,7 +2,7 @@ python3 - "$HOME/.claude-playbooks/reviewer-agent/settings.json" <<'PY'
 import json, sys
 s = json.load(open(sys.argv[1]))
 assert s["agent"] == "reviewer", s
-assert s["model"] == "claude-sonnet-5-5", s
+assert s["model"] == "sonnet", s
 assert s["permissions"]["allow"] == ["Bash(git diff *)", "Bash(git log *)"], s
 assert s["statusLine"] == {"type": "command", "command": "echo reviewer", "refreshInterval": 10}, s
 PY

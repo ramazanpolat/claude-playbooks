@@ -10,6 +10,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // dryState is what an APPLY --dry-run's earlier statements would have
@@ -23,6 +24,9 @@ type dryState struct {
 	pbEnvs      map[string]*manifest.Env // a playbook's env block after earlier statements; nil: empty
 	defaults    []string
 	hasDefaults bool
+	// The DEFAULTS model rows earlier statements would leave (nil: none).
+	defaultsPicker    *settings.Object
+	hasDefaultsPicker bool
 
 	// accounts written (nil: dropped), and the DEFAULTS account.
 	accounts          map[string]*account.Account
@@ -51,6 +55,9 @@ type dryState struct {
 	// always as earlier statements would leave them.
 	isolated  map[string]bool
 	sandboxed map[string]bool
+	// pickerExcluded, per playbook: model_picker_defaults = 'excluded' as
+	// earlier statements would leave it.
+	pickerExcluded map[string]bool
 	// sandboxes, per playbook: the [sandbox] block earlier statements would
 	// leave (nil: none); absent: as on disk.
 	sandboxes map[string]*manifest.Sandbox
@@ -62,21 +69,22 @@ type dryState struct {
 
 func newDryState() *dryState {
 	return &dryState{
-		sandboxes:    map[string]*manifest.Sandbox{},
-		profiles:     map[string]*envset.Set{},
-		accounts:     map[string]*account.Account{},
-		playbooks:    map[string]bool{},
-		pbEnvs:       map[string]*manifest.Env{},
-		worlds:       map[string]*pluginWorld{},
-		settings:     map[string][]byte{},
-		configDirs:   map[string]string{},
-		mcp:          map[string]map[string]json.RawMessage{},
-		mcpRecords:   map[string]map[string]*manifest.MCPRecord{},
-		skillRecords: map[string]map[string]*manifest.SkillRecord{},
-		skillKnown:   map[string]map[string]bool{},
-		isolated:     map[string]bool{},
-		sandboxed:    map[string]bool{},
-		launchers:    map[string]string{},
+		sandboxes:      map[string]*manifest.Sandbox{},
+		profiles:       map[string]*envset.Set{},
+		accounts:       map[string]*account.Account{},
+		playbooks:      map[string]bool{},
+		pbEnvs:         map[string]*manifest.Env{},
+		worlds:         map[string]*pluginWorld{},
+		settings:       map[string][]byte{},
+		configDirs:     map[string]string{},
+		mcp:            map[string]map[string]json.RawMessage{},
+		mcpRecords:     map[string]map[string]*manifest.MCPRecord{},
+		skillRecords:   map[string]map[string]*manifest.SkillRecord{},
+		skillKnown:     map[string]map[string]bool{},
+		isolated:       map[string]bool{},
+		sandboxed:      map[string]bool{},
+		pickerExcluded: map[string]bool{},
+		launchers:      map[string]string{},
 	}
 }
 
@@ -234,6 +242,20 @@ func (r *stmtRun) defaultsList(dir string) ([]string, error) {
 		return slices.Clone(r.dry.defaults), nil
 	}
 	return envset.Defaults(dir)
+}
+
+// defaultsPicker is the DEFAULTS model rows as the run sees them.
+func (r *stmtRun) defaultsPicker(root string) (*settings.Object, error) {
+	if r.dry != nil && r.dry.hasDefaultsPicker {
+		return r.dry.defaultsPicker, nil
+	}
+	return readDefaultsPicker(root)
+}
+
+func (r *stmtRun) recordDefaultsPicker(mp *settings.Object) {
+	if r.dry != nil {
+		r.dry.defaultsPicker, r.dry.hasDefaultsPicker = mp, true
+	}
 }
 
 func (r *stmtRun) recordDefaults(names []string) {

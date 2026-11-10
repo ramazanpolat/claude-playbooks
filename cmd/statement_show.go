@@ -72,6 +72,9 @@ type playbookJSON struct {
 	// login, SET global_instructions) as they stand: each key is its field.
 	Login              string `json:"login"`
 	GlobalInstructions string `json:"global_instructions"`
+	// ModelPickerDefaults is the model_picker_defaults property: excluded
+	// keeps the DEFAULTS model rows out of the playbook's launches.
+	ModelPickerDefaults string `json:"model_picker_defaults"`
 
 	Marketplaces []marketplaceJSON `json:"marketplaces"`
 	Plugins      []pluginJSON      `json:"plugins"`
@@ -197,6 +200,43 @@ type defaultsJSON struct {
 	Account          *string `json:"account"`
 	SecretHelper     *string `json:"secret_helper"`
 	SecretHelperFrom *string `json:"secret_helper_from"`
+	// ModelPicker is the DEFAULTS model rows (ADD MODEL) every launch on
+	// Anthropic's own API offers; null when there are none.
+	ModelPicker *defaultsModelsJSON `json:"model_picker"`
+}
+
+// defaultsModelsJSON is the DEFAULTS model rows: a picker's options, with
+// no mode (each playbook's own picker has that).
+type defaultsModelsJSON struct {
+	Options []pickerRowJSON `json:"options"`
+}
+
+// withDefaultsPicker adds the DEFAULTS model rows to v.
+func withDefaultsPicker(v *defaultsJSON, playbooksDir string) error {
+	mp, err := readDefaultsPicker(playbooksDir)
+	if err != nil {
+		return fmt.Errorf("the DEFAULTS model rows cannot be read: %w", err)
+	}
+	if p := defaultsPickerJSON(mp); p != nil {
+		v.ModelPicker = &defaultsModelsJSON{Options: p.Options}
+	}
+	return nil
+}
+
+// defaultsModelsLine is the DEFAULTS model rows in one human line.
+func defaultsModelsLine(p *defaultsModelsJSON) string {
+	if p == nil {
+		return "(none)"
+	}
+	var rows []string
+	for _, o := range p.Options {
+		s := markPinned(o.Model)
+		if o.Label != nil {
+			s += " (" + *o.Label + ")"
+		}
+		rows = append(rows, s)
+	}
+	return strings.Join(rows, ", ")
 }
 
 func defaultsOf(names []string, h *helperJSON) defaultsJSON {
@@ -223,6 +263,10 @@ type explainJSON struct {
 	// runs with.
 	Login              string `json:"login"`
 	GlobalInstructions string `json:"global_instructions"`
+	// ModelPickerAtLaunch is what a launch does with the DEFAULTS model
+	// rows: the models it adds, or why it adds none; null when DEFAULTS
+	// has none.
+	ModelPickerAtLaunch *launchPickerJSON `json:"model_picker_at_launch"`
 	// Account is SHOW's, flattened (v4.2.0).
 	auth.Account
 }
@@ -342,10 +386,14 @@ func readStatement(st *grammar.Stmt) error {
 			return fmt.Errorf("the DEFAULTS account cannot be read: %w", err)
 		}
 		v.Account = optStr(def)
+		if err := withDefaultsPicker(&v, playbooksDir); err != nil {
+			return err
+		}
 		if st.JSON {
 			return printJSON(v)
 		}
-		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Account", deref(v.Account, account.Machine+" (none set)")}, {"Secret helper", humanHelper(helper)}})
+		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Account", deref(v.Account, account.Machine+" (none set)")}, {"Secret helper", humanHelper(helper)},
+			{"Model picker", defaultsModelsLine(v.ModelPicker)}})
 		return nil
 	}
 	return fmt.Errorf("cannot run %s", st.String())
@@ -393,6 +441,10 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v.Launcher = optStr(effectiveLauncher(pb))
 	v.Login = "shared"
 	v.GlobalInstructions, _ = globalInstructionsStateOf(pb.Path)
+	v.ModelPickerDefaults = grammar.PlaybookPropertyDefault("model_picker_defaults")
+	if pb.Manifest.ExcludesModelPickerDefaults() {
+		v.ModelPickerDefaults = manifest.ModelPickerDefaultsExcluded
+	}
 	m := pb.Manifest
 	if m == nil {
 		// it still runs on an account: machine, or the DEFAULTS one
@@ -587,10 +639,13 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		rows = append(rows, [2]string{"Status line", statuslineLine(v)})
 	}
 	if v.Model != nil {
-		rows = append(rows, [2]string{"Model", *v.Model})
+		rows = append(rows, [2]string{"Model", markPinned(*v.Model)})
 	}
 	if v.ModelPicker != nil {
 		rows = append(rows, [2]string{"Model picker", pickerLine(v.ModelPicker)})
+	}
+	if v.ModelPickerDefaults == manifest.ModelPickerDefaultsExcluded {
+		rows = append(rows, [2]string{"Model picker defaults", "excluded (a launch offers no DEFAULTS model row)"})
 	}
 	if len(v.Skills) > 0 {
 		names := make([]string, len(v.Skills))
@@ -771,7 +826,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		pv := describePlaybook(pb)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
 			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions,
-			Account: pv.Account})
+			ModelPickerAtLaunch: launchPickerJSONOf(explainPicker(pb)), Account: pv.Account})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -780,6 +835,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		printLaunchPlugins(plugins, agent)
 		printMCPNames(mcpNames(pb))
 		printToolsAndModel(pb, vars)
+		printLaunchPicker(pb)
 		return nil
 	}
 	t := newTable("VARIABLE", "VALUE", "FROM").flexible(1)
@@ -807,7 +863,31 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	printLaunchPlugins(plugins, agent)
 	printMCPNames(mcpNames(pb))
 	printToolsAndModel(pb, vars)
+	printLaunchPicker(pb)
 	return nil
+}
+
+// explainPicker is what a launch of pb, with no flags, does with the
+// DEFAULTS model rows: the launch's own decision (launchPicker).
+func explainPicker(pb *playbook.Playbook) pickerAtLaunch {
+	root := config.ResolvePlaybooksDir()
+	if rows, err := defaultsPickerRows(root); err == nil && len(rows) == 0 {
+		return pickerAtLaunch{none: true}
+	}
+	wd, _ := os.Getwd()
+	acct, err := planAccount(pb.Path, pb.Name, nil, wd, nil)
+	if err != nil {
+		return pickerAtLaunch{skip: "the launch would be refused"}
+	}
+	return launchPicker(root, pb.Path, acct.sel, acct.rendered, nil)
+}
+
+// printLaunchPicker prints EXPLAIN's line for the DEFAULTS model rows, when
+// DEFAULTS has any.
+func printLaunchPicker(pb *playbook.Playbook) {
+	if line := launchPickerLine(explainPicker(pb)); line != "" {
+		fmt.Println(line)
+	}
 }
 
 // printLaunchSandbox says where a launch runs and what its login is, when
@@ -1018,7 +1098,12 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 		if m.From == "ANTHROPIC_MODEL" && v.Model != nil {
 			line += "; the settings model " + *v.Model + " is overridden"
 		}
-		fmt.Println(line + "; a launch's --model and /model still win")
+		line += "; a launch's --model and /model still win"
+		// A pinned id is said last, so the line reads as before up to it.
+		if mark := pinnedMark(m.Name); mark != "" {
+			line += "; " + mark
+		}
+		fmt.Println(line)
 	}
 	if v.ModelPicker != nil {
 		fmt.Printf("Model picker: %s\n", pickerLine(v.ModelPicker))

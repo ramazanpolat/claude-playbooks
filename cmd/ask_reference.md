@@ -154,7 +154,8 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a source
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, global_instructions, model, agent, sandbox.<key>,
-                                           statusline.command, statusline.refresh, model_picker.mode
+                                           statusline.command, statusline.refresh, model_picker.mode,
+                                           model_picker_defaults
                                            see "Playbook properties"
 value      := '<string>' | <word> | <integer> | true | false | [ '<string>', ... ] | '<item>,<item>'
                                            a one-word value bare or quoted; a list also comma-joined
@@ -178,6 +179,9 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
             | RESET secret_helper
+            | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
+                                           a row every launch offers; see "Model picker"
+            | DROP MODEL '<id>'
 
 pb-clause  := set-clause
             | SET VAR <key>=<value> ... [AS PLAINTEXT]
@@ -239,7 +243,7 @@ cpb CREATE ENV tools SET MAX_THINKING_TOKENS=8000
 cpb ALTER PLAYBOOK work USE ENV tools
 cpb ALTER PLAYBOOK work ADD ENV tools FIRST
 cpb ALTER PLAYBOOK work REPLACE ENV tools WITH tools-b
-cpb ALTER PLAYBOOK work SET model = 'claude-sonnet-5-5'
+cpb ALTER PLAYBOOK work SET model = 'sonnet'
 cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)'
 cpb ALTER PLAYBOOK work ADD MARKETPLACE team FROM 'github:example/team-plugins' ADD PLUGIN reviewer@team SET agent = 'reviewer'
 cpb ALTER PLAYBOOK work RENAME TO lab

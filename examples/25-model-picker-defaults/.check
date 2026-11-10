@@ -1,0 +1,18 @@
+p="$HOME/.claude-playbooks"
+cpb SHOW DEFAULTS | grep -qE '^Model picker: +opus \(Opus \(newest\)\), sonnet \(Sonnet \(newest\)\), haiku \(Haiku \(newest\)\), fable \(Fable \(newest\)\)$'
+cpb EXPLAIN PLAYBOOK daily | grep -q 'Model picker at launch: adds opus, sonnet, haiku, fable from DEFAULTS'
+cpb EXPLAIN PLAYBOOK fixed | grep -q "Model picker at launch: adds nothing (the playbook has model_picker_defaults = 'excluded')"
+# A launch passes the rows as one --settings, before claude's own arguments,
+# and writes nothing into the playbook.
+cpb run daily --continue
+python3 - "$p/daily/.fake-claude/launch-args" <<'PY'
+import json, sys
+args = open(sys.argv[1]).read().splitlines()
+assert args[0] == "--settings" and args[2:] == ["--continue"], args
+mp = json.loads(args[1])["modelPicker"]
+assert [o["model"] for o in mp["options"]] == ["opus", "sonnet", "haiku", "fable"], mp
+PY
+if grep -q modelPicker "$p/daily/settings.json" 2>/dev/null; then echo "rows written into the playbook"; exit 1; fi
+# The excluded playbook launches as it would without DEFAULTS rows.
+cpb run fixed
+if grep -qx -- '--settings' "$p/fixed/.fake-claude/launch-args"; then echo "fixed got --settings"; exit 1; fi

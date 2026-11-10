@@ -7,4 +7,4 @@ ALTER PLAYBOOK reviewer
   ALLOW TOOL 'Bash(git diff *)' 'Bash(go test *)'
   DENY TOOL 'Read(~/.ssh/**)'
   SET statusline.command = 'echo reviewer', statusline.refresh = 10
-  SET model = 'claude-opus-5-5';
+  SET model = 'opus';

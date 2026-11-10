@@ -231,6 +231,11 @@ func (r *stmtRun) propertyReader(name string, pb *playbook.Playbook) (func(key s
 			return "shared", true
 		case "sandbox.always":
 			return strconv.FormatBool(r.sandboxed(name, m)), true
+		case "model_picker_defaults":
+			if r.pickerDefaultsExcluded(name, m) {
+				return manifest.ModelPickerDefaultsExcluded, true
+			}
+			return grammar.PlaybookPropertyDefault("model_picker_defaults"), true
 		}
 		if k, ok := strings.CutPrefix(key, "sandbox."); ok {
 			sb := (*manifest.Sandbox)(nil)

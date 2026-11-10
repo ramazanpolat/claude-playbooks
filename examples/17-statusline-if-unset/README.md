@@ -22,7 +22,7 @@ one slot for it.
   `global_instructions` and the sandbox keys with a default are refused: they
   are never unset. It applies whole or not at all: only when none of the
   keys it names is set. Otherwise it changes nothing and says which key was set:
-  `SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'` leaves both
+  `SET IF UNSET model = 'opus', agent = 'reviewer'` leaves both
   alone on a playbook that has a model.
 - `SHOW CREATE` writes the status line the playbook has, never the condition.
 

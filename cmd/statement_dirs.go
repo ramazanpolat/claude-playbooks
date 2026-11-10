@@ -62,12 +62,18 @@ func validateDirClauses(st *grammar.Stmt) error {
 			if v, ok := grammar.PropertyValue([]grammar.Clause{c}, "global_instructions"); ok && inMachineConfig(dir) {
 				return fmt.Errorf("global_instructions = '%s' cannot apply to %s: it is the machine's own Claude Code configuration, and its CLAUDE.md is its own instructions", v, dir)
 			}
-			if _, ok := grammar.PropertyValue([]grammar.Clause{c}, "login"); ok {
-				verb := "SET"
-				if c.Kind == grammar.ResetProperties {
-					verb = "RESET"
+			for _, key := range []string{"login", "model_picker_defaults"} {
+				if _, ok := grammar.PropertyValue([]grammar.Clause{c}, key); ok {
+					verb := "SET"
+					if c.Kind == grammar.ResetProperties {
+						verb = "RESET"
+					}
+					what := "the login is"
+					if key != "login" {
+						what = key + " is"
+					}
+					return fmt.Errorf("%s %s cannot apply to %s: %s recorded in a playbook's manifest, which the directory does not have", verb, key, dir, what)
 				}
-				return fmt.Errorf("%s login cannot apply to %s: the login is recorded in a playbook's manifest, which the directory does not have", verb, dir)
 			}
 		}
 		if c.Kind == grammar.AddMCP {

@@ -271,19 +271,33 @@ func (e *Env) Blocks(key string) bool {
 	return false
 }
 
+// ModelPickerDefaultsExcluded is the one model_picker_defaults value a
+// manifest records; any other value, or none, is "inherited".
+const ModelPickerDefaultsExcluded = "excluded"
+
+// ExcludesModelPickerDefaults reports whether m keeps the DEFAULTS model
+// rows out of its launches.
+func (m *Manifest) ExcludesModelPickerDefaults() bool {
+	return m != nil && m.ModelPickerDefaults == ModelPickerDefaultsExcluded
+}
+
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
-	Version       string   `toml:"version"`
-	Name          string   `toml:"name"`
-	Launcher      string   `toml:"launcher"`
-	Description   string   `toml:"description"`
-	Homepage      string   `toml:"homepage"`
-	Author        string   `toml:"author"`
-	IsolatedLogin bool     `toml:"isolated_login"`
-	Source        *Source  `toml:"source,omitempty"`
-	Update        *Update  `toml:"update,omitempty"`
-	Env           *Env     `toml:"env,omitempty"`
-	Sandbox       *Sandbox `toml:"sandbox,omitempty"`
+	Version       string `toml:"version"`
+	Name          string `toml:"name"`
+	Launcher      string `toml:"launcher"`
+	Description   string `toml:"description"`
+	Homepage      string `toml:"homepage"`
+	Author        string `toml:"author"`
+	IsolatedLogin bool   `toml:"isolated_login"`
+	// ModelPickerDefaults is the model_picker_defaults property: "excluded"
+	// keeps the DEFAULTS model rows out of this playbook's launches; empty
+	// (or "inherited") lets them in (SPEC.md, "Model picker").
+	ModelPickerDefaults string   `toml:"model_picker_defaults"`
+	Source              *Source  `toml:"source,omitempty"`
+	Update              *Update  `toml:"update,omitempty"`
+	Env                 *Env     `toml:"env,omitempty"`
+	Sandbox             *Sandbox `toml:"sandbox,omitempty"`
 
 	// MCP records, per MCP server a statement declared, the variables cpb
 	// derived for its secret references, so dropping the server forgets
@@ -610,6 +624,9 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.IsolatedLogin {
 		fmt.Fprintf(&b, "isolated_login = true\n")
+	}
+	if m.ModelPickerDefaults == ModelPickerDefaultsExcluded {
+		fmt.Fprintf(&b, "model_picker_defaults = %s\n", QuoteTOML(m.ModelPickerDefaults))
 	}
 	if m.Source != nil {
 		b.WriteString("\n[source]\n")

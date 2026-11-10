@@ -5,7 +5,7 @@ cfg=$(cd "$(mktemp -d)" && pwd -P)
 printf '{"theme": "dark"}\n' > "$cfg/settings.json"
 cpb APPLY recipe.cpb TO "$cfg" --dry-run | grep -q "back up $cfg/settings.json"
 cpb APPLY recipe.cpb TO "$cfg" --yes
-python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"]=="claude-sonnet-5" and s["theme"]=="dark", s' "$cfg/settings.json"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"]=="sonnet" and s["theme"]=="dark", s' "$cfg/settings.json"
 ls "$cfg"/settings.json.cpb-backup-* >/dev/null
 rm -rf "$cfg"
 # The same plan for a program: one JSON object, schema 1, a target on every statement.

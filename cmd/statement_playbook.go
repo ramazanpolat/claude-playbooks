@@ -134,7 +134,18 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		switch c.Kind {
 		case grammar.SetProperties:
-			// login and global_instructions are the creation's own.
+			// login and global_instructions are the creation's own;
+			// model_picker_defaults is an ALTER of the new playbook.
+			rest := c
+			rest.Settings = nil
+			for _, v := range c.Settings {
+				if v.Key == "model_picker_defaults" {
+					rest.Settings = append(rest.Settings, v)
+				}
+			}
+			if len(rest.Settings) > 0 {
+				after = append(after, rest)
+			}
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link,
 			grammar.Launcher, grammar.NoLauncher:
 			// the creation's own
