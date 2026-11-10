@@ -125,7 +125,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 
 ## Built to be relied on
 
-- **Tested on every change:** CI applies all 24 examples and, on Linux and
+- **Tested on every change:** CI applies all 25 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
   same. A full arena regression runs on the exact commit each release is
   tagged from.
@@ -140,7 +140,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | base -> an agent -> a team layer, as recipes |
-| [Examples 01-23](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI, `cpb play` and accounts, all applied in CI |
+| [Examples 01-25](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI, `cpb play` and accounts, all applied in CI |
 | [Ask in plain words](docs/guides/assistant.md) | `cpb ask "<request>"` shows the cpb command that does it |
 | [Guides](docs/README.md) · [SPEC.md](SPEC.md) | how-tos for every area · every statement, command, file and output format: the contract |
 | [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) | what changed in each release · development |

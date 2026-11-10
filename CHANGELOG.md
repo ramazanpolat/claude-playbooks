@@ -1,6 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [v4.6.0] -- 2026-11-10
+
+v4.6.0 keeps every playbook's `/model` menu current when a new model ships.
+One statement per machine, `ALTER DEFAULTS ADD MODEL` with Claude Code's
+aliases (`opus`, `sonnet`, `haiku`, `fable`), gives every playbook a row per
+family that follows each Claude Code release: the playbooks you have and
+the ones you create later, with nothing written into them.
+
+**Nothing changes until that statement is run.** With no DEFAULTS model
+rows, a launch passes `claude` exactly the arguments it passed before. The
+statement is in [the guide](docs/guides/new-model.md).
+
+cpb also names a model id pinned to one release wherever it is set or shown.
 
 ### Added
 

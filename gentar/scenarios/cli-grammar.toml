@@ -23,8 +23,8 @@
 # for the plugin clauses, and DESCRIBE (29 assertions in all: 28 commands,
 # 1 file).
 # v4.0.0-rc2: a playbook whose manifest cannot be read is contained.
-# Unreleased: a setting set more than once is written once, so a stack converges.
-# Unreleased: DEFAULTS model rows offered at every launch (a playbook made
+# v4.0.0-rc3: a setting set more than once is written once, so a stack converges.
+# v4.6.0: DEFAULTS model rows offered at every launch (a playbook made
 # before the statement and one made after it, an excluded one), and the note
 # and mark for a pinned model id.
 
@@ -507,7 +507,7 @@ echo unreadable-ok'''
 contains = "unreadable-ok"
 
 [[verify.commands]]
-# A setting set more than once is written once (unreleased): a base recipe
+# A setting set more than once is written once (v4.0.0-rc3): a base recipe
 # and a child that sets the same keys again converge (the second APPLY
 # changes nothing), the run names what was overridden and where, and the
 # child's values win.

@@ -1570,7 +1570,7 @@ ALTER PLAYBOOK router-agent
 
 #### DEFAULTS model rows: offered at every launch
 
-`ALTER DEFAULTS ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']` and
+Since v4.6.0, `ALTER DEFAULTS ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']` and
 `ALTER DEFAULTS DROP MODEL '<id>'` keep model picker rows for every playbook, existing and future:
 
 ```

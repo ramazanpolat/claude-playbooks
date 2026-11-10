@@ -15,7 +15,7 @@ A server row can name the previous release for a while. With Claude Code 2.1.322
 
 ## One statement, once per machine
 
-Give every playbook a row per family, written as the alias:
+With cpb v4.6.0 or newer, give every playbook a row per family, written as the alias:
 
 ```
 cpb "ALTER DEFAULTS
@@ -33,6 +33,7 @@ That is all. When the next model ships, there is nothing to run.
 - When the menu already offers the newest model of a family, the alias row is the same model, and Claude Code shows it once.
 - When a server row lags, the alias row is the one that offers the newest model beside it.
 - A row the playbook already has with the same model id is not repeated.
+- A playbook row `fable[1m]` and a DEFAULTS row `fable` are different ids to cpb, so the launch passes both, but they name the same model, and Claude Code shows one: the playbook's, which comes first.
 
 **Checking it.** `cpb SHOW DEFAULTS` lists the rows. `cpb EXPLAIN PLAYBOOK <name>` says what a launch adds:
 
