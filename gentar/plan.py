@@ -5,6 +5,7 @@
 
     gentar/plan.py plan     # what should THIS CI event run?  (the kit's plan job)
     gentar/plan.py lint     # bench-free adaptation checks    (part of run.sh --check)
+    gentar/plan.py review <ref>   # what changed since <ref>      (part of run.sh --review)
     gentar/plan.py route    # [secrets] route, one name a line (run.sh maps the slots)
 
 The policy is declared in gentar/policy.toml at adaptation (AGENTS.md,
@@ -17,7 +18,7 @@ it on a GitHub-hosted runner (or the one GENTAR_CI_RUNNER names, never the
 bench's) BEFORE any job may touch the self-hosted bench runner:
 a pull request's code never reaches the bench-host unless this says so.
 
-Phases (the pilot's words: phase 1 for every PR, phase 2 only when asked):
+Phases (phase 1 for every PR, phase 2 only when asked):
 
   phase 1   every PR and every push to the default branch
               checks   bench-free, on a GitHub-hosted runner (run.sh --check)
@@ -66,6 +67,10 @@ HERE = Path(__file__).resolve().parent            # <repo>/gentar
 SCENARIOS = HERE / "scenarios"
 POLICY = HERE / "policy.toml"
 NAME = re.compile(r"[A-Za-z0-9._-]+")
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")       # the engine's rule
+# Labels GitHub gives every self-hosted runner (lowercase; labels match
+# case-insensitively).
+DEFAULT_RUNNER_LABELS = {"self-hosted", "linux", "macos", "windows", "x64", "arm", "arm64"}
 
 PHASE2_TRIGGERS = ("dispatch", "arena", "rc")
 SETUP_TOOLS = ("go", "node", "python")
@@ -131,8 +136,9 @@ _LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)
 
 # The kit files --check compares byte for byte against the pinned engine's
 # copies. hooks.py, policy.toml and the scenarios are the subject's own.
-# OPTIONAL ones may be absent: a central-dispatch subject has no own-arena
-# workflow, and a repo that never releases needs no release gate.
+# OPTIONAL ones may be absent: a repo that runs its arena only by hand has
+# no workflow, a repo that never releases needs no release gate, and one
+# outside mirror mode no mirror.sh.
 KIT_FILES = {
     "gentar/run.sh": "subject-template/gentar/run.sh",
     "gentar/dryrun.py": "subject-template/gentar/dryrun.py",
@@ -317,25 +323,123 @@ FIXTURES = HERE / "judge-fixtures"
 MIN_FIXTURES = 3
 
 
-def judged_suites():
+def _load(f):
+    """A suite's TOML, read as the engine reads it: bytes, decoded as UTF-8
+    whatever the locale (agy on #96). Raises TOMLDecodeError or
+    UnicodeDecodeError."""
+    with open(f, "rb") as fh:
+        return tomllib.load(fh)
+
+
+def _judged_parts(data):
+    """The engine's TomlScenario.uses_judge, on the parsed TOML: a judged
+    turn, a goal pilot, or a soft [[verify.judge]] check. One rule for
+    plan, lint and run.sh (`scenarios`); a test holds it to the engine's."""
+    driver = data.get("driver")
+    driver = driver if isinstance(driver, dict) else {}   # the engine refuses a
+    turns = driver.get("turns")                           # scalar; this must not
+    turns = turns if isinstance(turns, list) else []      # crash on one (agy)
+    verify = data.get("verify")
+    verify = verify if isinstance(verify, dict) else {}
+    idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
+    goal = bool(driver.get("goal"))
+    soft = bool(verify.get("judge"))
+    return idx, goal, soft
+
+
+def _identity(f, data):
+    """A suite is its file name, everywhere. The engine names a suite by
+    `[scenario] name` (the file name when absent), but run.sh sweeps,
+    forwards and guards by file name and plan selects by it: a `name` that
+    differed broke the sweep and let `run.sh <name>` pass the pull request
+    guard under a name with no file (ground-up review A7, GB2)."""
+    if not NAME.fullmatch(f.stem):
+        raise Refuse(f"{f.name}: a suite file name is letters, digits, dot, dash, "
+                     f"underscore")
+    sc = data.get("scenario", {})
+    if not isinstance(sc, dict):
+        raise Refuse(f"{f.name}: [scenario] must be a table")
+    name = sc.get("name", f.stem)
+    if name != f.stem:
+        raise Refuse(f"{f.name}: [scenario] name = {name!r} differs from the file name; "
+                     f"the kit runs a suite by its file name, so remove `name` or rename "
+                     f"the file to {name}.toml")
+    return sc
+
+
+def judged_suites(strict=True):
     """Suites with a judged (semantic) turn: they send screens to a judge,
-    so they never run in phase 1 and need fixtures (AGENTS.md decision 7)."""
+    so they never run in phase 1 and need fixtures (AGENTS.md decision 7).
+    Not strict (lint), a suite with no clear identity is skipped here: lint
+    lists it among its problems."""
     out = {}
     for f in sorted(SCENARIOS.glob("*.toml")):
         try:
-            data = tomllib.loads(f.read_text())
-        except tomllib.TOMLDecodeError:
+            data = _load(f)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
             continue
-        driver = data.get("driver") or {}
-        turns = driver.get("turns") or []
-        idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
-        goal = bool(driver.get("goal"))
-        soft = bool((data.get("verify") or {}).get("judge"))
+        try:
+            sc = _identity(f, data)
+        except Refuse:
+            if strict:
+                raise
+            continue
+        idx, goal, soft = _judged_parts(data)
         if idx or goal or soft:
-            name = (data.get("scenario") or {}).get("name", f.stem)
-            out[name] = {"turns": idx, "goal": goal,
-                         "data": (data.get("scenario") or {}).get("data", ""), "file": f.name}
+            out[f.stem] = {"turns": idx, "goal": goal, "data": sc.get("data", ""),
+                           "file": f.name}
     return out
+
+
+def scenario_facts(directory=None):
+    """What run.sh needs from each suite, read with a TOML parser.
+
+    run.sh read these with awk and grep, and diverged from the engine
+    (ground-up review A7): a step printing `goal=1` made a suite judged, a
+    comment holding triple quotes hid the [scenario] table, and
+    `credentials = []` read as a credential never set. A suite that does
+    not parse, or that the engine would refuse for these fields, is
+    refused here, before anything runs."""
+    facts = []
+    for f in sorted((directory or SCENARIOS).glob("*.toml")):
+        try:
+            data = _load(f)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+            raise Refuse(f"{f.name}: not valid TOML: {exc}")
+        facts.append(_suite_facts(f, data))
+    return facts
+
+
+def _suite_facts(f, data):
+    """One suite's facts, or Refuse. lint lists the same refusals, so
+    --check names every problem run.sh would refuse (agy on #96)."""
+    sc = _identity(f, data)
+    for table in ("driver", "verify"):
+        if table in data and not isinstance(data[table], dict):
+            raise Refuse(f"{f.name}: {table} must be a table — write [{table}]")
+    subject = sc.get("subject", "")
+    if not isinstance(subject, str) or (subject and not NAME.fullmatch(subject)):
+        raise Refuse(f"{f.name}: bad subject name: {subject!r} (letters, digits, dot, "
+                     f"dash, underscore)")
+    creds = sc.get("credentials", [])
+    env = sc.get("pass_env", [])
+    if not isinstance(creds, list) or not isinstance(env, list):
+        raise Refuse(f"{f.name}: scenario.credentials and scenario.pass_env are lists")
+    groups = []
+    for i, entry in enumerate(creds):
+        names = entry if isinstance(entry, list) else [entry]
+        if not names or any(not isinstance(n, str) or not ENV_NAME.fullmatch(n)
+                            for n in names):
+            raise Refuse(f"{f.name}: scenario.credentials[{i}] must be an env var name "
+                         f"or a flat list of them (a group that travels together)")
+        groups.append(names)
+    for i, n in enumerate(env):
+        if not isinstance(n, str) or not ENV_NAME.fullmatch(n):
+            raise Refuse(f"{f.name}: scenario.pass_env[{i}] must be an env var name")
+    idx, goal, soft = _judged_parts(data)
+    forwarded = list(dict.fromkeys([n for g in groups for n in g] + env))
+    return {"stem": f.stem, "subject": subject, "judged": bool(idx or goal or soft),
+            "groups": groups, "forwarded": forwarded}
 
 
 def _no_judged(names):
@@ -354,9 +458,24 @@ def ci_runner(env):
     in runs-on); this is the same value, checked where it can be tested.
     Never the bench runner: the checks run pull request code, and the
     `arena` label is where benches are driven from."""
+    # The bench label is checked whatever GENTAR_CI_RUNNER says: the bench
+    # job runs on it (agy on #98). Unstripped, as the workflow reads it, so
+    # a stray space is refused here instead of queueing on a label no
+    # runner has; never a default label, which every self-hosted runner
+    # carries, so the bench job and its secrets could land on any of them.
+    bench = env.get("GENTAR_BENCH_LABEL") or ""
+    if bench and (not NAME.fullmatch(bench) or bench.lower() in DEFAULT_RUNNER_LABELS):
+        raise Refuse(f"GENTAR_BENCH_LABEL must be one runner label of the bench runner's own, "
+                     f"not a default one ({', '.join(sorted(DEFAULT_RUNNER_LABELS))}): {bench!r}")
     raw = (env.get("GENTAR_CI_RUNNER") or "").strip()
     if not raw:
         return None
+    # runs-on reads the DECODED value, and the workflow's guard the raw
+    # text: `"\u0061rena"` passed the one and named the bench runner in the
+    # other (Codex on #98). No runner label needs an escape.
+    if "\\" in raw:
+        raise Refuse(f"GENTAR_CI_RUNNER holds a JSON escape (a backslash): {raw!r}; write "
+                     f"the labels plainly")
     try:
         value = json.loads(raw)
     except ValueError:
@@ -367,13 +486,25 @@ def ci_runner(env):
             or not all(isinstance(x, str) and NAME.fullmatch(x) for x in labels)):
         raise Refuse(f"GENTAR_CI_RUNNER must be a runner label or a list of them: {raw!r}")
     # Case-insensitive and by substring, exactly as the workflow's own
-    # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`):
-    # runner labels match regardless of case, so `Arena` IS the bench
-    # runner (Codex).
-    if "arena" in raw.lower():
-        raise Refuse("GENTAR_CI_RUNNER names the `arena` label (or a label containing "
-                     "'arena', in any case): the checks run pull request code and must "
-                     "never land on the bench runner")
+    # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`, and
+    # the same for GENTAR_BENCH_LABEL): runner labels match regardless of
+    # case, so `Arena` IS the bench runner (Codex). A bench runner labelled
+    # otherwise (`my-bench`, say) is caught by its own label.
+    for label in ["arena"] + ([bench] if bench else []):
+        if label.lower() in raw.lower():          # no escapes (above): raw IS decoded
+            raise Refuse(f"GENTAR_CI_RUNNER names the bench runner's label {label!r} (or a "
+                         f"label containing it, in any case): the checks run pull request "
+                         f"code and must never land on the bench runner")
+    # A job lands on any runner that carries ALL its labels. Default labels
+    # alone (`self-hosted`, `linux`, `x64`, ...) are carried by every
+    # self-hosted runner, the bench runner included (ground-up review C4,
+    # SB03): the CI runner must be picked by a label of its own. Checked
+    # here, after plan was scheduled, since the workflow cannot loop over a
+    # list; it still stops the checks, and fails the run loudly.
+    if all(x.lower() in DEFAULT_RUNNER_LABELS for x in labels):
+        raise Refuse(f"GENTAR_CI_RUNNER {raw} names only default runner labels, which "
+                     f"every self-hosted runner carries, the bench runner included: add a "
+                     f"label only your CI runner has, e.g. [\"self-hosted\", \"linux-ci\"]")
     return labels
 
 
@@ -391,7 +522,7 @@ def plan(env, policy):
     res = {"checks": False, "bench": "none", "suites": [], "reason": "",
            "setup": {}, "os": ["ubuntu-latest"], "route": route_names(policy)}
     runner = ci_runner(env)
-    # Where plan and checks ran, in the plan output (claude-playbooks-dc):
+    # Where plan and checks ran, in the plan output:
     # a subject can see it without reading repository settings.
     res["runner"] = json.dumps(runner) if runner else "github-hosted"
     if runner is not None:
@@ -584,9 +715,14 @@ def lint(policy, engine_root):
     #    dropped (the first real adopter's bug). Nest the pair.
     for f in sorted(SCENARIOS.glob("*.toml")):
         try:
-            data = tomllib.loads(f.read_text())
-        except tomllib.TOMLDecodeError as exc:
+            data = _load(f)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
             problems.append(f"{f.name}: not valid TOML: {exc}")
+            continue
+        try:
+            _suite_facts(f, data)
+        except Refuse as exc:                 # listed with the rest, not alone
+            problems.append(str(exc))
             continue
         creds = (data.get("scenario") or {}).get("credentials") or []
         flat = [c for c in creds if isinstance(c, str)]
@@ -606,8 +742,8 @@ def lint(policy, engine_root):
             continue                      # an older engine without this file
         if not a.exists():
             if mine in OPTIONAL_KIT_FILES:
-                print(f"note: {mine} not present (fine for a central-dispatch subject, "
-                      f"or one that does not gate releases)")
+                print(f"note: {mine} not present (fine for a repo without the kit's CI "
+                      f"workflow, a release gate or the arena mirror)")
             else:
                 problems.append(f"{mine}: missing (copy it from the kit)")
         elif a.read_bytes() != b.read_bytes():
@@ -620,7 +756,7 @@ def lint(policy, engine_root):
                     f"(or list it in [check] allow_drift, and own the difference)")
     # 3. judged suites: synthetic data declared, phase 2 only, fixtures to
     #    measure them with (bin/judge-eval in the engine).
-    judged = judged_suites()
+    judged = judged_suites(strict=False)
     floor = set((policy or {}).get("phase1", {}).get("floor", []))
     for name, j in sorted(judged.items()):
         if j["data"] != "synthetic":
@@ -631,7 +767,10 @@ def lint(policy, engine_root):
                             f"judged suites run in phase 2 only")
         if j.get("goal"):
             gdir = FIXTURES / name / "goal"
-            picks = {d.name: len(list(d.glob("*.txt"))) for d in gdir.glob("*") if d.is_dir()}
+            # an action counts only with a screen in it: an empty `done/`
+            # covered nothing (agy on #99)
+            picks = {d.name: n for d in gdir.glob("*")
+                     if d.is_dir() and (n := len(list(d.glob("*.txt"))))}
             if sum(picks.values()) < MIN_FIXTURES or "done" not in picks or len(picks) < 2:
                 problems.append(
                     f"{j['file']}: its goal pilot needs {MIN_FIXTURES}+ fixture screens under "
@@ -650,11 +789,14 @@ def lint(policy, engine_root):
     asked = set()
     for f in sorted(SCENARIOS.glob("*.toml")):
         try:
-            sc = tomllib.loads(f.read_text()).get("scenario") or {}
-        except tomllib.TOMLDecodeError:
+            sc = _load(f).get("scenario") or {}
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
             continue                          # reported by check 1
-        for c in (sc.get("credentials") or []) + (sc.get("pass_env") or []):
-            asked.update([c] if isinstance(c, str) else [x for x in c if isinstance(x, str)])
+        listed = [v for v in (sc.get("credentials"), sc.get("pass_env"))
+                  if isinstance(v, list)]          # anything else: check 1 says so
+        for c in [c for v in listed for c in v]:
+            asked.update([c] if isinstance(c, str)
+                         else [x for x in c if isinstance(x, str)] if isinstance(c, list) else [])
     for n in route_names(policy):
         if n not in asked:
             problems.append(f"policy.toml: [secrets] route has {n}, but no suite declares it "
@@ -668,6 +810,89 @@ def lint(policy, engine_root):
         print(f"note: {wf} is allowed to drift, so 'no pull_request job reaches "
               f"the self-hosted runner unless the plan says so' is NOT verified")
     return problems
+
+
+# Never staged, from git or not: gentar/.arena holds .env and the bench key,
+# gentar/reports holds old verdicts, and .git holds the job's auth header on
+# CI (stage-git builds a fresh one when the policy asks for history).
+STAGE_EXCLUDE = (".git", "gentar/.arena", "gentar/reports")
+
+
+def shipped_files(repo: str):
+    """What git would ship from `repo`, relative and sorted: tracked files
+    plus the untracked ones it does not ignore (`git ls-files --cached
+    --others --exclude-standard`). A submodule or nested repository is
+    listed by its own git, so its ignored files stay out too and its .git
+    never comes along; one with nothing checked out is an empty directory
+    (a trailing `/`). None when `repo` has no .git of its own: not a work
+    tree root, so it is staged whole, as before. Refuses when git cannot
+    list a repo that has a .git: falling back to the whole tree would ship
+    exactly the files this exists to keep out."""
+    import subprocess
+
+    if not os.path.lexists(os.path.join(repo, ".git")):
+        return None
+    # The repo's own config must not run anything here (core.fsmonitor is a
+    # program git starts for ls-files), and an outer GIT_DIR/GIT_WORK_TREE
+    # must not redirect git to another repository (agy on #92).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+                        "-C", repo, "ls-files", "-z", "--cached", "--others",
+                        "--exclude-standard"], capture_output=True, env=env)
+    if r.returncode != 0:
+        raise Refuse(f"stage-tree: git ls-files in {repo} failed: "
+                     f"{r.stderr.decode(errors='replace').strip()[:300]}")
+    out = []
+    # A path is listed once per merge stage while a conflict is open.
+    for rel in sorted({os.fsdecode(p).rstrip("/") for p in r.stdout.split(b"\0") if p}):
+        src = os.path.join(repo, rel)
+        if any(rel == x or rel.startswith(x + "/") for x in STAGE_EXCLUDE):
+            continue
+        # A tracked directory replaced by a symlink (not yet staged): git still
+        # lists the old children, which now resolve through the link. The
+        # link ships as a link; its "children" are not files of this repo
+        # (Codex on #92).
+        parts = rel.split("/")
+        if any(os.path.islink(os.path.join(repo, *parts[:i])) for i in range(1, len(parts))):
+            continue
+        if os.path.isdir(src) and not os.path.islink(src):
+            inner = shipped_files(src)
+            out += [f"{rel}/{p}" for p in inner] if inner else [rel + "/"]
+        elif os.path.lexists(src):                 # tracked but deleted on disk: gone
+            out.append(rel)
+    return out
+
+
+def stage_tree(repo: str, dest: str) -> str:
+    """Copy the subject's files from `repo` into `dest` (an empty directory):
+    in a git work tree, only what git would ship (shipped_files), so a
+    gitignored .env, .npmrc or build output never reaches a bench (C2).
+    Without a .git, the whole tree minus STAGE_EXCLUDE, by the same tar
+    pipe run.sh used before. Symlinks are copied as links, never followed.
+    Returns how it staged, for the log line."""
+    import subprocess
+
+    dest = os.path.abspath(dest)
+    files = shipped_files(repo)
+    if files is None:
+        pack = subprocess.Popen(["tar", *(f"--exclude=./{x}" for x in STAGE_EXCLUDE),
+                                 "-cf", "-", "."], cwd=repo, stdout=subprocess.PIPE)
+        unpack = subprocess.run(["tar", "-xf", "-", "-C", dest], stdin=pack.stdout)
+        pack.stdout.close()
+        if pack.wait() != 0 or unpack.returncode != 0:
+            raise Refuse(f"stage-tree: copying {repo} into {dest} failed")
+        return "the whole tree (not a git work tree)"
+    for rel in files:
+        src, dst = os.path.join(repo, rel), os.path.join(dest, rel)
+        if rel.endswith("/"):
+            os.makedirs(dst, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.islink(src):
+            os.symlink(os.readlink(src), dst)
+        elif os.path.isfile(src):
+            shutil.copy2(src, dst)
+    return f"{len(files)} file(s) git would ship (ignored files left out)"
 
 
 def stage_git(repo: str, dest: str) -> None:
@@ -700,9 +925,150 @@ def stage_git(repo: str, dest: str) -> None:
     git("-C", dest, "reset", "-q")                 # the index matches HEAD; files are the copy's
 
 
+# --- review: what changed since <ref> ------------------------------------
+#
+# run.sh --review's second half. The first half (in run.sh) compares names:
+# what the repo ships against what the suites mention. Its blind spot is a
+# change INSIDE a file a suite already names -- a new statement in an
+# existing binary. This half closes that from the other side: it starts from
+# the commits, not the names, so every changed path is listed whether or not
+# a suite mentions it, and each suite that mentions one is named for
+# re-reading. Deterministic: git objects only (the ref and HEAD, never the
+# working tree), sorted output, no network, no bench. It reports; it never
+# fails a build.
+REF_SAFE = re.compile(r"[A-Za-z0-9._/~^@{}-]+")
+# Same exclusions as run.sh's candidate list: the kit and the tests are not
+# what a fresh machine runs.
+NOT_SHIPPED = re.compile(r"^(gentar|test|tests|\.github)/")
+
+
+def _git(repo, *args):
+    import subprocess
+    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Refuse(f"git {' '.join(args[:2])}: {r.stderr.strip() or 'failed'}")
+    return r.stdout
+
+
+def _executables(repo, rev):
+    """Paths at `rev` a fresh machine can RUN: the executable bit, or bin/."""
+    out = set()
+    for rec in _git(repo, "ls-tree", "-r", "-z", rev).split("\0"):
+        if not rec:
+            continue
+        meta, path = rec.split("\t", 1)
+        mode = meta.split()[0]
+        if (mode == "100755" or path.startswith("bin/")) and not NOT_SHIPPED.match(path):
+            out.add(path)
+    return out
+
+
+def suite_mentions(text):
+    """Every token a suite uses, split on path separators -- run.sh's rule,
+    so `./install.sh` and `bin/tool` count as mentions of their basenames."""
+    lines = [l for l in text.splitlines() if not l.lstrip().startswith("#")]
+    return set(t for t in re.split(r"[^A-Za-z0-9_.-]+", "\n".join(lines)) if t)
+
+
+def _mentioned(path, tokens):
+    base = path.rsplit("/", 1)[-1]
+    return bool(base) and (base in tokens or base.rsplit(".", 1)[0] in tokens)
+
+
+def review(repo, since):
+    if since.startswith("-") or not REF_SAFE.fullmatch(since):
+        raise Refuse(f"bad ref: {since!r}")
+    try:
+        old = _git(repo, "rev-parse", "-q", "--verify", f"{since}^{{commit}}").strip()
+    except Refuse:
+        raise Refuse(f"ref {since!r} not found here (a shallow CI checkout needs "
+                     f"fetch-depth: 0)") from None
+    new = _git(repo, "rev-parse", "HEAD").strip()
+    changes = []                                   # (status, path, old path)
+    recs = _git(repo, "diff", "--name-status", "-z", "-M", old, new).split("\0")
+    i = 0
+    while i < len(recs) and recs[i]:
+        st = recs[i][0]
+        if st in "RC":
+            changes.append((st, recs[i + 2], recs[i + 1]))
+            i += 3
+        else:
+            changes.append((st, recs[i + 1], None))
+            i += 2
+    # Outside gentar/ only. A move ACROSS the boundary keeps its outside
+    # side: a subject file moved into gentar/ is gone from the subject, and
+    # a suite naming it must be re-read (Codex on #53).
+    ours = []
+    for st, path, frm in changes:
+        in_new = path.startswith("gentar/")
+        in_old = frm is not None and frm.startswith("gentar/")
+        if frm is None or (not in_new and not in_old):
+            if not in_new:
+                ours.append((st, path, frm))
+        elif in_new and not in_old:
+            if st == "R":
+                ours.append(("D", frm, None))
+        elif not in_new and in_old:
+            ours.append(("A", path, None))
+    was, now = _executables(repo, old), _executables(repo, new)
+    # The suites as committed at HEAD, like the diff: an uncommitted edit to a
+    # scenario must not move a changed path into "covered" (Codex).
+    rel = "./" + os.path.relpath(SCENARIOS, repo).replace(os.sep, "/")
+    # not -r: the scenarios directory's own files, as run.sh globs them
+    names = sorted(n for n in _git(repo, "ls-tree", "-z", "--name-only", new, rel + "/")
+                   .split("\0") if n.endswith(".toml"))
+    suites = {n.rsplit("/", 1)[-1]: suite_mentions(_git(repo, "show", f"{new}:./{n}"))
+              for n in names}
+
+    label = old[:12] if old.startswith(since) else f"{since} ({old[:12]})"
+    lines = [f"since {label} .. HEAD ({new[:12]})", ""]
+    lines.append(f"changed paths outside gentar/: {len(ours)}")
+    for st, path, frm in sorted(ours, key=lambda c: c[1]):
+        lines.append(f"  {st}  {frm} -> {path}" if frm else f"  {st}  {path}")
+    added, removed = sorted(now - was), sorted(was - now)
+    lines += ["", "executables:"]
+    lines += [f"  added    {p}" for p in added] + [f"  removed  {p}" for p in removed]
+    changed_exe = sorted(p for st, p, _ in ours if p in now and p in was and st == "M")
+    lines += [f"  changed  {p}" for p in changed_exe]
+    if not (added or removed or changed_exe):
+        lines.append("  (none)")
+    touched = {p for _, p, _ in ours} | {f for _, _, f in ours if f}
+    lines += ["", "suites that mention a changed path (re-read them):"]
+    unmentioned = set(touched)
+    hits = 0
+    for name, tokens in suites.items():
+        paths = sorted(p for p in touched if _mentioned(p, tokens))
+        unmentioned -= set(paths)
+        if paths:
+            hits += 1
+            lines.append(f"  {name:<28} {', '.join(paths)}")
+    if not hits:
+        lines.append("  (none)")
+    lines += ["", "changed paths no suite mentions:"]
+    lines += [f"  {p}" for p in sorted(unmentioned)] or ["  (none)"]
+    lines += ["", "not covered here: --help output per executable (it needs the binaries",
+              "run, which belongs on a bench, not on this host)."]
+    return "\n".join(lines)
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     try:
+        if cmd == "stage-tree" and len(argv) == 4:   # needs no policy
+            print(f"staged: {stage_tree(argv[2], argv[3])}", file=sys.stderr)
+            return 0
+        if cmd == "review" and len(argv) == 3:    # needs no policy: a broken
+            print(review(HERE.parent, argv[2]))   # one must not hide the diff
+            return 0
+        if cmd == "scenarios" and len(argv) == 2:   # run.sh's view of the suites
+            # One tab-separated line per suite: file stem, subject, judged
+            # (1/0), credential groups (`;` between groups, a space between
+            # names), every name forwarded (credentials, then pass_env).
+            for x in scenario_facts():
+                print("\t".join([x["stem"], x["subject"], "1" if x["judged"] else "0",
+                                 ";".join(" ".join(g) for g in x["groups"]),
+                                 " ".join(x["forwarded"])]))
+            return 0
         policy = load_policy()
         if cmd == "plan":
             emit(plan(os.environ, policy))
@@ -740,7 +1106,8 @@ def main(argv):
         print(f"plan: {exc}", file=sys.stderr)
         return 2
     print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | arena-config | "
-          "route | stage-git <repo> <dest>",
+          "route | scenarios | stage-tree <repo> <dest> | stage-git <repo> <dest> | "
+          "review <ref>",
           file=sys.stderr)
     return 2
 

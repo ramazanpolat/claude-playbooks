@@ -17,11 +17,17 @@ same way.
 What it is NOT: a bench. There is no sandbox, no template, no network policy,
 no real agent. It proves the shell and the assertions; the arena still proves
 the isolation. Suites declaring `credentials` are skipped -- they need a real
-agent and a real key. Suites whose [driver] uses `pick` or `abort` turns, a judged `expect`, or a
-goal pilot come back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
-picker that never matched or a danger gate that never fired must not read as
-a pass. A suite with `bench_only = "<why>"` in [scenario] is UNVERIFIED too,
-with its reason, and is not run (GENTAR_DRYRUN_BENCH_ONLY=run runs it).
+agent and a real key. Suites whose [driver] uses `pick`, `key` or `abort`
+turns, a judged `expect`, or a goal pilot come back UNVERIFIED with a nonzero
+exit: those turns need the real driver, and a picker that never matched or a
+danger gate that never fired must not read as a pass. For `pick`, `key` and
+`abort`, the turns before the first such turn are replayed; the drive stops
+there, and neither the later turns nor the suite's assertions run. A suite
+with a judged `expect` or a goal pilot is not driven at all, so none of its
+turns is checked. A failing step, or a failing turn replayed before a `pick`,
+`key` or `abort`, is still a FAILURE. A suite with `bench_only = "<why>"` in
+[scenario] is UNVERIFIED too, with its reason, and is not run
+(GENTAR_DRYRUN_BENCH_ONLY=run runs it).
 
 The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
@@ -156,23 +162,23 @@ def stage_subject(workspace: str) -> None:
     workspace, so $WORKSPACE_DIR contains the checkout at its root and
     steps can write alongside it without dirtying anything real. The
     same must hold here or a suite that passes locally and fails in the
-    bench (or worse, the reverse) is a harness lie. .git, the engine
-    clone and old reports stay out — dead weight on the bench too.
+    bench (or worse, the reverse) is a harness lie. So the copy is
+    run.sh's own, `plan.py stage-tree`: in a git work tree only the files
+    git would ship (a gitignored .env is not on the bench either), and
+    never .git, the engine clone or old reports.
 
     The workspace is a directory UNDER the home, never the home itself
     (the bench's is `<home>/gentar-workspaces/<run>`). Collapsing the
     two made a repo file named `.config/tool` satisfy a `~/.config/tool`
     assertion before any step created it (PR #27 review).
     """
-    def skip(directory, contents):
-        d = Path(directory)
-        if d == REPO:
-            return [".git"]
-        if d == REPO / "gentar":
-            return [c for c in contents if c in (".arena", "reports")]
-        return []
-    shutil.copytree(REPO, workspace, dirs_exist_ok=True, symlinks=True,
-                    ignore=skip)
+    r = subprocess.run([sys.executable, str(_here / "plan.py"), "stage-tree",
+                        str(REPO), workspace], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        print(f"dryrun: refusing: the subject could not be staged\n{r.stderr.strip()}",
+              file=sys.stderr)
+        sys.exit(2)                             # a refusal, as run.sh's would be
 
 
 
@@ -311,6 +317,14 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
         verify_files, verify_commands = sc.files, sc.commands
         if sc.driver_command:
             fails += drive(sc, env, workspace, log, unreplayed)
+            if unreplayed:
+                # The drive stopped at a turn only the real driver can take,
+                # so the assertions describe the end of a drive that did not
+                # happen. Running them turned such a suite into FAILURES
+                # (ground-up review D3): not run, as for a goal pilot.
+                log.append("  assertions: not run — the drive stopped at a turn "
+                           "only the arena can take")
+                verify_files, verify_commands = [], []
 
     # File assertions go through the same shell as the steps, for the
     # same reason the engine runs them inside the bench: `test -e` and
@@ -343,6 +357,14 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
             want = f"  (wanted {c['contains']!r})" if "contains" in c else ""
             log.append(f"  verify {i} FAIL{want}\n    {c['command'][:180]}\n    {(r.stdout + r.stderr).strip()[:300] or '(no output)'}")
 
+    if getattr(sc, "self_report", False):
+        # [verify] self_report: the bench's OTLP span must reach the arena's
+        # ClickHouse and join the run's harness spans. Only the arena has
+        # either, so the suite is not verified here, whatever else passed.
+        unreplayed.append("self-report")
+        fails += 1
+        log.append("  self-report join: needs the arena's ClickHouse — NOT verified here")
+
     if not fails:
         verdict = "ALL PASS"
     elif unreplayed and fails == len(unreplayed):
@@ -350,8 +372,11 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
         # these. Say so instead of either lying (ALL PASS) or crying
         # wolf (FAILURES); the exit code is still nonzero, so CI and the
         # caller treat "unverified" as "not proven".
-        verdict = (f"UNVERIFIED ({', '.join(sorted(set(unreplayed)))} "
-                   "turns need the arena)")
+        kinds = sorted(set(unreplayed) - {"self-report"})
+        parts = [f"{', '.join(kinds)} turns need the arena"] if kinds else []
+        if "self-report" in unreplayed:
+            parts.append("the self-report join needs the arena")
+        verdict = f"UNVERIFIED ({'; '.join(parts)})"
     else:
         verdict = f"{fails} FAILURES"
     print(f"{path.name}: {verdict}")
@@ -418,17 +443,24 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
             if not ok:
                 log.append(f"  turn {i} expect /{t['pattern']}/: pattern never appeared")
         else:
-            # `pick` (navigate a picker by ❯ cursor line) and `abort`
-            # (the danger gate) need the real driver. Counting them as
-            # passes printed ALL PASS for a suite whose picker label was
-            # absent or whose danger gate never fired — a harness lie in
-            # the dangerous direction (PR #27 review). Not replayed is
-            # not verified: the suite is reported UNVERIFIED and the
-            # dry-run does not claim success for it.
-            ok = False
+            # `pick` (navigate a picker by ❯ cursor line), `key` (raw key
+            # events) and `abort` (the danger gate) need the real driver.
+            # Counting them as passes printed ALL PASS for a suite whose
+            # picker label was absent or whose danger gate never fired — a
+            # harness lie in the dangerous direction (PR #27 review). Not
+            # replayed is not verified: the suite is reported UNVERIFIED
+            # and the dry-run does not claim success for it.
+            #
+            # The drive stops here. Every later turn would wait on a screen
+            # this turn was meant to produce, so it timed out and counted
+            # as a FAILURE the suite does not have (ground-up review D3).
             unreplayed.append(kind)
+            rest = len(sc.turns) - i - 1
             log.append(f"  turn {i}: type {kind!r} needs the real driver "
-                       f"— NOT verified here (run it in the arena)")
+                       f"— NOT verified here (run it in the arena)"
+                       + (f"; the {rest} turn(s) after it are not replayed" if rest else ""))
+            fails += 1
+            break
         if not ok:
             fails += 1
     # Drain what is left, but never wait forever: a driver still waiting for

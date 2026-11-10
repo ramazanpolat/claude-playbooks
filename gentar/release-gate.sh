@@ -36,7 +36,7 @@ set -euo pipefail
 
 SHA=${1:-}
 case "$SHA" in
-  ''|*[!0-9a-f]*) echo "usage: gentar/release-gate.sh <full commit sha>" >&2; exit 2 ;;
+  ''|*[!0123456789abcdef]*) echo "usage: gentar/release-gate.sh <full commit sha>" >&2; exit 2 ;;
 esac
 [ "${#SHA}" = 40 ] || { echo "release-gate: need the full 40-character sha" >&2; exit 2; }
 REPO=${GITHUB_REPOSITORY:-}
