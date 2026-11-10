@@ -161,11 +161,11 @@ func askOtherCommand(ctx context.Context, a *account.Account, claudePath string,
 	}
 	lp := &launchPlan{}
 	if len(r.Layer.Refs) > 0 {
-		_, helper, err := resolveHelper()
+		x, err := resolveHelperFor(refValues(r.Layer.Refs))
 		if err != nil {
 			return nil, fmt.Errorf("account %s's credential or headers are secret references, and %w: nothing was sent", a.Name, err)
 		}
-		lp.helper, lp.refs = helper, r.Layer.Refs
+		lp.helper, lp.helperPre, lp.refs = x.path, x.pre, r.Layer.Refs
 		if err := lp.withHeaders(r.Headers); err != nil {
 			return nil, fmt.Errorf("account %s: %w: nothing was sent", a.Name, err)
 		}

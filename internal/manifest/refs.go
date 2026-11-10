@@ -24,6 +24,25 @@ var refPattern = regexp.MustCompile(`^[a-z][a-z0-9+.-]*:.+`)
 // LooksLikeRef reports whether s has the shape of a secret reference.
 func LooksLikeRef(s string) bool { return refPattern.MatchString(s) }
 
+// CPBRefPrefix is the scheme of cpb's default secret helper (SPEC.md,
+// "Secrets"): cpb:<name>, kept in the operating system's own store.
+const CPBRefPrefix = "cpb:"
+
+// cpbRefName is a cpb:<name>'s name: a plain word, so it is the same
+// string in every store and on every command line that names it.
+var cpbRefName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// ValidateCPBRef reports whether a cpb: reference has a valid name; any
+// other scheme is its helper's business and passes. The error quotes no
+// value: a malformed reference may be a pasted secret.
+func ValidateCPBRef(ref string) error {
+	name, ok := strings.CutPrefix(ref, CPBRefPrefix)
+	if !ok || cpbRefName.MatchString(name) {
+		return nil
+	}
+	return fmt.Errorf("a cpb: reference's name is a lowercase letter or digit, then up to 63 of a-z, 0-9, '.', '_' and '-'")
+}
+
 // ValidateRefKey reports whether key may hold a reference. The error names
 // the key and never a value.
 func ValidateRefKey(key string) error {
@@ -46,6 +65,9 @@ func ValidateRefs(refs, set map[string]string, unset []string) error {
 		}
 		if !LooksLikeRef(ref) || strings.ContainsAny(ref, "\x00\n") {
 			return fmt.Errorf("%s: not a secret reference (a scheme such as keychain: or op://, then the rest)", key)
+		}
+		if err := ValidateCPBRef(ref); err != nil {
+			return fmt.Errorf("%s: %w", key, err)
 		}
 		if _, both := set[key]; both {
 			return fmt.Errorf("%s is both set and a reference", key)

@@ -184,6 +184,17 @@ func playConfirmAsk(res *play.Result, interactive bool, question string) error {
 		if a != r.Confirm {
 			return fmt.Errorf("%s was not confirmed; nothing was written", r.Confirm)
 		}
+		// The store step (play_store.go): a reference the plan showed as not
+		// stored yet is asked for now, from this terminal only.
+		if r.Code == play.RiskUsesSecret && storeAfterConfirm[r.Confirm] {
+			if w := storeStepRefusal(r.Confirm, interactive, playYes, playTrustSecret); w != "" {
+				return fmt.Errorf("%s is not stored on this machine, and cpb asks for a value only from your own terminal (%s); nothing was written", r.Confirm, w)
+			}
+			if err := storeSecret(r.Confirm); err != nil {
+				return err
+			}
+			delete(storeAfterConfirm, r.Confirm)
+		}
 	}
 	return nil
 }
@@ -296,9 +307,13 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 		files := []string{setup, recipe}
 
 		// The preview: the recipe, its risks, and the plan of the exact bytes.
+		pending, _ := preparePendingStore(playRefs(res), false, interactive, playYes, playTrustSecret)
 		printPlayCheck(os.Stdout, src, rec, res)
+		printPendingNote(pending, false)
 		fmt.Println("\nWhat it would do, in a throwaway playbook removed when the session ends:")
-		if err := applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, DryRun: true, Yes: true}, nil); err != nil {
+		err = applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, DryRun: true, Yes: true}, nil)
+		donePendingStore()
+		if err != nil {
 			return err
 		}
 		fmt.Println("\n" + sb.Note)

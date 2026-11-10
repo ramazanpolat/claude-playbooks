@@ -301,7 +301,10 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 	}
 	defer done()
 	plan := &grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, DryRun: true, Yes: true, JSON: playJSONF}
+	interactive := isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	pending, _ := preparePendingStore(playRefs(res), playDryRun, interactive, playYes, playTrustSecret)
 	if playDryRun && playJSONF {
+		defer donePendingStore()
 		sb := &playSandbox{Note: keepSandboxNote(sandboxed, res)}
 		if sandboxed {
 			sb.Backend = backend
@@ -309,12 +312,15 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 				sb.Backend = "default"
 			}
 		}
-		block.Sandbox, block.Keep = sb, true
+		block.Sandbox, block.Keep, block.NotStored = sb, true, pending
 		return runPlayApplyJSON(plan, block)
 	}
 	printPlayCheck(os.Stdout, src, rec, res)
+	printPendingNote(pending, playDryRun)
 	fmt.Printf("\nWhat it would do: a playbook %s in your store, with a launcher %s:\n", name, name)
-	if err := applyRun(plan, nil); err != nil {
+	err = applyRun(plan, nil)
+	donePendingStore()
+	if err != nil {
 		return err
 	}
 	printDefaultsNote(defNames, res)
@@ -322,7 +328,7 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 	if playDryRun {
 		return nil
 	}
-	if err := playConfirmAsk(res, isTerminal(os.Stdin) && isTerminal(os.Stdout), fmt.Sprintf("\nKeep this playbook as %s? [y/N] ", name)); err != nil {
+	if err := playConfirmAsk(res, interactive, fmt.Sprintf("\nKeep this playbook as %s? [y/N] ", name)); err != nil {
 		return err
 	}
 	if err := applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, Yes: true}, nil); err != nil {
@@ -672,10 +678,15 @@ func playUpdateRun(name string) error {
 	}
 	defer done()
 	plan := &grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, DryRun: true, Yes: true, JSON: playJSONF}
+	interactive := isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	pending, _ := preparePendingStore(playRefs(res), playDryRun, interactive, playYes, playTrustSecret)
 	if playDryRun && playJSONF {
+		defer donePendingStore()
+		block.NotStored = pending
 		return runPlayApplyJSON(plan, block)
 	}
 	printPlayCheck(os.Stdout, src, rec, res)
+	printPendingNote(pending, playDryRun)
 	fmt.Printf("\nChanges from sha256 %s to %s:\n", shortSHA(recd.SHA256), shortSHA(rec.SHA256))
 	for _, l := range lineDiff(recipeLines(old), recipeLines(rec.Bytes)) {
 		fmt.Println("  " + l)
@@ -684,14 +695,16 @@ func playUpdateRun(name string) error {
 		fmt.Printf("\nNote: %s is pinned, and it now serves different bytes: the tag moved.\n", redactSourceURL(recd.Ref))
 	}
 	fmt.Printf("\nWhat the update would do to %s:\n", name)
-	if err := applyRun(plan, nil); err != nil {
+	err = applyRun(plan, nil)
+	donePendingStore()
+	if err != nil {
 		return err
 	}
 	printDefaultsNote(defNames, res)
 	if playDryRun {
 		return nil
 	}
-	if err := playConfirmAsk(res, isTerminal(os.Stdin) && isTerminal(os.Stdout), fmt.Sprintf("\nUpdate %s to these bytes? [y/N] ", name)); err != nil {
+	if err := playConfirmAsk(res, interactive, fmt.Sprintf("\nUpdate %s to these bytes? [y/N] ", name)); err != nil {
 		return err
 	}
 	if err := applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, Yes: true}, nil); err != nil {

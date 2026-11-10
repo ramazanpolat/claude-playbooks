@@ -45,6 +45,19 @@ func Execute() {
 		}
 		os.Exit(1)
 	}
+	// cpb's default secret helper, which a launch, a reference check or
+	// the store step runs as a process of its own (secret_default.go).
+	if len(os.Args) > 1 && os.Args[1] == secretHelperArg {
+		err := runSecretHelper(os.Args[2:], os.Stdin)
+		if err == nil {
+			os.Exit(0)
+		}
+		if code, ok := exitCode(err); ok {
+			os.Exit(code)
+		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	// Multicall dispatch happens ONLY when invoked through a launcher
 	// symlink: a regular binary installed under a name that happens to
 	// match a playbook must keep the CLI reachable. Within a launcher

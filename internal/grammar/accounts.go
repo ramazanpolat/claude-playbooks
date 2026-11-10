@@ -167,6 +167,9 @@ func (p *parser) accountRef(c *Clause) (bool, *Error) {
 	if !manifest.LooksLikeRef(ref) {
 		return true, errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>' or 'op://<vault>/<item>/<field>' (the value itself is never stored)")
 	}
+	if err := manifest.ValidateCPBRef(ref); err != nil {
+		return true, errAt(r.Pos, err.Error())
+	}
 	p.i++
 	c.Settings = append(c.Settings, Var{Key: k, Ref: ref})
 	return true, nil

@@ -1409,6 +1409,9 @@ func (p *parser) setRef(c *Clause, t Token) *Error {
 	if !manifest.LooksLikeRef(r.Text) {
 		return errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>' or 'op://<vault>/<item>/<field>' (the value itself is never stored)")
 	}
+	if err := manifest.ValidateCPBRef(r.Text); err != nil {
+		return errAt(r.Pos, err.Error())
+	}
 	// Keys whose value cpb itself reads never take a reference, at any
 	// layer (manifest.RefRefusedKeys).
 	if err := manifest.ValidateRefKey(t.Text); err != nil {
@@ -1861,6 +1864,9 @@ func (p *parser) mcpEnv(m *MCP) *Error {
 		if !manifest.LooksLikeRef(r.Text) {
 			return errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>'")
 		}
+		if err := manifest.ValidateCPBRef(r.Text); err != nil {
+			return errAt(r.Pos, err.Error())
+		}
 		m.Env = append(m.Env, Var{Key: t.Text, Ref: r.Text})
 		return nil
 	}
@@ -1904,6 +1910,9 @@ func (p *parser) mcpHeader(m *MCP) *Error {
 		}
 		if !manifest.LooksLikeRef(r.Text) {
 			return errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>'")
+		}
+		if err := manifest.ValidateCPBRef(r.Text); err != nil {
+			return errAt(r.Pos, err.Error())
 		}
 		m.Headers = append(m.Headers, Var{Key: n.Text, Ref: r.Text})
 		return nil
