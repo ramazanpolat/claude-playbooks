@@ -73,7 +73,7 @@ func (keychainStore) read(name string) ([]byte, error) {
 // (-X) it needs no quoting. Without -U it never replaces an item.
 // security's own output is discarded, since an error from it may repeat
 // the command line. security -i exits 0 even when the add fails, so the
-// caller asks the store again (runSecretHelper).
+// caller reads the value back (runSecretHelper).
 func (keychainStore) write(name string, value []byte) error {
 	line := []byte("add-generic-password -s cpb -a " + name + " -l cpb/" + name + " -X ")
 	enc := make([]byte, hex.EncodedLen(len(value)))

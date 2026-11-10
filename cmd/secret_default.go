@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -84,6 +86,55 @@ func cpbRefName(ref string) (string, error) {
 // maxSecretBytes bounds a value read from stdin.
 const maxSecretBytes = 64 << 10
 
+// printableASCII reports whether every byte is a printable ASCII character
+// (space to '~'). The default helper keeps only such values: macOS's
+// security prints any other value as hex when it is read back, so it would
+// not be the value given.
+func printableASCII(v []byte) bool {
+	for _, c := range v {
+		if c < 0x20 || c > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// secretLockDir holds the default helper's per-name store locks: empty
+// files, never a value (a test replaces it).
+var secretLockDir = func() (string, error) {
+	d, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "cpb", "secret-locks"), nil
+}
+
+// lockSecretName holds an exclusive lock on name until the returned
+// function runs, so two default helpers storing the same name never both
+// find it absent. It does not stop another program from writing the item.
+func lockSecretName(name string) (func(), error) {
+	dir, err := secretLockDir()
+	if err == nil {
+		err = os.MkdirAll(dir, 0o700)
+	}
+	var f *os.File
+	if err == nil {
+		f, err = os.OpenFile(filepath.Join(dir, name+".lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	}
+	if err == nil {
+		if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			f.Close()
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the lock for cpb:%s could not be taken (%v); nothing was stored", name, err)
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
 // runSecretHelper is the default helper's process: args follow
 // secretHelperArg. Messages never carry a value.
 func runSecretHelper(args []string, stdin io.Reader) error {
@@ -124,14 +175,8 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		found, err := st.exists(name)
-		if err != nil {
-			return err
-		}
-		if found {
-			// Rotation is add-new, verify, retire old: never in place.
-			return fmt.Errorf("%s is stored already, and cpb never replaces a stored secret: store the new value under a new name", args[1])
-		}
+		// The value is read before the lock is taken, so the lock is never
+		// held while a writer waits on its input.
 		value, err := io.ReadAll(io.LimitReader(stdin, maxSecretBytes+1))
 		defer clear(value)
 		if err != nil {
@@ -140,13 +185,32 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 		if len(value) == 0 || len(value) > maxSecretBytes {
 			return fmt.Errorf("the value is empty or over %d bytes; nothing was stored", maxSecretBytes)
 		}
+		if !printableASCII(value) {
+			return errors.New("cpb's default helper keeps printable ASCII values only (space to '~': no tab, newline or non-ASCII character); nothing was stored. Use a helper of your own for any other value")
+		}
+		unlock, err := lockSecretName(name)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		found, err := st.exists(name)
+		if err != nil {
+			return err
+		}
+		if found {
+			// Rotation is add-new, verify, retire old: never in place.
+			return fmt.Errorf("%s is stored already, and cpb never replaces a stored secret: store the new value under a new name", args[1])
+		}
 		if err := st.write(name, value); err != nil {
 			return err
 		}
-		// The store is asked again: macOS's security -i exits 0 even when
-		// its add failed, so its exit status alone proves nothing.
-		if found, err := st.exists(name); err != nil || !found {
-			return fmt.Errorf("the store did not keep %s; nothing was stored", args[1])
+		// The value is read back: macOS's security -i exits 0 even when its
+		// add failed, and another program may have written the same item at
+		// the same moment, so neither exit status proves the value is ours.
+		got, err := st.read(name)
+		defer clear(got)
+		if err != nil || subtle.ConstantTimeCompare(got, value) != 1 {
+			return fmt.Errorf("the store does not hold the value given for %s; it was not stored", args[1])
 		}
 		return nil
 	}

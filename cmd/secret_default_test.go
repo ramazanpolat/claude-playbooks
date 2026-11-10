@@ -4,25 +4,35 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // memStore is an in-memory osSecretStore; writes counts every write call.
+// With other set, a write reports success and keeps other instead, as when
+// another program wrote the same item at the same moment.
 type memStore struct {
+	mu     sync.Mutex
 	items  map[string][]byte
 	writes int
 	fail   bool
+	other  []byte
 }
 
 func (m *memStore) where(name string) string { return "the test store, as " + name }
 func (m *memStore) exists(name string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	_, ok := m.items[name]
 	return ok, nil
 }
 func (m *memStore) read(name string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	v, ok := m.items[name]
 	if !ok {
 		return nil, errors.New("not found")
@@ -30,23 +40,36 @@ func (m *memStore) read(name string) ([]byte, error) {
 	return append([]byte{}, v...), nil
 }
 func (m *memStore) write(name string, value []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.writes++
 	if m.fail {
 		return errors.New("the test store refused")
 	}
+	if m.other != nil {
+		value = m.other
+	}
 	m.items[name] = append([]byte{}, value...)
 	return nil
 }
+func (m *memStore) get(name string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.items[name]
+	return string(v), ok
+}
 
-// useMemStore makes the default helper's store an in-memory one, and this
-// binary's path a fixed one.
+// useMemStore makes the default helper's store an in-memory one, this
+// binary's path a fixed one, and its locks a temp directory's.
 func useMemStore(t *testing.T) *memStore {
 	t.Helper()
 	m := &memStore{items: map[string][]byte{}}
-	saved, savedSelf := defaultSecretStore, selfExecutable
+	saved, savedSelf, savedLocks := defaultSecretStore, selfExecutable, secretLockDir
+	locks := t.TempDir()
 	defaultSecretStore = func() (osSecretStore, error) { return m, nil }
 	selfExecutable = func() (string, error) { return "/opt/cpb/bin/cpb", nil }
-	t.Cleanup(func() { defaultSecretStore, selfExecutable = saved, savedSelf })
+	secretLockDir = func() (string, error) { return locks, nil }
+	t.Cleanup(func() { defaultSecretStore, selfExecutable, secretLockDir = saved, savedSelf, savedLocks })
 	return m
 }
 
@@ -92,6 +115,68 @@ func TestDefaultHelperStoreFailureStoresNothing(t *testing.T) {
 	}
 	if _, ok := m.items["tok"]; ok {
 		t.Fatal("a refused write left an item")
+	}
+}
+
+func TestDefaultHelperStoresPrintableASCIIOnly(t *testing.T) {
+	m := useMemStore(t)
+	for _, v := range []string{"tab\there", "line\n", "p\u00e4ss", "nul\x00"} {
+		err := runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader(v))
+		if err == nil || !strings.Contains(err.Error(), "printable ASCII") || strings.Contains(err.Error(), v) {
+			t.Errorf("%q: %v", v, err)
+		}
+	}
+	if m.writes != 0 {
+		t.Fatalf("a refused value was written: %d writes", m.writes)
+	}
+	if err := runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader(" A-z~! 0 ")); err != nil {
+		t.Fatalf("printable ASCII refused: %v", err)
+	}
+}
+
+// The store holds another value after the write (another program wrote the
+// same item at the same moment, or macOS's add failed with exit 0): the
+// value is read back, and the store is reported as not holding it.
+func TestDefaultHelperReadsTheValueBack(t *testing.T) {
+	m := useMemStore(t)
+	m.other = []byte("someone-else")
+	err := runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-1"))
+	if err == nil || !strings.Contains(err.Error(), "does not hold the value given") || strings.Contains(err.Error(), "v-1") || strings.Contains(err.Error(), "someone-else") {
+		t.Fatalf("a value the store did not keep: %v", err)
+	}
+}
+
+// Two default helpers storing one name are serialized: the second waits for
+// the first's lock, then finds the name stored and refuses.
+func TestDefaultHelperStoresOneNameAtATime(t *testing.T) {
+	m := useMemStore(t)
+	unlock, err := lockSecretName("tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-2")) }()
+	select {
+	case err := <-result:
+		unlock()
+		t.Fatalf("--store did not wait for the lock: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	// The first helper stores its value while it holds the lock.
+	m.mu.Lock()
+	m.items["tok"] = []byte("v-1")
+	m.mu.Unlock()
+	unlock()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "never replaces") {
+			t.Fatalf("the second store: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("--store never took the lock")
+	}
+	if v, _ := m.get("tok"); v != "v-1" || m.writes != 0 {
+		t.Fatalf("the first value was replaced: %q, %d writes", v, m.writes)
 	}
 }
 

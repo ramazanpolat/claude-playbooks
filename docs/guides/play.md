@@ -118,10 +118,12 @@ cpb:service-token is not stored on this machine yet. Its value will be written t
 Type the value now (it is not shown), or press Enter to stop:
 ```
 
-- An empty answer, `^C`, or a closed terminal stops the run, and nothing is
-  stored.
+- An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
+  nothing is stored.
 - cpb never replaces a stored secret: to change one, store it under a new name
   and point the recipe at that.
+- cpb's own store keeps printable ASCII values only (letters, digits,
+  punctuation and spaces); a helper of your own takes any value.
 - The step runs only from your own terminal: never with `--yes` or
   `--trust-secret`, never without a terminal, and never inside an agent's
   session. An agent can show you the plan (`--dry-run`) and the command; you

@@ -8,10 +8,12 @@
   helper configured, a `cpb:<name>` reference is resolved by cpb's own binary
   in a helper mode, run as a process of its own, in the operating system's
   store: the default macOS Keychain through `/usr/bin/security`, or the Secret
-  Service through `secret-tool`. A configured helper always wins; any other
-  scheme with no helper is refused as before. A machine with no store refuses
-  a `cpb:` reference and names the fix. `<name>` is a lowercase letter or
-  digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`.
+  Service through `secret-tool`. It keeps printable ASCII values only, reads
+  each value back after writing it, and stores one name at a time. A
+  configured helper always wins; any other scheme with no helper is refused as
+  before. A machine with no store refuses a `cpb:` reference and names the
+  fix. `<name>` is a lowercase letter or digit, then up to 63 of `a-z`, `0-9`,
+  `.`, `_` and `-`.
 - **The store step in `cpb play`.** When a played recipe's secret reference is
   not stored yet, `cpb play`, `--keep` and `cpb update` show it in the plan
   (`"not_stored"` in `--json`), and after you type the reference they ask for
@@ -19,10 +21,10 @@
   helper on stdin (`<helper> --store REF`, a new optional verb of the helper
   interface). It never runs with `--yes`, with `--trust-secret` for that
   reference, without a terminal, or inside an agent's session. `^C`, an empty
-  answer, a closed terminal or a failing helper store nothing, and a stored
-  value is never replaced. It keeps the value out of command lines and
-  cpb's output; it does not hide it from programs that run as you.
-  See *Secrets* in SPEC.md and [the play guide](docs/guides/play.md).
+  answer, a closed terminal, a signal or a failing helper store nothing, and
+  cpb never replaces a stored value. It keeps the value out of command lines and
+  cpb's output; it does not hide it from programs that run as you. See
+  *Secrets* in SPEC.md and [the play guide](docs/guides/play.md).
 
 ## [v4.6.0] -- 2026-11-10
 

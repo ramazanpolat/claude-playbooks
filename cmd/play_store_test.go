@@ -46,7 +46,8 @@ exit 2
 	t.Setenv("FAIL_STORE", "")
 	t.Setenv(envset.SecretHelperEnv, path)
 	for _, v := range agentSessionVars {
-		t.Setenv(v, "")
+		t.Setenv(v, "") // restored after the test
+		os.Unsetenv(v)
 	}
 	t.Cleanup(func() { refsPendingStore, storeAfterConfirm = nil, nil })
 	return store, log
@@ -170,6 +171,70 @@ func TestStoreStepInterruptedStoresNothing(t *testing.T) {
 	}
 }
 
+// A signal the play guard caught (promptCancel closed) ends the read at
+// once, before Enter, and nothing is stored; one that came before the read
+// ends it before any key.
+func TestStoreStepCancelledByTheGuard(t *testing.T) {
+	for _, early := range []bool{false, true} {
+		t.Run(map[bool]string{false: "while reading", true: "before reading"}[early], func(t *testing.T) {
+			store, log := storeHelper(t)
+			cancel := make(chan struct{})
+			promptCancel = cancel
+			t.Cleanup(func() { promptCancel = nil })
+			if early {
+				close(cancel)
+			} else {
+				go func() { time.Sleep(600 * time.Millisecond); close(cancel) }()
+			}
+			typeIt, finish := onPty(t)
+			typeIt("abc", false)
+			var err error
+			done := make(chan struct{})
+			out := captureStdout(t, func() {
+				go func() { defer close(done); err = storeSecret(testRef) }()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("the read did not end on cancel")
+					typeIt("\r", false) // ends a read that ignores it
+				}
+			})
+			<-done
+			// A read left pending at the cancel takes this key and ends
+			// (on macOS a terminal read blocks its close until it returns).
+			typeIt("\r", false)
+			time.Sleep(500 * time.Millisecond)
+			finish()
+			if err == nil || !strings.Contains(err.Error(), "nothing was written") {
+				t.Fatalf("store step: %v", err)
+			}
+			if _, ok := storedValue(store); ok || strings.Contains(readLog(t, log), "--store") {
+				t.Fatal("a cancelled read stored a value")
+			}
+			if strings.Contains(out, "abc") {
+				t.Fatal("the typed text was shown")
+			}
+		})
+	}
+}
+
+// The read takes no key after its own Enter: what is typed next is the
+// next prompt's.
+func TestReadHiddenReadsNothingAhead(t *testing.T) {
+	typeIt, finish := onPty(t)
+	defer finish()
+	typeIt("abc\r", false)
+	first, ok := readHidden(secretIn, nil)
+	if !ok || string(first) != "abc" {
+		t.Fatalf("first read %q %v", first, ok)
+	}
+	typeIt("def\r", false)
+	second, ok := readHidden(secretIn, nil)
+	if !ok || string(second) != "def" {
+		t.Fatalf("second read %q %v: a key went to the first read", second, ok)
+	}
+}
+
 func TestStoreStepRefusals(t *testing.T) {
 	storeHelper(t)
 	if w := storeStepRefusal(testRef, true, false, nil); w != "" {
@@ -181,16 +246,19 @@ func TestStoreStepRefusals(t *testing.T) {
 		yes         bool
 		trusted     []string
 		agentVar    string
+		agentVal    string
 	}{
 		{name: "no terminal", interactive: false},
 		{name: "--yes", interactive: true, yes: true},
 		{name: "--trust-secret", interactive: true, trusted: []string{testRef}},
-		{name: "CLAUDECODE", interactive: true, agentVar: "CLAUDECODE"},
-		{name: "CLAUDE_CODE_ENTRYPOINT", interactive: true, agentVar: "CLAUDE_CODE_ENTRYPOINT"},
+		{name: "CLAUDECODE", interactive: true, agentVar: "CLAUDECODE", agentVal: "1"},
+		{name: "CLAUDE_CODE_ENTRYPOINT", interactive: true, agentVar: "CLAUDE_CODE_ENTRYPOINT", agentVal: "cli"},
+		{name: "CLAUDECODE set empty", interactive: true, agentVar: "CLAUDECODE"},
+		{name: "CLAUDE_CODE_ENTRYPOINT set empty", interactive: true, agentVar: "CLAUDE_CODE_ENTRYPOINT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.agentVar != "" {
-				t.Setenv(tc.agentVar, "1")
+				t.Setenv(tc.agentVar, tc.agentVal)
 			}
 			if w := storeStepRefusal(testRef, tc.interactive, tc.yes, tc.trusted); w == "" {
 				t.Fatal("the store step was allowed")

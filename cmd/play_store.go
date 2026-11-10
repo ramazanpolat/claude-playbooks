@@ -35,7 +35,7 @@ var storeAfterConfirm map[string]bool
 var secretIn = os.Stdin
 
 // agentSessionVars mark a session an agent runs: a value typed there would
-// go through that agent's own terminal.
+// go through that agent's own terminal. Set at all, even empty, counts.
 var agentSessionVars = []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"}
 
 // storeStepRefusal says why the store step cannot run here for ref, or ""
@@ -52,7 +52,7 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 		return "--trust-secret " + ref + " was given"
 	}
 	for _, v := range agentSessionVars {
-		if os.Getenv(v) != "" {
+		if _, set := os.LookupEnv(v); set {
 			return "this runs inside an agent's session (" + v + " is set)"
 		}
 	}
@@ -132,17 +132,17 @@ func printPendingNote(pending []string, planOnly bool) {
 // storeSecret is the store step for one reference: it names where the
 // value goes, reads it with echo off from the terminal, hands it to the
 // helper's --store on stdin, and checks the reference again. An empty
-// answer, ^C, a closed terminal or a helper that fails stops the run with
-// nothing stored.
+// answer, ^C, a closed terminal, a signal the play guard caught
+// (promptCancel) or a helper that fails stops the run with nothing stored.
 func storeSecret(ref string) error {
 	x, err := resolveHelperFor([]string{ref})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\nType the value now (it is not shown), or press Enter to stop: ", ref, storeWhere(x, ref))
-	value, ok := readHidden(secretIn)
+	value, ok := readHidden(secretIn, promptCancel)
 	defer clear(value)
-	if !ok || len(value) == 0 {
+	if !ok || len(value) == 0 || isCancelled(promptCancel) {
 		return fmt.Errorf("%s was not stored; nothing was written", ref)
 	}
 	c := x.command("--store", ref)
@@ -161,53 +161,111 @@ func storeSecret(ref string) error {
 	return nil
 }
 
+// isCancelled reports whether cancel (nil: never) is closed.
+func isCancelled(cancel <-chan struct{}) bool {
+	select {
+	case <-cancel:
+		return true
+	default:
+		return false
+	}
+}
+
 // readHidden reads one line from the terminal f in raw mode, echoing
-// nothing: Enter ends it, ^C, ^D on an empty line, an error or end of
-// input cancel it, and the terminal's mode is restored on every way out.
-// In raw mode ^C arrives as a byte, never as a signal, so cancelling is
-// the read's own decision.
-func readHidden(f *os.File) ([]byte, bool) {
+// nothing: Enter ends it; ^C, ^D on an empty line, an error, end of input
+// or cancel closing cancel it; and the terminal's mode is restored on every
+// way out. In raw mode a typed ^C arrives as a byte, so cancelling is the
+// read's own decision; a signal sent to cpb is the play guard's, which
+// closes cancel. Each byte is read in a goroutine, and only when asked
+// for, so a cancel never waits for a key and nothing is read ahead of the
+// next prompt; a read pending at a cancel ends with the run.
+func readHidden(f *os.File, cancel <-chan struct{}) ([]byte, bool) {
 	fd := int(f.Fd())
 	old, err := term.MakeRaw(fd)
 	if err != nil {
 		return nil, false
 	}
 	defer term.Restore(fd, old)
-	var buf []byte
-	b := make([]byte, 1)
-	for {
-		n, err := f.Read(b)
-		if n == 1 {
-			switch c := b[0]; c {
-			case '\r', '\n':
-				fmt.Print("\r\n")
-				return buf, true
-			case 3: // ^C
-				fmt.Print("^C\r\n")
-				clear(buf)
-				return nil, false
-			case 4: // ^D
-				if len(buf) == 0 {
-					fmt.Print("\r\n")
-					return nil, false
+	type key struct {
+		c   byte
+		err error
+	}
+	want, keys, done := make(chan struct{}), make(chan key), make(chan struct{})
+	defer close(done)
+	go func() {
+		b := make([]byte, 1)
+		for {
+			select {
+			case <-want:
+			case <-done:
+				return
+			}
+			var k key
+			for {
+				n, err := f.Read(b)
+				if err != nil {
+					k = key{err: err}
+					break
 				}
-			case 0x7f, 8: // backspace
-				if len(buf) > 0 {
-					buf[len(buf)-1] = 0
-					buf = buf[:len(buf)-1]
-				}
-			case 0x15: // ^U
-				clear(buf)
-				buf = buf[:0]
-			default:
-				if c >= 0x20 || c == '\t' {
-					buf = append(buf, c)
+				if n == 1 {
+					k = key{c: b[0]}
+					break
 				}
 			}
+			select {
+			case keys <- k:
+			case <-done:
+				return
+			}
 		}
-		if err != nil {
+	}()
+	var buf []byte
+	for {
+		if isCancelled(cancel) {
+			fmt.Print("\r\n")
 			clear(buf)
 			return nil, false
+		}
+		var k key
+		select {
+		case want <- struct{}{}:
+		case <-cancel:
+			continue
+		}
+		select {
+		case k = <-keys:
+		case <-cancel:
+			continue
+		}
+		if k.err != nil {
+			clear(buf)
+			return nil, false
+		}
+		switch c := k.c; c {
+		case '\r', '\n':
+			fmt.Print("\r\n")
+			return buf, true
+		case 3: // ^C
+			fmt.Print("^C\r\n")
+			clear(buf)
+			return nil, false
+		case 4: // ^D
+			if len(buf) == 0 {
+				fmt.Print("\r\n")
+				return nil, false
+			}
+		case 0x7f, 8: // backspace
+			if len(buf) > 0 {
+				buf[len(buf)-1] = 0
+				buf = buf[:len(buf)-1]
+			}
+		case 0x15: // ^U
+			clear(buf)
+			buf = buf[:0]
+		default:
+			if c >= 0x20 || c == '\t' {
+				buf = append(buf, c)
+			}
 		}
 	}
 }

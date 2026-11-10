@@ -617,15 +617,25 @@ values in the operating system's store:
 | Linux | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>` |
 | other, or no store | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
 
+- **Values.** Printable ASCII only (space to `~`: no tab, newline or
+  non-ASCII character), at most 64 KiB; any other value is refused, and
+  nothing is stored. macOS's `security` prints any other value as hex when
+  it is read, so it would not reach the launch as given. A helper of your
+  own takes any value.
 - **Writing.** On macOS the add command goes to `security -i` on its stdin,
   the value hex-encoded (`-X`), so it is in no argument list. On Linux it
   goes to `secret-tool store` on its stdin. Neither tool's output is shown.
-  `security -i` exits 0 even when its add fails, so the store is asked
-  again after every write, and a value it does not find is reported as not
-  stored.
+  After every write the value is read back and compared: `security -i`
+  exits 0 even when its add fails, and a store that does not hold the value
+  given reports it as not stored.
 - **Never in place.** `--store` of a name that is stored already is refused
   (no `-U`): rotating a secret is a new name, verified, then the old one
-  retired.
+  retired. Default helpers storing one name take a lock on it first (an
+  empty file, `cpb/secret-locks/<name>.lock` in the user's cache
+  directory), so two of them never both find it absent. The rule binds
+  cpb's helpers only: another program of the same user can write the same
+  item at the same moment, and `secret-tool store` replaces a matching
+  item.
 - **macOS access setting.** The item is created by `/usr/bin/security`
   without `-A` or `-T`, so its access list trusts the program that created
   it and nothing else: the decrypt entry lists `/usr/bin/security` alone
@@ -647,8 +657,9 @@ played playbook). When a recipe's secret reference does not resolve yet:
   off, from the controlling terminal only;
 - the value goes to `<helper> --store REF` on stdin, and the reference is
   checked again before anything is applied;
-- **an empty answer, ^C, a closed terminal, or a helper that fails** stops
-  the run with nothing stored and nothing written.
+- **an empty answer, ^C, a closed terminal, a signal to cpb (`SIGINT`,
+  `SIGTERM`, `SIGHUP`) while it waits, or a helper that fails** stops the
+  run with nothing stored and nothing written.
 
 The step runs only when **all** of these hold, and otherwise a reference that
 does not resolve is refused as before, naming why and asking the person to
@@ -657,7 +668,7 @@ run the command from their own terminal:
 - standard input and output are both a terminal;
 - the run has no `--yes`, and no `--trust-secret` confirmed this reference;
 - the environment shows no agent session (`CLAUDECODE` or
-  `CLAUDE_CODE_ENTRYPOINT` set).
+  `CLAUDE_CODE_ENTRYPOINT` set, even to an empty value).
 
 No flag, environment variable or file ever supplies a value, and none may be
 added.
