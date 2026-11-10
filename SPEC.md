@@ -578,7 +578,9 @@ cpb never names or discovers one.
 cpb checks one thing about its shape, a scheme followed by a colon
 (`keychain:…`, `op://…`, `vault:…`), so a value pasted where a reference
 belongs is refused, and never echoed. Everything else about a reference is
-the helper's business.
+the helper's business, except `cpb:<name>`, whose `<name>` is a lowercase
+letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`
+(refused otherwise, at every layer, without quoting it).
 
 **The helper interface** (cpb's own contract):
 
@@ -590,11 +592,83 @@ the helper's business.
   command, and execs it. cpb fetches no values; there is no value-returning
   call, and none may be built. A non-zero exit before `claude` starts means
   cpb did not launch, and the helper's message says why.
+- **Store** (optional, since v4.7.0): `<helper> --store REF`, the value on
+  its stdin, never an argument. Exit 0 means it is stored. A helper without
+  it exits non-zero (cpb then says to store the value with your own tool and
+  run again). Only the store step below calls it.
 
-**Without a configured helper**, cpb stays fully usable. `SET … FROM` is
-refused, and so is launching a playbook whose layers hold a reference, each
-with one line: "no secret helper configured (ALTER DEFAULTS SET secret_helper =
+**Without a configured helper**, cpb stays fully usable. A `cpb:<name>`
+reference is resolved by cpb's default helper (below). Any other `SET … FROM`
+is refused, and so is launching a playbook whose layers hold one, each with
+one line: "no secret helper configured (ALTER DEFAULTS SET secret_helper =
 …)". Literal values work without one.
+
+**cpb's default helper** (since v4.7.0) is used only when no helper is
+configured (neither `secret_helper` nor `CPB_SECRET_HELPER`) and every
+reference involved is `cpb:<name>`; a configured helper always wins, for
+`cpb:` references too. It is cpb's own binary run in a helper mode, as a
+process of its own: it speaks the interface above (`--check`, exec,
+`--store`), so the cpb that launches still never holds a value. It keeps
+values in the operating system's store:
+
+| System | Store | Item |
+|---|---|---|
+| macOS | the default Keychain (normally the login one), through `/usr/bin/security` | a generic password, service `cpb`, account `<name>`, label `cpb/<name>` |
+| Linux | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>` |
+| other, or no store | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
+
+- **Writing.** On macOS the add command goes to `security -i` on its stdin,
+  the value hex-encoded (`-X`), so it is in no argument list. On Linux it
+  goes to `secret-tool store` on its stdin. Neither tool's output is shown.
+  `security -i` exits 0 even when its add fails, so the store is asked
+  again after every write, and a value it does not find is reported as not
+  stored.
+- **Never in place.** `--store` of a name that is stored already is refused
+  (no `-U`): rotating a secret is a new name, verified, then the old one
+  retired.
+- **macOS access setting.** The item is created by `/usr/bin/security`
+  without `-A` or `-T`, so its access list trusts the program that created
+  it and nothing else: the decrypt entry lists `/usr/bin/security` alone
+  (checked on a throwaway keychain). The default helper reads it through
+  that same program, so a launch asks for nothing; another application that
+  asks for the value gets the Keychain's own prompt. That list stops other
+  applications, not other processes of the same user: any of them can run
+  `/usr/bin/security` too.
+
+**The store step** (since v4.7.0; `cpb play`, `--keep` and `cpb update` of a
+played playbook). When a recipe's secret reference does not resolve yet:
+
+- **the plan** shows it ("Not stored on this machine yet: `<ref>`") instead
+  of refusing, and `--json` lists it as `"not_stored"`. A run that only plans
+  (`--dry-run`, `--check`) never stores anything;
+- **after the person typed the reference** (its typed confirmation), cpb
+  names where the value will be written (for the default helper the store
+  and the item, for another helper the helper) and asks for it with echo
+  off, from the controlling terminal only;
+- the value goes to `<helper> --store REF` on stdin, and the reference is
+  checked again before anything is applied;
+- **an empty answer, ^C, a closed terminal, or a helper that fails** stops
+  the run with nothing stored and nothing written.
+
+The step runs only when **all** of these hold, and otherwise a reference that
+does not resolve is refused as before, naming why and asking the person to
+run the command from their own terminal:
+
+- standard input and output are both a terminal;
+- the run has no `--yes`, and no `--trust-secret` confirmed this reference;
+- the environment shows no agent session (`CLAUDECODE` or
+  `CLAUDE_CODE_ENTRYPOINT` set).
+
+No flag, environment variable or file ever supplies a value, and none may be
+added.
+
+**What the step does not cover.** It keeps the value out of argument lists,
+out of cpb's output and files, and out of an agent's transcript. It does not
+hide the value from the person's own processes. A program that drives a
+terminal of its own (a pseudo-terminal it started) can pass the terminal
+test. Any process of the same user can ask the operating system's store for
+the value, an agent's included. Keeping a secret from an agent that runs as
+you is a sandbox's job, not this step's.
 
 `FROM` also names a playbook's source in `CREATE PLAYBOOK`; the position
 disambiguates.
@@ -3101,11 +3175,13 @@ block added. It is a top-level field that `APPLY`'s own report does not have:
          "header": {"title", "description", "needs", "create_with", "min_cpb"},
          "playbook", "endpoint", "refused": [{"line", "what", "reason"}],
          "risks": [{"code", "line", "clause", "detail", "confirm"}],
+         "not_stored": [<ref>, ...],
          "sandbox": {"backend", "note"},
          "keep": true, "update": {"from_sha256", "unchanged", "tag_moved"}}
 ```
 
-`--check --json` is the same object with no statements, and `sandbox`
+`not_stored` is present only when a reference does not resolve yet (the
+store step, *Secrets*). `--check --json` is the same object with no statements, and `sandbox`
 `null`. `sandbox.backend` is `""` when the play runs on this machine. `keep`
 and `update` are present only for `--keep` and `cpb update`.
 
@@ -3133,7 +3209,9 @@ those names, sorted, one per line.
      endpoint: that is an account's, `--account`);
    - `Type the secret this playbook may read, on this machine, as you (<ref>):`.
 
-   An exact match goes on; anything else stops with nothing written.
+   An exact match goes on; anything else stops with nothing written. A
+   reference that is not stored yet is then asked for: the store step
+   (*Secrets*), on your own terminal only.
 4. It applies the same bytes to the throwaway playbook (its report is shown
    only if it fails), runs the session (arguments after `--` go to
    `claude`), and removes everything afterwards.

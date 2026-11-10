@@ -96,6 +96,42 @@ typed: you type the host (`TLS` for a certificate change), and a typo stops
 the run, with nothing written. A secret reference (`SET VAR GH FROM 'keychain:…'`) is
 typed too, and the prompt says the secret is read on this machine, as you.
 
+## A secret that is not stored yet
+
+A recipe can name a secret it needs as `cpb:<name>`, for example
+`SET VAR SERVICE_TOKEN FROM 'cpb:service-token'`. With no secret helper of your
+own, cpb keeps such a secret in your system's store: your default macOS
+Keychain (normally the login one), or the Secret Service on Linux (through
+`secret-tool`).
+
+If it is not stored yet, the preview says so:
+
+```
+Not stored on this machine yet: cpb:service-token. You will be asked for its value after you confirm it.
+```
+
+After you type the reference, cpb names where the value will go and asks for
+it, without showing what you type:
+
+```
+cpb:service-token is not stored on this machine yet. Its value will be written to your default macOS Keychain, as the item cpb/service-token (service cpb, account service-token).
+Type the value now (it is not shown), or press Enter to stop:
+```
+
+- An empty answer, `^C`, or a closed terminal stops the run, and nothing is
+  stored.
+- cpb never replaces a stored secret: to change one, store it under a new name
+  and point the recipe at that.
+- The step runs only from your own terminal: never with `--yes` or
+  `--trust-secret`, never without a terminal, and never inside an agent's
+  session. An agent can show you the plan (`--dry-run`) and the command; you
+  run the command and type the value yourself.
+
+What this protects, and what it does not: the value stays out of command
+lines, out of cpb's output, and out of an agent's transcript. It does not hide
+the value from programs that run as you. Any of them can read it from the
+system's store, an agent's included.
+
 ## Sandboxed by default
 
 The session runs in a Docker Sandbox (`sbx`) where one is installed, and the
