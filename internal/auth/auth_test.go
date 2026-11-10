@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -180,13 +179,7 @@ func TestSyncCredentialsHealsSymlinkAndSyncsNewer(t *testing.T) {
 		t.Fatal(err)
 	}
 	globalCreds := filepath.Join(globalDir, CredentialsFileName)
-	if err := os.WriteFile(globalCreds, []byte(testCreds), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Make the global file older than the local one we're about to write.
-	oldTime := time.Now().Add(-1 * time.Hour)
-	if err := os.Chtimes(globalCreds, oldTime, oldTime); err != nil {
+	if err := os.WriteFile(globalCreds, []byte(`{"claudeAiOauth":{"accessToken":"older-global","expiresAt":1000}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -195,8 +188,14 @@ func TestSyncCredentialsHealsSymlinkAndSyncsNewer(t *testing.T) {
 		t.Fatal(err)
 	}
 	localCreds := filepath.Join(target, CredentialsFileName)
-	localContent := []byte(`{"claudeAiOauth":{"accessToken":"newer-local"}}`)
+	localContent := []byte(`{"claudeAiOauth":{"accessToken":"newer-local","expiresAt":2000}}`)
 	if err := os.WriteFile(localCreds, localContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The local file is the older FILE: the grant's expiry decides, not
+	// the file times.
+	oldTime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(localCreds, oldTime, oldTime); err != nil {
 		t.Fatal(err)
 	}
 	// The same account on both sides: a refresh inside the playbook, which
@@ -256,11 +255,9 @@ func TestSyncCredentialsNoGlobalCredentialsNoop(t *testing.T) {
 	}
 }
 
+// The macOS branch, through the hostOS and Keychain seams: it runs on every
+// OS and never reaches a real Keychain.
 func TestEnsureGlobalCredentialsRefreshesFromKeychain(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Keychain refresh is macOS-specific")
-	}
-
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".claude")
@@ -268,15 +265,16 @@ func TestEnsureGlobalCredentialsRefreshesFromKeychain(t *testing.T) {
 		t.Fatal(err)
 	}
 	globalCreds := filepath.Join(globalDir, CredentialsFileName)
-	if err := os.WriteFile(globalCreds, []byte(`{"claudeAiOauth":{"refreshToken":"stale"}}`), 0600); err != nil {
+	if err := os.WriteFile(globalCreds, []byte(`{"claudeAiOauth":{"refreshToken":"stale","expiresAt":1000}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	oldFind := findGenericPassword
+	oldFind, oldOS := findGenericPassword, hostOS
+	hostOS = "darwin"
 	findGenericPassword = func(string) ([]byte, error) {
-		return []byte(`{"claudeAiOauth":{"refreshToken":"fresh"}}`), nil
+		return []byte(`{"claudeAiOauth":{"refreshToken":"fresh","expiresAt":2000}}`), nil
 	}
-	t.Cleanup(func() { findGenericPassword = oldFind })
+	t.Cleanup(func() { findGenericPassword, hostOS = oldFind, oldOS })
 
 	path, err := EnsureGlobalCredentials()
 	if err != nil {

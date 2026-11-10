@@ -353,8 +353,9 @@ func ownToken(configDir string, layers []*manifest.Env) (tok string, ref bool, e
 // newer copy goes over the machine store first, as the credential sync does,
 // and the strip loses nothing. Any other login, or one that cannot be
 // confirmed as the machine's, or one with no machine grant to fall back on,
-// is copied aside first (the quarantine then strips only the grant, and the
-// store's other logins stay). A link, an unreadable store and the machine's
+// or one that cannot be ordered against the machine's, is copied aside first
+// (the quarantine then strips only the grant, and the store's other logins
+// stay). A link, an unreadable store and the machine's
 // own store are left to the quarantine, which keeps them.
 func keepStoreGrant(configDir string) error {
 	if isGlobalConfigDir(configDir) {
@@ -373,14 +374,25 @@ func keepStoreGrant(configDir string) error {
 		return err
 	}
 	globalStore := StorePath(global)
-	globalInfo, err := os.Stat(globalStore)
+	_, err = os.Stat(globalStore)
 	// The machine store is the recovery copy only when it holds a grant of
 	// its own: one holding nothing but MCP logins would leave the stripped
 	// grant nowhere.
 	globalAbsent, gErr := storeGrantAbsent(globalStore)
 	switch {
 	case err == nil && gErr == nil && !globalAbsent && sameAccount(configDir):
-		if info.ModTime().After(globalInfo.ModTime()) {
+		// Newer by the grant's expiry, as on the sync (ownLoginNewer). One
+		// that cannot be ordered against the machine's is kept aside, so
+		// the strip loses nothing.
+		newer, decided, _, err := ownLoginNewer(store, globalStore)
+		if err != nil {
+			return err
+		}
+		if !decided {
+			return setAsideOwnLogin(configDir, "launched on the token", true,
+				"the machine account's login, which cannot be told newer or older than the machine store's")
+		}
+		if newer {
 			if err := copyFile(store, globalStore, 0600); err != nil {
 				return fmt.Errorf("failed to copy newer credentials to global: %w", err)
 			}
@@ -389,7 +401,7 @@ func keepStoreGrant(configDir string) error {
 	case err != nil && !os.IsNotExist(err):
 		return err
 	}
-	return setAsideOwnLogin(configDir, "launched on the token", true)
+	return setAsideOwnLogin(configDir, "launched on the token", true, "")
 }
 
 // tokenRun is one token run this process holds: its shared run lock, and
