@@ -38,7 +38,7 @@ usage() { echo "usage: gentar/mirror.sh dispatch <sha> [suite ...] | status <sha
 case "$CMD" in dispatch|status) ;; *) usage ;; esac
 [ $# -ge 2 ] || usage
 shift 2
-case "$SHA" in ''|*[!0-9a-f]*) usage ;; esac
+case "$SHA" in ''|*[!0123456789abcdef]*) usage ;; esac
 [ "${#SHA}" = 40 ] || { echo "mirror: need the full 40-character sha" >&2; exit 2; }
 for s in "$@"; do
   case "$s" in ''|*[!A-Za-z0-9._-]*) echo "mirror: not a suite name: $s" >&2; exit 2 ;; esac
