@@ -1600,7 +1600,7 @@ ALTER DEFAULTS
 
   Anything cpb cannot read is a skip, never a refusal.
 - **One `--settings`.** An account that authenticates with a helper already makes the launch pass `{"apiKeyHelper": …}`. The picker goes into that same object.
-- **Which launches.** A resumed session (`--resume`, `--continue`) is a launch like any other. A sandboxed launch passes the same `--settings` to the `claude` it starts inside the sandbox. A launch forwarded to another host (`--sandbox-host`, `[sandbox] host`) is that host's `cpb`'s, which applies its own DEFAULTS.
+- **Which launches.** A resumed session (`--resume`, `--continue`) is a launch like any other. A sandboxed launch passes the same `--settings` to the `claude` it starts inside the sandbox. A launch forwarded to another host (`--sandbox-host`, `[sandbox] host`) is that host's `cpb`'s, which applies its own DEFAULTS; `EXPLAIN PLAYBOOK` of a playbook whose manifest forwards every launch says so instead of naming local rows.
   - A session that does not start through cpb gets none: bare `claude`, or `claude` with `CLAUDE_CONFIG_DIR` set by hand. For `~/.claude`, `APPLY` a recipe of `ADD MODEL` rows `TO '~/.claude'`, which writes them into its `settings.json`.
 - **Why aliases.** The recommended rows are Claude Code's own aliases.
   - An alias resolves to the newest model of its family that the installed Claude Code knows, so the rows follow every release with no further statement.

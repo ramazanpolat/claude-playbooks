@@ -215,7 +215,7 @@ func applyRunIn(st *grammar.Stmt, rep *applyReport, sc *applyScope) error {
 	done := map[string]int{} // statements applied per file
 	for i, x := range stmts {
 		s := x.s
-		r.outcome, r.note, r.warnings, r.actions = "", "", nil, nil
+		r.outcome, r.note, r.warnings, r.actions, r.notes = "", "", nil, nil, nil
 		where := fmt.Sprintf("%s:%d", x.file, s.Pos.Line)
 		if s.Pos.Line == 0 { // cpb update's undo, from no file
 			where = x.file

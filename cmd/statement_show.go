@@ -874,6 +874,14 @@ func explainPicker(pb *playbook.Playbook) pickerAtLaunch {
 	if rows, err := defaultsPickerRows(root); err == nil && len(rows) == 0 {
 		return pickerAtLaunch{none: true}
 	}
+	// A launch the manifest sends to another host is that host's cpb's,
+	// which applies its own DEFAULTS (runRun forwards it before anything
+	// here would run).
+	if m := pb.Manifest; m != nil && m.Sandbox != nil && m.Sandbox.Always {
+		if host := sandboxHost(m.Sandbox, &sandboxOpts{}); host != "" {
+			return pickerAtLaunch{skip: pickerSkipRemote}
+		}
+	}
 	wd, _ := os.Getwd()
 	acct, err := planAccount(pb.Path, pb.Name, nil, wd, nil)
 	if err != nil {

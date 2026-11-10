@@ -286,6 +286,36 @@ func TestLaunchOffersDefaultsModelRows(t *testing.T) {
 	}
 }
 
+// A launch the manifest forwards to its sandbox host is that host's cpb's:
+// EXPLAIN does not claim the local rows for it.
+func TestExplainPickerForwardedLaunch(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "remote", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true, Host: "user@example-host"}})
+	if _, err := quotedStmt(t, "ALTER DEFAULTS ADD MODEL 'fable' LABEL 'Fable (newest)'"); err != nil {
+		t.Fatal(err)
+	}
+	if ex := mustStmt(t, "EXPLAIN PLAYBOOK remote"); !strings.Contains(ex, "Model picker at launch: adds nothing ("+pickerSkipRemote+")") {
+		t.Fatalf("EXPLAIN of a forwarded launch:\n%s", ex)
+	}
+}
+
+// In an APPLY, a pinned id's note is told once, for the statement that names
+// it, never again for the statements after it.
+func TestPinnedNoteOncePerStatementInApply(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "p", &manifest.Manifest{IsolatedLogin: true})
+	// No statement here sets what an earlier one set, so APPLY folds none away.
+	f := writePlaybookFile(t, "ALTER PLAYBOOK p SET model = 'claude-opus-5-5';\nALTER PLAYBOOK p SET agent = 'x';\nALTER PLAYBOOK p ALLOW TOOL 'Read';\n")
+	var err error
+	stderr := captureStderr(t, func() { _, err = apply(t, f) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(stderr, "Note: "); n != 1 || !strings.Contains(stderr, ":1: 'claude-opus-5-5' names one release") {
+		t.Fatalf("notes in an APPLY (%d):\n%s", n, stderr)
+	}
+}
+
 // A sandboxed launch builds claude's argv inside the sandbox: the one
 // --settings goes there too.
 func TestSandboxedLaunchOffersDefaultsModelRows(t *testing.T) {

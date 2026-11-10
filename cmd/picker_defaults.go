@@ -142,6 +142,7 @@ const (
 	pickerSkipOnly       = "the playbook's model picker is mode 'only'"
 	pickerSkipSettingArg = "the launch passes its own --settings"
 	pickerSkipAllThere   = "the playbook's own picker has every DEFAULTS row already"
+	pickerSkipRemote     = "the launch runs on its sandbox host, whose cpb applies its own DEFAULTS"
 )
 
 // launchPicker decides, for a launch of configDir on the selected account,
