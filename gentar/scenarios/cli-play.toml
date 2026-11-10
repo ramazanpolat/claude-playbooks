@@ -9,7 +9,9 @@
 # only: on macOS those two steps say they did not run) and resolves a
 # template name. Local recipes only; the
 # https fetch limits are unit-tested here and join this scenario with the
-# local TLS server in a later slice.
+# local TLS server in a later slice. Slice 6: a secret reference that is
+# not stored yet is listed by a plan and asked for only on a person's own
+# terminal (v4.7.0); a stub helper records every call.
 
 [scenario]
 name = "cli-play"
@@ -26,6 +28,7 @@ steps = [
   '''mkdir -p "$HOME/tls" && openssl req -x509 -newkey rsa:2048 -nodes -keyout "$HOME/tls/key.pem" -out "$HOME/tls/cert.pem" -days 2 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 2>/dev/null''',
   '''mkdir -p "$HOME/stubsbx" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/sbx.log"' 'if [ "$1" = ls ] && [ "$2" = --json ]; then printf "%s" "{\"sandboxes\":[]}"; exit 0; fi' 'if [ "$1" = exec ]; then case "$*" in *"cat ~/.cpb-sandbox"*) printf "%s" skills=private;; esac; fi' 'exit 0' > "$HOME/stubsbx/sbx" && chmod 755 "$HOME/stubsbx/sbx" && printf '%s\n' "ALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';" > "$HOME/playfx/refs.cpb"''',
   '''F="$HOME/playfx"; printf '%s\n' "-- title: Plain" "-- description: A model." "" "ALTER PLAYBOOK SET model = 'claude-opus-5-5';" > "$F/plain.cpb" && mkdir -p "$HOME/sleepclaude" && printf '%s\n' '#!/bin/sh' 'echo "$CLAUDE_CONFIG_DIR" > "$HOME/play-cfg"' 'sleep 30' > "$HOME/sleepclaude/claude" && chmod 755 "$HOME/sleepclaude/claude"''',
+  '''F="$HOME/playfx"; printf '%s\n' "-- title: Needs" "-- description: A token." "" "ALTER PLAYBOOK SET VAR TOK FROM 'keychain:arena-tok';" > "$F/needs.cpb" && mkdir -p "$HOME/stubhelper" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/helper.log"' 'case "$1" in --check) exit 4;; --store) cat > /dev/null; exit 0;; esac' 'exit 2' > "$HOME/stubhelper/h" && chmod 755 "$HOME/stubhelper/h"''',
 ]
 
 [[verify.commands]]
@@ -114,3 +117,14 @@ contains = "play-pin-ok"
 # the URL.
 command = '''if HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 NO_PROXY= no_proxy= cpb play --check reviewer > "$HOME/t.out" 2>&1; then echo fetched-through-a-dead-proxy; exit 1; fi; grep -q "127.0.0.1:9" "$HOME/t.out" || { echo "not through the proxy: $(head -c 300 "$HOME/t.out")"; exit 1; }; python3 -c "import re,sys; t=open(sys.argv[1]).read(); m=re.search(r'https://raw\\.githubusercontent\\.com/ramazanpolat/claude-playbooks/([^/]+)/site/p/reviewer\\.cpb', t); assert m and (m.group(1)=='main' or re.fullmatch(r'v[0-9]+[.][0-9]+[.][0-9]+(-rc[0-9]+)?', m.group(1))), t" "$HOME/t.out" && echo play-template-ok'''
 contains = "play-template-ok"
+
+[[verify.commands]]
+# Slice 6, the store step (v4.7.0), against a stub helper that stores
+# nothing and logs every call: a plan lists the reference as not stored;
+# without a terminal, with --yes, with --trust-secret for it, and on a
+# terminal inside an agent's session (CLAUDECODE, CLAUDE_CODE_ENTRYPOINT,
+# for play and for cpb update) the run refuses, naming why, before any
+# prompt; the helper is never asked to store, no session runs, and the
+# kept playbook keeps its old recipe. The terminal is a pty from python.
+command = '''F="$HOME/playfx"; unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; export CPB_SECRET_HELPER="$HOME/stubhelper/h" PATH="$HOME/sleepclaude:$PATH"; rm -f "$HOME/helper.log" "$HOME/play-cfg"; onpty() { python3 -c 'import pty,sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)' "$@" < /dev/null; }; why() { grep -q "keychain:arena-tok is not stored on this machine, and cpb asks for a value only from your own terminal ($1)" "$2"; }; if ! cpb play --dry-run --json --no-sandbox "$F/needs.cpb" > "$HOME/n1.json" 2> "$HOME/n1.err" || ! python3 -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['ok'] and r['play']['not_stored']==['keychain:arena-tok'], r" "$HOME/n1.json"; then echo plan-wrong; elif cpb play --yes --no-sandbox "$F/needs.cpb" < /dev/null > "$HOME/n2.out" 2>&1 || ! why "not on a terminal" "$HOME/n2.out"; then echo no-terminal-wrong; elif onpty env CLAUDECODE=1 cpb play --no-sandbox "$F/needs.cpb" > "$HOME/n3.out" 2>&1; ! why "this runs inside an agent.s session (CLAUDECODE is set)" "$HOME/n3.out"; then echo claudecode-wrong; elif onpty env CLAUDE_CODE_ENTRYPOINT=cli cpb play --no-sandbox "$F/needs.cpb" > "$HOME/n4.out" 2>&1; ! why "this runs inside an agent.s session (CLAUDE_CODE_ENTRYPOINT is set)" "$HOME/n4.out"; then echo entrypoint-wrong; elif onpty cpb play --no-sandbox --trust-secret keychain:arena-tok "$F/needs.cpb" > "$HOME/n5.out" 2>&1; ! why "--trust-secret keychain:arena-tok was given" "$HOME/n5.out"; then echo trust-secret-wrong; elif onpty cpb play --yes --no-sandbox "$F/needs.cpb" > "$HOME/n6.out" 2>&1; ! why "--yes was given" "$HOME/n6.out"; then echo yes-wrong; elif cp "$F/plain.cpb" "$F/storeme.cpb" && ! cpb play --keep --yes --no-sandbox "$F/storeme.cpb" > "$HOME/n7.out" 2>&1; then echo keep-failed; elif cp "$F/needs.cpb" "$F/storeme.cpb" && onpty env CLAUDECODE=1 cpb update storeme > "$HOME/n8.out" 2>&1; ! why "this runs inside an agent.s session (CLAUDECODE is set)" "$HOME/n8.out"; then echo update-wrong; elif ! cpb SHOW PLAYBOOK storeme --json > "$HOME/n8.json" || ! python3 -c "import json,sys,os; v=json.load(open(sys.argv[1])); assert open(os.path.join(v['path'],'.play/recipe.cpb')).read()==open(sys.argv[2]).read(), v" "$HOME/n8.json" "$F/plain.cpb"; then echo update-applied; elif ! grep -q -- "--check" "$HOME/helper.log"; then echo helper-never-asked; elif grep -q -- "--store" "$HOME/helper.log"; then echo store-was-called; elif [ -e "$HOME/play-cfg" ]; then echo a-session-ran; else echo play-store-step-ok; fi'''
+contains = "play-store-step-ok"
