@@ -36,13 +36,18 @@ func SyncCredentials(targetDir string) error {
 	if isAuthIsolated(targetDir) {
 		return detachSharedCredentials(targetDir)
 	}
-	globalCreds, ownLeft, err := syncMachineStore(targetDir)
+	globalCreds, leave, err := syncMachineStore(targetDir)
 	if err != nil {
 		return err
 	}
-	if globalCreds == "" || ownLeft {
-		// No machine login to link, or the playbook's own login could not be
-		// ordered against it: the playbook keeps what it holds.
+	if leave {
+		// The newest login could not be told (a notice said so). Nothing is
+		// linked and no account metadata is seeded either: seeded, the
+		// machine's account would let a login the playbook holds pass for
+		// the machine's own at the next sync, unjudged.
+		return nil
+	}
+	if globalCreds == "" {
 		return SyncAccountMetadata(targetDir)
 	}
 	if err := LinkCredentials(targetDir, globalCreds); err != nil {
@@ -68,10 +73,11 @@ func EnsureGlobalCredentials() (string, error) {
 // expires last wins (newestLogin), and is written only when its bytes differ,
 // through a temporary file renamed over the store (replaceFile). The Keychain
 // is only ever read. When no candidate can be told to be the newest, nothing
-// is written, one notice says which sources and why, and ownLeft reports
-// whether the playbook's file was among them, so the caller leaves it in
-// place. globalCreds is "" when the machine store holds no usable value.
-func syncMachineStore(targetDir string) (globalCreds string, ownLeft bool, err error) {
+// is written and one notice says which sources and why; leave then tells the
+// caller to leave the playbook as it is too, when its own file was among
+// them or the machine store holds no usable value to link. globalCreds is ""
+// when the machine store holds no usable value.
+func syncMachineStore(targetDir string) (globalCreds string, leave bool, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", false, err
@@ -113,7 +119,7 @@ func syncMachineStore(targetDir string) (globalCreds string, ownLeft bool, err e
 	if win < 0 {
 		Notice(why)
 		if !json.Valid(current) {
-			return "", withOwn, nil
+			return "", true, nil
 		}
 		return globalCreds, withOwn, nil
 	}

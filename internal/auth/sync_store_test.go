@@ -320,11 +320,17 @@ func TestSyncUndecidableChangesNothing(t *testing.T) {
 			}
 			before := snap(t, f.global)
 
+			state := snap(t, filepath.Join(f.target, StateFileName))
+
 			if err := SyncCredentials(f.target); err != nil {
 				t.Fatal(err)
 			}
 			before.untouched(t, f.global)
 			noTempFiles(t, filepath.Dir(f.global))
+			if !c.linked {
+				// Nothing linked, and no account metadata seeded either.
+				state.untouched(t, filepath.Join(f.target, StateFileName))
+			}
 			if c.own != "" {
 				own.untouched(t, f.local)
 				if info, _ := os.Lstat(f.local); !info.Mode().IsRegular() {
@@ -338,6 +344,31 @@ func TestSyncUndecidableChangesNothing(t *testing.T) {
 			f.oneUndecidedNotice(t, append([]string{f.global}, c.sources...)...)
 		})
 	}
+}
+
+// A playbook login of an unconfirmed account (its state names none) stays
+// unjudged when the machine store cannot be ordered against the Keychain:
+// nothing is linked over it, and the machine's account is not seeded into
+// its state, which would let it pass for the machine's own at the next sync.
+func TestSyncUndecidableSeedsNoAccountMetadata(t *testing.T) {
+	f := newStoreFixture(t, fakeLogin("k", 2000), `{"claudeAiOauth":`)
+	stateFile := filepath.Join(f.target, StateFileName)
+	if err := os.WriteFile(stateFile, []byte(`{"theme":"dark"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeOld(t, f.local, fakeLogin("own", 3000))
+	before, own, state := snap(t, f.global), snap(t, f.local), snap(t, stateFile)
+
+	if err := SyncCredentials(f.target); err != nil {
+		t.Fatal(err)
+	}
+	before.untouched(t, f.global)
+	own.untouched(t, f.local)
+	state.untouched(t, stateFile)
+	if sameAccount(f.target) {
+		t.Fatal("the playbook's login now passes for the machine's account")
+	}
+	f.oneUndecidedNotice(t, f.global, "Keychain")
 }
 
 // An interrupted write (the rename fails) leaves the old store byte for byte
