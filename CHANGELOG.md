@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### Added
+
+- **DEFAULTS model rows, offered at every launch.** `ALTER DEFAULTS ADD
+  MODEL '<id>' [LABEL …] [DESCRIPTION …] [BEHAVES AS …]` and `DROP MODEL`
+  keep `/model` picker rows in the playbooks root. Every launch through cpb
+  then passes `claude` one `--settings` holding the playbook's own picker,
+  unchanged, followed by each DEFAULTS row it does not already have. That
+  covers a launcher, `run`, `start`, a sandboxed launch and a resumed
+  session. Nothing is written into any playbook, so existing and new
+  playbooks get the rows alike.
+
+  Written as aliases (`opus`, `sonnet`, `haiku`, `fable`), the rows follow
+  every Claude Code release. They also offer the newest model when the
+  `/model` menu carries a row the server sends at start-up that names an
+  earlier release. See [the guide](docs/guides/new-model.md).
+
+  A launch that does not go to Anthropic's own API gets no rows, and neither
+  does a picker in mode `only`, a launch that passes its own `--settings`,
+  or a playbook with `model_picker_defaults = 'excluded'`, a new playbook
+  property.
+
+  `SHOW DEFAULTS`, `SELECT … FROM DEFAULTS` and `SHOW CREATE ALL` show the
+  rows. `EXPLAIN PLAYBOOK` says what a launch adds, or why it adds nothing
+  (`model_picker_at_launch` in `--json`).
+- **Pinned model ids are named.** `SET model = '<id>'` and `ADD MODEL
+  '<id>'` with a first-party Claude release id (`claude-fable-5-1[1m]`)
+  print a note on stderr naming the family's alias, which follows the
+  newest release. `SHOW` and `EXPLAIN` mark such ids. Nothing is refused.
+
+### Changed
+
+- `SHOW CREATE` writes `model_picker_defaults`: `SET … = 'excluded'`, or
+  `RESET model_picker_defaults` with the other properties at their
+  defaults. The docs' and examples' `SET model` use aliases.
+
 ## [v4.5.0] -- 2026-11-10
 
 v4.5.0 gives `cpb ask` a memory and a way to ask on a gateway account.

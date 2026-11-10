@@ -106,6 +106,9 @@ func runStatement(args []string) error {
 	for _, w := range r.warnings {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", w.message)
 	}
+	for _, n := range r.notes {
+		fmt.Fprintf(os.Stderr, "Note: %s\n", n)
+	}
 	return err
 }
 
@@ -138,6 +141,9 @@ type stmtRun struct {
 	// exists: the ALTER being run is CREATE OR ALTER's SET list on a
 	// playbook that exists, so "unchanged" says that it exists.
 	exists bool
+	// notes are told on stderr after the result, never errors: e.g. a
+	// model id pinned to one release (notePinned).
+	notes []string
 }
 
 // stmtWarning is one warning a statement raises, with its code for APPLY
@@ -171,6 +177,14 @@ func (r *stmtRun) say(head string, lines []string) {
 }
 
 func execStatement(r *stmtRun, st *grammar.Stmt) error {
+	err := execStatementOnce(r, st)
+	if err == nil {
+		r.notePinned(st)
+	}
+	return err
+}
+
+func execStatementOnce(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case st.Dir != "":
 		return dirStatement(r, st)
@@ -323,13 +337,15 @@ func (r *stmtRun) writeProfile(dir string, old, p *envset.Set, changed, what str
 func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	dir := envset.Dir(config.ResolvePlaybooksDir())
 
-	var listClauses, helperClauses, accountClauses []grammar.Clause
+	var listClauses, helperClauses, accountClauses, pickerClauses []grammar.Clause
 	for _, c := range st.Clauses {
 		switch c.Kind {
 		case grammar.SetHelper, grammar.UnsetHelper:
 			helperClauses = append(helperClauses, c)
 		case grammar.UseAccount:
 			accountClauses = append(accountClauses, c)
+		case grammar.AddModel, grammar.DropModel:
+			pickerClauses = append(pickerClauses, c)
 		default:
 			listClauses = append(listClauses, c)
 		}
@@ -383,6 +399,24 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	accountSame := len(accountClauses) == 0 || defAccount == curAccount
 
+	// The DEFAULTS model rows (SPEC.md, "Model picker").
+	root := config.ResolvePlaybooksDir()
+	var picker *settings.Object
+	pickerSame := true
+	if len(pickerClauses) > 0 {
+		cur, err := r.defaultsPicker(root)
+		if err != nil {
+			return fmt.Errorf("the DEFAULTS model rows cannot be read: %w", err)
+		}
+		var pickerLines []string
+		var changed bool
+		if picker, pickerLines, changed, err = applyDefaultsPicker(cur, pickerClauses); err != nil {
+			return err
+		}
+		pickerSame = !changed
+		lines = append(lines, pickerLines...)
+	}
+
 	// Unchanged when the list and the helper setting would stay as they are.
 	listSame := len(listClauses) == 0 || slices.Equal(current, names)
 	helperSame := true
@@ -392,7 +426,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		helperSame = (c.Kind == grammar.SetHelper && stored == c.Arg) || (c.Kind == grammar.UnsetHelper && stored == "")
 	}
 	switch {
-	case listSame && helperSame && accountSame:
+	case listSame && helperSame && accountSame && pickerSame:
 		r.outcome = outUnchanged
 		r.say("DEFAULTS unchanged", nil)
 		return nil
@@ -406,6 +440,9 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if len(accountClauses) > 0 && r.dry != nil {
 			r.dry.defaultAccount, r.dry.hasDefaultAccount = defAccount, true
+		}
+		if !pickerSame {
+			r.recordDefaultsPicker(picker)
 		}
 		return nil
 	}
@@ -450,6 +487,12 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		if err := account.WriteDefault(accountDir, defAccount); err != nil {
 			restore()
 			return fmt.Errorf("cannot write the DEFAULTS account: %w", err)
+		}
+	}
+	if !pickerSame {
+		if err := writeDefaultsPicker(root, picker); err != nil {
+			restore()
+			return fmt.Errorf("cannot write the DEFAULTS model rows: %w", err)
 		}
 	}
 	r.say("Altered DEFAULTS", lines)
@@ -629,6 +672,24 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	loginChange := nowIsolated != wasIsolated
 	m.IsolatedLogin = nowIsolated
 	lines = append(lines, loginLines...)
+	// model_picker_defaults, in the same manifest write.
+	wasExcluded := r.pickerDefaultsExcluded(st.Name, m)
+	nowExcluded := wasExcluded
+	if v, ok := grammar.PropertyValue(st.Clauses, "model_picker_defaults"); ok {
+		nowExcluded = v == manifest.ModelPickerDefaultsExcluded
+	}
+	pickerDefaultsChange := nowExcluded != wasExcluded
+	m.ModelPickerDefaults = ""
+	if nowExcluded {
+		m.ModelPickerDefaults = manifest.ModelPickerDefaultsExcluded
+	}
+	if pickerDefaultsChange {
+		if nowExcluded {
+			lines = append(lines, "model_picker_defaults  excluded: a launch offers no DEFAULTS model row")
+		} else {
+			lines = append(lines, "model_picker_defaults  inherited: a launch offers the DEFAULTS model rows")
+		}
+	}
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
 	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
@@ -675,7 +736,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && !pickerDefaultsChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		head := "PLAYBOOK " + st.Name + " unchanged"
 		if r.exists {
@@ -689,6 +750,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.recordPlaybookEnv(st.Name, m.Env)
 		if loginChange && r.dry != nil {
 			r.dry.isolated[st.Name] = nowIsolated
+		}
+		if pickerDefaultsChange && r.dry != nil {
+			r.dry.pickerExcluded[st.Name] = nowExcluded
 		}
 		if nowSandboxed := sandbox != nil && sandbox.Always; nowSandboxed != wasSandboxed && r.dry != nil {
 			r.dry.sandboxed[st.Name] = nowSandboxed
@@ -726,7 +790,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return nil
 	}
-	if envChange || mcpRecordChange || loginChange || sandboxChange {
+	if envChange || mcpRecordChange || loginChange || sandboxChange || pickerDefaultsChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}

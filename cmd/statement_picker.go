@@ -171,7 +171,7 @@ func readPicker(root *settings.Object) *pickerJSON {
 func pickerLine(p *pickerJSON) string {
 	var ids []string
 	for _, o := range p.Options {
-		s := o.Model
+		s := markPinned(o.Model)
 		if o.Label != nil {
 			s += " (" + *o.Label + ")"
 		}

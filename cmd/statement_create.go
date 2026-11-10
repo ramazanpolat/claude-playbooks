@@ -215,9 +215,22 @@ func createDefaultsBlocks(dir string) (helper, defaults createBlock, err error) 
 	if def != "" {
 		clauses = append(clauses, grammar.Clause{Kind: grammar.UseAccount, Names: []string{def}})
 	}
+	// The DEFAULTS model rows, each an ADD MODEL (SPEC.md, "Model picker").
+	mp, err := readDefaultsPicker(filepath.Dir(dir))
+	if err != nil {
+		return createBlock{}, createBlock{}, fmt.Errorf("the DEFAULTS model rows cannot be read: %w", err)
+	}
+	var comments []string
+	if mp != nil {
+		root := settings.NewObject()
+		root.SetObject(keyModelPicker, mp)
+		rows, notes := pickerCreateClauses(root)
+		clauses = append(clauses, rows...)
+		comments = notes
+	}
 	if len(clauses) > 0 {
 		st := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Defaults, Clauses: clauses}
-		defaults = createBlock{text: st.Pretty() + ";"}
+		defaults = createBlock{text: joinComments(comments, st.Pretty()+";")}
 	}
 	// Only the stored setting: CPB_SECRET_HELPER belongs to one process.
 	if data, err := os.ReadFile(filepath.Join(dir, envset.SecretHelperFile)); err == nil {
@@ -275,6 +288,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		}
 		global, _ := globalInstructionsStateOf(pb.Path)
 		props := []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}
+		if m.ExcludesModelPickerDefaults() {
+			props = append(props, grammar.Var{Key: "model_picker_defaults", Value: manifest.ModelPickerDefaultsExcluded})
+		}
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetProperties, Settings: props})
 		// Exact convergence (D2): every key that is not set is RESET, so
 		// the statement brings a playbook back to exactly this, and the
@@ -286,6 +302,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %w", pb.Name, err)
 		}
 		st.Clauses = append(st.Clauses, settingsResetClauses(sf.Root)...)
+		if !m.ExcludesModelPickerDefaults() {
+			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.ResetProperties, Settings: []grammar.Var{{Key: "model_picker_defaults"}}})
+		}
 		var sets, accounts []string
 		if m != nil && m.Env != nil {
 			sets, accounts = m.Env.Sets, m.Env.Accounts

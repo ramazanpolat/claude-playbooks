@@ -24,6 +24,9 @@
 # 1 file).
 # v4.0.0-rc2: a playbook whose manifest cannot be read is contained.
 # Unreleased: a setting set more than once is written once, so a stack converges.
+# Unreleased: DEFAULTS model rows offered at every launch (a playbook made
+# before the statement and one made after it, an excluded one), and the note
+# and mark for a pinned model id.
 
 [scenario]
 name = "cli-grammar"
@@ -241,6 +244,16 @@ contains = "apply-json-ok"
 # re-applies with nothing changed.
 command = '''P="$HOME/.claude-playbooks/mpk"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; cpb CREATE PLAYBOOK mpk SET launcher = '' >/dev/null && rm -f "$S" && cpb "ALTER PLAYBOOK mpk ADD MODEL 'glm-5.3' LABEL 'GLM 5.3'" >/dev/null && [ "$(c)" = '{"modelPicker":{"options":[{"model":"glm-5.3","label":"GLM5.3"}]}}' ] && cpb "ALTER PLAYBOOK mpk SET model_picker.mode = 'only'" >/dev/null && c | grep -qF '"replaceBuiltInOptions":true' && printf '{"theme":"dark","modelPicker":{"options":[{"model":"hand","label":"Hand"},{"model":"glm-5.3","label":"GLM 5.3"}],"replaceBuiltInOptions":true}}\n' > "$S" && cpb "ALTER PLAYBOOK mpk ADD MODEL 'glm-5.3-flash' BEHAVES AS 'claude-sonnet-5'" >/dev/null && c | grep -qF '"theme":"dark"' && c | grep -qF '{"model":"hand","label":"Hand"},{"model":"glm-5.3","label":"GLM5.3"},{"model":"glm-5.3-flash","behavesAs":"claude-sonnet-5"}' && cpb "ALTER PLAYBOOK mpk DROP MODEL 'hand'" >/dev/null && ! c | grep -qF '"model":"hand"' && cpb SHOW PLAYBOOK mpk --json | tr -d ' \n' | grep -qF '"model_picker":{"mode":"only","options":[{"model":"glm-5.3","label":"GLM5.3","description":null,"behaves_as":null}' && cpb "SELECT name, model_picker FROM PLAYBOOKS --json" | tr -d ' \n' | grep -qF '"model_picker":{"mode":"only","options":[{"behaves_as":null,"description":null,"label":"GLM5.3","model":"glm-5.3"}' && cpb SHOW CREATE PLAYBOOK mpk > "$HOME/mpk.cpb" && grep -qF "SET model_picker.mode = 'only'" "$HOME/mpk.cpb" && cpb APPLY "$HOME/mpk.cpb" | grep -q " 0 created, 0 changed," && echo model-picker-ok'''
 contains = "model-picker-ok"
+
+[[verify.commands]]
+# DEFAULTS model rows: one ALTER DEFAULTS ADD MODEL reaches a playbook made
+# before it and one made after it, as one --settings before claude's own
+# arguments (the logging stub claude records them), and writes nothing into
+# either; an excluded playbook launches without it; SHOW DEFAULTS and
+# EXPLAIN say so; a pinned model id gets its note on stderr and its mark in
+# SHOW; dropping the last row removes the file.
+command = '''export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; R="$HOME/.claude-playbooks"; cpb CREATE PLAYBOOK mdold SET launcher = '' >/dev/null && cpb "ALTER DEFAULTS ADD MODEL 'opus' LABEL 'Opus (newest)' ADD MODEL 'fable' LABEL 'Fable (newest)'" >/dev/null && cpb CREATE PLAYBOOK mdnew SET launcher = '', login = 'isolated' >/dev/null && cpb "CREATE PLAYBOOK mdoff SET launcher = '', model_picker_defaults = 'excluded'" >/dev/null && cpb SHOW DEFAULTS | grep -qE '^Model picker: +opus \(Opus \(newest\)\), fable \(Fable \(newest\)\)$' && cpb SHOW DEFAULTS --json | tr -d ' \n' | grep -qF '"model_picker":{"options":[{"model":"opus","label":"Opus(newest)"' && cpb EXPLAIN PLAYBOOK mdold | grep -qF 'Model picker at launch: adds opus, fable from DEFAULTS' && cpb EXPLAIN PLAYBOOK mdoff | grep -qF "Model picker at launch: adds nothing (the playbook has model_picker_defaults = 'excluded')" && { cpb run mdold --continue; cpb run mdnew; cpb run mdoff; true; } >/dev/null 2>&1 && grep -qF '/mdold|--settings {"modelPicker":{"options":[{"model":"opus","label":"Opus (newest)"},{"model":"fable","label":"Fable (newest)"}]}} --continue' "$L" && grep -qF '/mdnew|--settings {"modelPicker":{"options":[{"model":"opus"' "$L" && grep -qF '/mdoff|' "$L" && ! grep -F '/mdoff|' "$L" | grep -qF -- '--settings' && ! grep -qs modelPicker "$R/mdold/settings.json" && cpb "ALTER PLAYBOOK mdold SET model = 'claude-fable-5-1[1m]'" 2>&1 >/dev/null | grep -qF "Note: 'claude-fable-5-1[1m]' names one release; 'fable[1m]' follows the newest the installed Claude Code knows." && cpb SHOW PLAYBOOK mdold | grep -qF 'claude-fable-5-1[1m] (pinned; fable[1m] follows releases)' && cpb "ALTER DEFAULTS DROP MODEL 'opus' DROP MODEL 'fable'" >/dev/null && test ! -e "$R/.model-picker" && echo defaults-models-ok'''
+contains = "defaults-models-ok"
 
 [[verify.commands]]
 # Claude Code older than 2.1.268 (no `plugin install --json`): a plan that

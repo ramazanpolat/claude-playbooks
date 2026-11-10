@@ -92,6 +92,11 @@ var playbookPropertyTable = []playbookProperty{
 	// a collection, which DROP MODEL empties.
 	{key: "model_picker.mode", kind: kindEnum, values: []string{"append", "only"}, set: SetModelPicker, del: UnsetModelPickerMode},
 	{key: "model_picker", table: true, tableDel: UnsetModelPickerMode},
+	// model_picker_defaults: inherited lets the DEFAULTS model rows into
+	// the playbook's launches; excluded keeps them out (the manifest's
+	// model_picker_defaults). A key of its own, not of the model_picker
+	// table: RESET model_picker stays the picker's mode.
+	{key: "model_picker_defaults", values: []string{"inherited", "excluded"}},
 }
 
 // defaultsPropertyTable is DEFAULTS' one property: the secret helper.

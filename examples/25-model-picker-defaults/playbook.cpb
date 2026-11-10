@@ -1,0 +1,13 @@
+-- Rows every playbook's /model offers, written once for all of them: the
+-- newest model of each family, by its alias. Nothing is written into a
+-- playbook; each launch through cpb passes the rows (SPEC.md, "Model picker").
+ALTER DEFAULTS
+  ADD MODEL 'opus' LABEL 'Opus (newest)'
+  ADD MODEL 'sonnet' LABEL 'Sonnet (newest)'
+  ADD MODEL 'haiku' LABEL 'Haiku (newest)'
+  ADD MODEL 'fable' LABEL 'Fable (newest)';
+
+CREATE PLAYBOOK IF NOT EXISTS daily SET launcher = '';
+
+-- A playbook that keeps its menu as it is.
+CREATE PLAYBOOK IF NOT EXISTS fixed SET launcher = '', model_picker_defaults = 'excluded';

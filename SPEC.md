@@ -146,7 +146,8 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a source
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, global_instructions, model, agent, sandbox.<key>,
-                                           statusline.command, statusline.refresh, model_picker.mode
+                                           statusline.command, statusline.refresh, model_picker.mode,
+                                           model_picker_defaults
                                            see "Playbook properties"
 value      := '<string>' | <word> | <integer> | true | false | [ '<string>', ... ] | '<item>,<item>'
                                            a one-word value bare or quoted; a list also comma-joined
@@ -170,6 +171,9 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
             | RESET secret_helper
+            | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
+                                           a row every launch offers; see "Model picker"
+            | DROP MODEL '<id>'
 
 pb-clause  := set-clause
             | SET VAR <key>=<value> ... [AS PLAINTEXT]
@@ -308,6 +312,8 @@ stores commands; files store the result.
 | `CREATE / ALTER / DROP ACCOUNT` | `<root>/.accounts/<name>.toml` |
 | `ALTER PLAYBOOK … USE ACCOUNT` | the playbook's `.playbook`, `[env] accounts = [...]` |
 | `ALTER DEFAULTS USE ACCOUNT` | `<root>/.accounts/.default`, one name |
+| `ALTER DEFAULTS ADD / DROP MODEL` | `<root>/.model-picker`, `{"options": [...]}`, mode `0600`; nothing in any playbook: each launch passes the rows (see *Model picker*) |
+| `ALTER PLAYBOOK … SET / RESET model_picker_defaults` | the playbook's `.playbook`, `model_picker_defaults = "excluded"` (absent: `'inherited'`) |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `SET launcher` / `RESET launcher` | the playbook dir, the registry and the launcher |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
 | `ALTER PLAYBOOK … SET / RESET agent` | the playbook's `settings.json`, `agent` |
@@ -347,7 +353,7 @@ cpb EXPLAIN PLAYBOOK work
 cpb SHOW CREATE ALL > playbook.cpb
 cpb APPLY playbook.cpb --dry-run
 cpb ALTER PLAYBOOK work ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
-cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)' SET model = 'claude-opus-5-5'
+cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)' SET model = 'opus'
 cpb ALTER PLAYBOOK work SET statusline.command = 'bash ~/bin/statusline.sh'
 cpb ALTER PLAYBOOK work ADD SKILL release-notes FROM 'github:acme/skills' SUBDIR release-notes
 cpb APPLY agent.cpb TO lab
@@ -954,7 +960,7 @@ puts a key back to its default. What is fixed at creation (`FROM`,
 
 ```
 CREATE PLAYBOOK <name> … SET launcher = 'w', login = 'isolated', global_instructions = 'inherited'
-ALTER PLAYBOOK <name> SET global_instructions = 'excluded', model = 'claude-opus-5-5'
+ALTER PLAYBOOK <name> SET global_instructions = 'excluded', model = 'opus'
 ALTER PLAYBOOK <name> RESET login, global_instructions       -- back to the defaults
 ```
 
@@ -969,6 +975,7 @@ ALTER PLAYBOOK <name> RESET login, global_instructions       -- back to the defa
 | `statusline.command` | a command | none | The status line, `settings.json` `statusLine.command` (see *Status line and model*); `RESET statusline` (or `statusline.command`) removes it, its refresh with it |
 | `statusline.refresh` | whole seconds, at least 1 | none | `statusLine.refreshInterval` |
 | `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `RESET model_picker` is the mode too: the rows are a collection, which `DROP MODEL` empties |
+| `model_picker_defaults` | `'inherited'`, `'excluded'` | `'inherited'` | Whether the playbook's launches offer the DEFAULTS model rows (see *Model picker*); the manifest's `model_picker_defaults`, written only when `'excluded'`. A key of its own: `RESET model_picker` stays the mode. A plain directory has no manifest and refuses it, as it refuses `login` |
 
 `DEFAULTS` has one property, `secret_helper` (`ALTER DEFAULTS SET
 secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
@@ -1027,7 +1034,7 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   replacing the ones a playbook has:
 
   ```
-  ALTER PLAYBOOK reviewer SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'
+  ALTER PLAYBOOK reviewer SET IF UNSET model = 'opus', agent = 'reviewer'
   -- on a playbook with a model of its own:
   --   PLAYBOOK reviewer: model is set; SET IF UNSET changed nothing
   -- agent stays unset too: the list is one
@@ -1041,15 +1048,19 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   line (and a `Login:` line when it is isolated). Each key is its
   field: `SHOW PLAYBOOK --json` and `EXPLAIN --json` have `"login"` and
   `"global_instructions"`, and `SELECT`'s `PLAYBOOKS` has `login` and `global_instructions` columns.
+  `SHOW PLAYBOOK --json` and `SELECT` have `model_picker_defaults` too, and
+  the human `SHOW PLAYBOOK` prints a `Model picker defaults` row when it is
+  `'excluded'`.
   `SHOW CREATE` writes the playbook's `CREATE` so that it converges
   exactly: the launcher (`SET launcher = '<alias>'`, `SET launcher = ''`
   for none, or `RESET launcher` for the default: a playbook's name may be a
   keyword, which is no launcher value), then a `SET` list with `login` and
-  `global_instructions`, always, and
+  `global_instructions`, always, `model_picker_defaults = 'excluded'` when
+  it is, and
   `sandbox.always` with the sandbox keys that are set; then a `RESET` list
   with every property that is not set (`RESET sandbox` when nothing in the
   table is, the model, the agent, the status line or only its refresh, the
-  picker mode); then the whole env list, `USE ENV ''` for none. `model`,
+  picker mode, and `model_picker_defaults` when it is `'inherited'`); then the whole env list, `USE ENV ''` for none. `model`,
   `agent`, the status line and the picker mode that are set follow in the
   `ALTER` that adds the plugins (an agent may be a plugin's). Applied to the
   playbook it describes, it changes nothing; applied after a key was set or
@@ -1395,7 +1406,7 @@ ALTER PLAYBOOK reviewer-agent
   ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Bash(rm -rf *)'
   SET statusline.command = '~/.claude-playbooks/reviewer-agent/bin/statusline.sh'
-  SET model = 'claude-opus-5-5'
+  SET model = 'opus'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
 
@@ -1556,6 +1567,64 @@ ALTER PLAYBOOK router-agent
   - `SELECT`'s `PLAYBOOKS` has a `model_picker` column.
 - **Claude Code versions:** `modelPicker` is read from Claude Code 2.1.242, and `behavesAs` from 2.1.257. cpb writes the key either way and does not check the version.
 - `SET model = '<model>'` (the `model` key, above) is a separate property from `model_picker.mode`; a model id is quoted.
+
+#### DEFAULTS model rows: offered at every launch
+
+`ALTER DEFAULTS ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']` and
+`ALTER DEFAULTS DROP MODEL '<id>'` keep model picker rows for every playbook, existing and future:
+
+```
+ALTER DEFAULTS
+  ADD MODEL 'opus' LABEL 'Opus (newest)'
+  ADD MODEL 'sonnet' LABEL 'Sonnet (newest)'
+  ADD MODEL 'haiku' LABEL 'Haiku (newest)'
+  ADD MODEL 'fable' LABEL 'Fable (newest)';
+```
+
+- **The clauses are the playbook's.** A row is keyed by its model id, `ADD` changes a row in place, and `DROP` of a row that is not there is refused.
+- **Storage.** The rows are kept in `<playbooks root>/.model-picker`, the object a `modelPicker` is (`{"options": [...]}`), mode `0600`. Dropping the last row removes the file.
+- **Applied at launch, never written.** Every launch of a playbook or a `start` directory, sandboxed or not, passes `claude` one `--settings` before its own arguments. Its `modelPicker` holds:
+  - the playbook's own `settings.json` picker, unchanged: its rows in order, every field of them, and its other keys;
+  - then each DEFAULTS row whose model id (trimmed) no row of the playbook already has.
+
+  No file of the playbook changes. A DEFAULTS change or an opt-out takes effect at the next launch of every playbook.
+- **Why the whole picker is passed.** Claude Code takes `modelPicker` from the highest of managed settings, `--settings` and user settings that defines it, and does not merge them. A `--settings` picker that held only the DEFAULTS rows would hide the playbook's own.
+- **Skipped.** The launch is exactly as it would be without DEFAULTS rows when:
+  - DEFAULTS has no model rows;
+  - the playbook has `model_picker_defaults = 'excluded'` (*Playbook properties*), read from the manifest that governs the config directory;
+  - the launch does not go to Anthropic's own API: the account's provider is not `anthropic`, or the route it renders sends requests anywhere but `https://api.anthropic.com` (the route `EXPLAIN PLAYBOOK` reports). A gateway, a router, Bedrock, Vertex and Foundry get none. An env set that reaches Anthropic's API, with no base URL or with that one, does;
+  - the playbook's own picker is mode `only` (`replaceBuiltInOptions: true`): it shows exactly its own rows;
+  - `claude`'s own arguments carry `--settings`. Claude Code takes one `--settings`, and the launch's stays the launch's;
+  - the playbook's `settings.json` cannot be read, or its `modelPicker` is not an object;
+  - the playbook's own picker already has every DEFAULTS row.
+
+  Anything cpb cannot read is a skip, never a refusal.
+- **One `--settings`.** An account that authenticates with a helper already makes the launch pass `{"apiKeyHelper": …}`. The picker goes into that same object.
+- **Which launches.** A resumed session (`--resume`, `--continue`) is a launch like any other. A sandboxed launch passes the same `--settings` to the `claude` it starts inside the sandbox. A launch forwarded to another host (`--sandbox-host`, `[sandbox] host`) is that host's `cpb`'s, which applies its own DEFAULTS; `EXPLAIN PLAYBOOK` of a playbook whose manifest forwards every launch says so instead of naming local rows.
+  - A session that does not start through cpb gets none: bare `claude`, or `claude` with `CLAUDE_CONFIG_DIR` set by hand. For `~/.claude`, `APPLY` a recipe of `ADD MODEL` rows `TO '~/.claude'`, which writes them into its `settings.json`.
+- **Why aliases.** The recommended rows are Claude Code's own aliases.
+  - An alias resolves to the newest model of its family that the installed Claude Code knows, so the rows follow every release with no further statement.
+  - When the menu already has a row for the same model, Claude Code shows it once.
+  - The `/model` menu can carry a row the Anthropic server sends at start-up for one release. With Claude Code 2.1.322, a server-sent Fable row named the previous Fable, and while such a row was present Claude Code added no Fable row of its own. The alias row then offers the newest one beside it.
+- **Reads.**
+  - `SHOW DEFAULTS` prints a `Model picker:` line, and its `--json` has `"model_picker": null | {"options": [{"model", "label", "description", "behaves_as"}]}`.
+  - `SHOW CREATE ALL` writes the rows as `ADD MODEL` clauses of `ALTER DEFAULTS`.
+  - `SELECT`'s `DEFAULTS` has a `model_picker` column.
+  - `EXPLAIN PLAYBOOK` prints `Model picker at launch: adds <models> from DEFAULTS`, or `adds nothing (<why>)`, whenever DEFAULTS has rows. Its `--json` has `"model_picker_at_launch": null | {"added": [<model>, ...], "skipped": null | "<why>"}`. The launch and EXPLAIN make the decision with the same function.
+
+#### Pinned model ids
+
+A first-party Claude release id names one release and stays on it when a newer model ships, where its family's alias follows the newest one. Examples: `claude-fable-5-1[1m]`, `claude-haiku-4-5-20251001`.
+
+- **What counts as pinned.** `claude-<…>` with a digit in it, an optional `[1m]`, and no provider prefix or `/`. Aliases (`fable`, `opus[1m]`), gateway ids (`cc/claude-…`, `glm-5.3`) and provider ids (`anthropic.claude-…`) are never pinned.
+- **The note.** `SET model = '<id>'`, `ADD MODEL '<id>'` (a playbook's, a directory's, or DEFAULTS') and their `IF UNSET` forms print one note on stderr after the result when the id is pinned:
+
+  ```
+  Note: 'claude-fable-5-1[1m]' names one release; 'fable[1m]' follows the newest the installed Claude Code knows.
+  ```
+
+  The family's alias keeps the id's `[1m]`. For a family without an alias the note says the id stays on its model. Nothing is refused and stdout and the exit status do not change: pinning can be the point.
+- **The marks.** The human `SHOW PLAYBOOK` and `SHOW DEFAULTS` mark a pinned id where they print a model or a picker row, as do `EXPLAIN PLAYBOOK`'s and `SHOW`'s `Model picker:` lines: `claude-fable-5-1[1m] (pinned; fable[1m] follows releases)`. `EXPLAIN PLAYBOOK`'s `Model:` line says it last, after what it said before: `Model: claude-fable-5-1[1m] (playbook settings); a launch's --model and /model still win; pinned; fable[1m] follows releases`.
 
 ### Skills
 
@@ -1718,18 +1787,22 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 ### SHOW DEFAULTS
 
 **`SHOW DEFAULTS`**: human form, `Env sets:` in order, `Account:` (the
-`DEFAULTS` account, or `machine (none set)`), and `Secret helper:` with the
+`DEFAULTS` account, or `machine (none set)`), `Secret helper:` with the
 command and where it came from (`setting` or `CPB_SECRET_HELPER`), or
-`(none)`. `--json`:
+`(none)`, and `Model picker:` with the DEFAULTS model rows, `<model> (<label>)`
+each, pinned ids marked, or `(none)`. `--json`:
 
 ```
 {"envs": ["claude-default", "corp-proxy"], "account": "mine",
- "secret_helper": "my-keychain-helper", "secret_helper_from": "setting"}
+ "secret_helper": "my-keychain-helper", "secret_helper_from": "setting",
+ "model_picker": {"options": [{"model": "fable", "label": "Fable (newest)", "description": null, "behaves_as": null}]}}
 ```
 
 (`account` is null when `DEFAULTS` names none; `secret_helper` and
-`secret_helper_from` are null when none is configured. Each key is its
-field: `SET secret_helper` is `secret_helper`, `USE ACCOUNT` is `account`.)
+`secret_helper_from` are null when none is configured; `model_picker` is null
+when there are no model rows. Each key is its field: `SET secret_helper` is
+`secret_helper`, `USE ACCOUNT` is `account`, `ADD MODEL` a row of
+`model_picker`.)
 
 ### SHOW ACCOUNTS and SHOW ACCOUNT
 
@@ -1775,6 +1848,7 @@ read is left out of `used_by` and named on stderr, as for `SHOW ENVS`.
  "vars": [{<variable>, "layer": {"kind": "env", "name": "tracing"}}, ...],
  "secret_helper": {"command": "...", "from": "setting"} | null,
  ...,
+ "model_picker_at_launch": null | {"added": ["opus", ...], "skipped": null | "<why>"},
  "route": {"base_url": "http://localhost:8080/v1" | null, "host": "localhost:8080" | null,
            "models": {"default": "glm-5.3", "opus": "glm-5.3-pro"},
            "auth": "none" | "token-set" | "key-helper" | "oauth-login" | "unknown",
@@ -1785,6 +1859,13 @@ read is left out of `used_by` and named on stderr, as for `SHOW ENVS`.
 ```
 
 `layer.kind` is `defaults` (with `name` the env set), `env` or `playbook`.
+
+**`model_picker_at_launch`** is what a launch with no flags does with the
+DEFAULTS model rows (*Model picker*): the models it adds after the playbook's
+own picker, or, with `added` empty, why it adds none. It is null when
+DEFAULTS has no model rows. The human form prints it as one line,
+`Model picker at launch: adds <models> from DEFAULTS` or `Model picker at
+launch: adds nothing (<why>)`, and nothing when DEFAULTS has no rows.
 
 **`route`** (v4.0.0) says where a launch from this environment sends its
 requests and how it authenticates. It carries non-secret values and states
@@ -2043,6 +2124,7 @@ code to the same lines):
 | `sandbox` | `JSON` | The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills. |
 | `login` | `String` | The login property: isolated when the playbook shares no login with the machine (a sandboxed playbook too), else shared. |
 | `global_instructions` | `String` | The global_instructions property: excluded when ~/.claude's CLAUDE.md and rules do not load into the playbook, else inherited. |
+| `model_picker_defaults` | `String` | The model_picker_defaults property: excluded when the playbook's launches offer no DEFAULTS model row, else inherited. |
 | `marketplaces` | `Array(JSON)` | The plugin marketplaces in the playbook's settings: name, source. |
 | `plugins` | `Array(JSON)` | The plugins in the playbook's settings: id, enabled. |
 | `agent` | `Nullable(String)` | The agent the playbook pins (SET agent); null when unset. |
@@ -2113,6 +2195,7 @@ code to the same lines):
 | `account` | `Nullable(String)` | The DEFAULTS account (USE ACCOUNT), for playbooks that name none; null when none is set (they run on machine). |
 | `secret_helper` | `Nullable(String)` | The command that resolves secret references (SET secret_helper); null when none is configured. |
 | `secret_helper_from` | `Nullable(String)` | Where the secret helper is set: setting or CPB_SECRET_HELPER; null when none is configured. |
+| `model_picker` | `JSON` | The DEFAULTS model rows (ADD MODEL), offered by every launch on Anthropic's own API after the playbook's own rows: options; null when there are none. |
 
 ## SHOW SESSIONS
 
@@ -2278,7 +2361,7 @@ CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
   SET launcher = 'w', login = 'isolated', global_instructions = 'excluded'
-  RESET sandbox, model, agent, statusline, model_picker.mode
+  RESET sandbox, model, agent, statusline, model_picker.mode, model_picker_defaults
   USE ENV tracing
   USE ACCOUNT router;
 
