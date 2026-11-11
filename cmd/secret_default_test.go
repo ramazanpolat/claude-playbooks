@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -37,9 +39,12 @@ type memStore struct {
 	notReady error
 	// lastWant is the store kind the last write was told to keep to.
 	lastWant string
-	// targetErr and targetWhy are what target answers.
-	targetErr error
-	targetWhy string
+	// targetErr and targetWhy are what target answers; targetSeq, when
+	// set, the kinds it answers call after call (a store that flaps).
+	targetErr   error
+	targetWhy   string
+	targetSeq   []string
+	targetCalls int
 }
 
 func (m *memStore) readyToStore(string) error { return m.notReady }
@@ -52,9 +57,17 @@ func (m *memStore) maxValue() int {
 }
 
 func (m *memStore) where(name string) string { return "the test store, as " + name }
+func (m *memStore) describe(name string, t storeTarget) string {
+	return "the test store (" + t.kind + "), as " + name
+}
 func (m *memStore) target(name string) (storeTarget, error) {
 	if m.targetErr != nil {
 		return storeTarget{}, m.targetErr
+	}
+	m.targetCalls++
+	if len(m.targetSeq) > 0 {
+		k := m.targetSeq[min(m.targetCalls, len(m.targetSeq))-1]
+		return storeTarget{kind: k, path: "/test-store/" + name}, nil
 	}
 	return storeTarget{kind: storeFile, path: "/test-store/" + name, why: m.targetWhy}, nil
 }
@@ -502,5 +515,41 @@ func TestDefaultHelperReady(t *testing.T) {
 	}
 	if m.writes != 0 {
 		t.Fatalf("%d writes", m.writes)
+	}
+}
+
+// cpb ask on an account whose Claude token is a cpb: reference runs the
+// default helper with cpb's own store, whatever ask's narrow child
+// environment holds: a planted CPB_SECRET_STORE_* or opt-in is replaced.
+func TestAskThroughAnAccountGetsCPBsStore(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	useMemStore(t)
+	t.Setenv(envset.SecretHelperEnv, "")
+	t.Setenv(fileStoreOptInEnv, "")
+	launch := []string{"XDG_DATA_HOME=/elsewhere", storeEnvPrefix + "DIR=/planted", storeEnvPrefix + "FILE_OK=1"}
+	signIn := askSignIn{mode: askLoginAccount, account: &account.Account{Name: "a", Auth: account.Auth{Ref: "cpb:tok"}}}
+	c, err := askCommand(context.Background(), signIn, "/bin/claude", nil, launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := strings.Join(c.Env, "\n")
+	if !strings.Contains(env, storeEnvPrefix+"SET=1") || strings.Contains(env, "=/planted") || strings.Contains(env, storeEnvPrefix+"FILE_OK=1") {
+		t.Fatalf("ask's helper environment: %q", c.Env)
+	}
+	if want := storeDirForHelper(); want != "" && !strings.Contains(env, storeEnvPrefix+"DIR="+want) {
+		t.Fatalf("ask's helper got another store than %s: %q", want, c.Env)
+	}
+}
+
+// The file store opt-in comes from cpb's own environment only.
+func TestFileStoreOptInIsCPBsOwn(t *testing.T) {
+	t.Setenv(fileStoreOptInEnv, "")
+	if env := strings.Join(defaultHelperEnv([]string{fileStoreOptInEnv + "=1"}), "\n"); strings.Contains(env, storeEnvPrefix+"FILE_OK=1") {
+		t.Fatalf("a launch environment opted in: %q", env)
+	}
+	t.Setenv(fileStoreOptInEnv, "1")
+	if env := strings.Join(defaultHelperEnv(nil), "\n"); !strings.Contains(env, storeEnvPrefix+"FILE_OK=1") {
+		t.Fatalf("cpb's own opt-in was not handed: %q", env)
 	}
 }

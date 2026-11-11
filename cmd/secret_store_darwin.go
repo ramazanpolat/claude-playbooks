@@ -80,9 +80,13 @@ func (keychainStore) target(string) (storeTarget, error) {
 }
 
 // There is no file store on macOS: nothing to hand the helper.
-func storeDirForHelper() string { return "" }
-func setHelperStoreDir(string)  {}
-func quietFileReads() func()    { return func() {} }
+func storeDirForHelper() string  { return "" }
+func setHelperStoreDir(string)   {}
+func quietFileReads() func()     { return func() {} }
+func storeToolForHelper() string { return "" }
+func setHelperSecretTool(string) {}
+
+func (k keychainStore) describe(name string, _ storeTarget) string { return k.where(name) }
 
 func (keychainStore) where(name string) string {
 	return "your default macOS Keychain, as the item cpb/" + name + " (service cpb, account " + name + ")"

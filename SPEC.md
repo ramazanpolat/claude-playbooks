@@ -641,7 +641,21 @@ keeps values in the operating system's store:
   Anything else (another message, such as a stale or malformed bus address;
   another exit status; a `secret-tool` that crashed or could not start) is
   a store that cannot answer, exit 5: nothing is written, to the keyring or
-  the file, and a read (a launch) never falls back to the file. A **locked keyring** answers `lookup` as a missing item
+  the file, and a read (a launch) never falls back to the file. Those two
+  messages come from the bus, not from libsecret, so other systems answer
+  otherwise and fail closed. Measured (`LC_ALL=C`): dbus-broker (Fedora 41,
+  libsecret 0.21.7) answers a bus with no keyring daemon on it with `The
+  name is not activatable`; a container with no machine id answers `Cannot
+  spawn a message bus without a machine-id: …`; one with a machine id and
+  a `DISPLAY` with no X server answers `Error spawning command line
+  "dbus-launch --autolaunch=…": Child process exited with code 1`.
+  **`CPB_SECRET_FILE_STORE=1`** is the deliberate way to the file store on
+  such a machine: set in cpb's own environment (the shell cpb runs in;
+  cpb hands it to the helper, and a playbook's or recipe's environment
+  never sets it), it lets the file store answer when `secret-tool` fails
+  outright, never when it is slow (a timeout) or holds the name locked.
+  The exit-5 line names it. The prompt and the report then say why the
+  file keeps the value. A **locked keyring** answers `lookup` as a missing item
   does, also when its unlock prompt was dismissed, and `secret-tool store`
   would then replace the item once it is unlocked; so the helper checks a
   missing answer with `secret-tool search`, which lists a locked item
@@ -695,10 +709,12 @@ keeps values in the operating system's store:
     in one stderr line: which file, and that the keyring does not hold the
     name or cannot be reached. `--store`'s own read-back stays quiet.
   - **Whose store.** The store is the one of the cpb that runs the helper,
-    never the launch's: cpb resolves the file store's directory and takes
-    its own `HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and
-    `DISPLAY`, and hands them to the default helper (`CPB_SECRET_STORE_*`,
-    for every call: `--check`, `--ready`, `--store`, a launch, `cpb ask`).
+    never the launch's: cpb resolves the file store's directory and
+    `secret-tool` (on its own `PATH`), takes its own `HOME`,
+    `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `DISPLAY` and its own
+    `CPB_SECRET_FILE_STORE`, and hands them to the default helper
+    (`CPB_SECRET_STORE_*`, for every call: `--check`, `--ready`, `--store`,
+    a launch, `cpb ask` on an account whose token is a `cpb:` reference).
     The helper uses them for its store and its tools, and drops them before
     it runs the command; anything of that name in the launch environment is
     replaced. So a playbook or a recipe that sets `XDG_DATA_HOME`, `HOME` or
@@ -733,14 +749,25 @@ keeps values in the operating system's store:
     (links among them are judged by where they lead). The directory is then
     opened once, without following a link, and every file in it is reached
     through that handle (`openat`, `fstatat`, `linkat`), so nothing can be
-    swapped in between a check and its use. The file layer refuses a name
-    that is not a plain file name, beside the grammar.
+    swapped in between a check and its use. The ancestors are judged before
+    any missing directory is made. The user's private group is the user's
+    primary group, named as the user, with no other member listed in
+    `/etc/group`; a group kept only in a directory service (LDAP) counts as
+    shared. A root-owned volume mounted group-writable for a pod (a
+    Kubernetes `fsGroup` mount) is refused too: put the file store on a
+    volume the user owns and alone can write, or use a helper of your own.
+    The refusal names the directory, who else could change it, and the
+    `chmod`. Confidentiality rests on the directory handle and the
+    `0700`/`0600` modes; this rule keeps the path to them from being
+    swapped. The file layer refuses a name that is not a plain file name,
+    beside the grammar.
   - **Writing** never replaces: the value goes to a temporary file (`0600`,
     created exclusively, `.tmp-<name>~…`) in the same directory, is
     synced, and is linked to its name, which fails when the name exists (a
-    dangling link included). Under the per-name lock, which first removes
-    any temporary file of that name a killed write left behind: each may
-    hold a value.
+    dangling link included). Every store step, under the per-name lock,
+    first removes any temporary file of that name a killed write left
+    behind (each may hold the value, and one linked before the kill is a
+    second name for it), and so does a read when no write holds the lock.
   - **Reading** refuses a file that does not hold what `--store` would have
     written: empty, ending in a line end, holding a byte outside printable
     ASCII, or longer than 4096 bytes. The line names the file and the
@@ -4457,6 +4484,7 @@ These have no flag equivalent:
 | `CPB_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam. |
 | `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `self-update` makes, and on `install.sh`'s latest-release lookup, raising the anonymous rate limit. Only to GitHub's own API: never to an overridden API base. |
 | `CPB_UPDATE_REPO`, `CPB_UPDATE_API_BASE`, `CPB_UPDATE_DOWNLOAD_BASE` | Redirect self-update at another repository, API, or asset host. Test seams. |
+| `CPB_SECRET_FILE_STORE` | `1` in cpb's own environment lets the Linux file store keep `cpb:<name>` values where `secret-tool` is installed but fails outright (a bus cpb does not know); never where it is slow or holds the name locked. A playbook's or recipe's environment never sets it (*Secrets*, the file store). |
 
 A variable marked *test seam* exists so the suites can run without network or a real release.
 

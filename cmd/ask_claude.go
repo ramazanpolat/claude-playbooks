@@ -444,6 +444,11 @@ func askCommand(ctx context.Context, signIn askSignIn, claudePath string, args, 
 	argv := append(append(append([]string{}, x.pre...), auth.OAuthTokenEnv+"="+a.Auth.Ref, "--", claudePath), args...)
 	c := exec.CommandContext(ctx, x.path, argv...)
 	c.Env = withoutKeys(env, []string{auth.OAuthTokenEnv})
+	if x.def {
+		// ask's child keeps a narrow environment (askEnvKeep); the store is
+		// cpb's own all the same.
+		c.Env = defaultHelperEnv(c.Env)
+	}
 	return c, nil
 }
 

@@ -61,11 +61,6 @@ type helperExe struct {
 	name string // for messages: the configured command, or the default's name
 }
 
-// command is the helper process for args (its own arguments).
-func (x helperExe) command(args ...string) *exec.Cmd {
-	return exec.Command(x.path, append(append([]string{}, x.pre...), args...)...)
-}
-
 // allCPBRefs reports references that are all cpb:<name>, the only scheme
 // the default helper resolves.
 func allCPBRefs(refs []string) bool {

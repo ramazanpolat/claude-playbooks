@@ -65,6 +65,7 @@ func secretsDir() (string, error) {
 
 // setHelperStoreDir takes the directory the running cpb handed the helper.
 func setHelperStoreDir(d string) {
+	helperStoreDir = ""
 	if filepath.IsAbs(d) {
 		helperStoreDir = d
 	}
@@ -123,24 +124,55 @@ func ownedPrivate(path string, st *unix.Stat_t, dir bool) error {
 }
 
 // privateGroup is the user's own group where the system gives each user one
-// (a group named as the user that is the user's primary group, as Debian
-// and Ubuntu do, with umask 002): its write bit lets no one else in. -1
-// when there is none, or it cannot be told (a test replaces it).
+// (as Debian and Ubuntu do, with umask 002): its write bit lets no one else
+// in. -1 when there is none, or it cannot be told from /etc/group (a group
+// kept only in a directory service such as LDAP reads as shared). A test
+// replaces it.
 var privateGroup = sync.OnceValue(func() int {
 	u, err := user.Current()
 	if err != nil {
 		return -1
 	}
-	g, err := user.LookupGroupId(u.Gid)
-	if err != nil || g.Name != u.Username {
-		return -1
-	}
-	gid, err := strconv.Atoi(u.Gid)
+	data, err := os.ReadFile("/etc/group")
 	if err != nil {
 		return -1
 	}
-	return gid
+	return privateGroupIn(data, u.Username, u.Gid)
 })
+
+// privateGroupIn is the user's private group in an /etc/group file: the
+// user's primary group, named as the user, with no member listed but the
+// user. -1 otherwise.
+func privateGroupIn(groupFile []byte, username, primaryGid string) int {
+	for _, line := range strings.Split(string(groupFile), "\n") {
+		f := strings.Split(strings.TrimSpace(line), ":")
+		if len(f) < 4 || f[2] != primaryGid {
+			continue
+		}
+		if f[0] != username {
+			return -1
+		}
+		for _, m := range strings.Split(f[3], ",") {
+			if m = strings.TrimSpace(m); m != "" && m != username {
+				return -1
+			}
+		}
+		gid, err := strconv.Atoi(f[2])
+		if err != nil {
+			return -1
+		}
+		return gid
+	}
+	return -1
+}
+
+// groupName is gid's name for a message, or the number.
+func groupName(gid uint32) string {
+	if g, err := user.LookupGroupId(strconv.Itoa(int(gid))); err == nil {
+		return g.Name
+	}
+	return strconv.Itoa(int(gid))
+}
 
 // ancestorWritableByOthers reports whether a directory st describes lets
 // someone other than its owner change its entries: writable by others, or
@@ -157,7 +189,9 @@ func ancestorWritableByOthers(st *unix.Stat_t) bool {
 // could change: one owned by anyone but root or this user, or writable by
 // anyone else (ancestorWritableByOthers). p is resolved first, so a link
 // among the ancestors (a /home that points elsewhere) is judged by where
-// it leads.
+// it leads. The line names the directory, who else can change it, and the
+// fix. (A root-owned volume mounted group-writable for a pod, as a
+// Kubernetes fsGroup does, is refused too: SPEC says so.)
 func checkAncestors(p string) error {
 	real, err := filepath.EvalSymlinks(p)
 	if err != nil {
@@ -169,10 +203,13 @@ func checkAncestors(p string) error {
 			return fmt.Errorf("%s could not be checked (%v); nothing was read or written", d, err)
 		}
 		if owner := fileOwner(&st); owner != 0 && owner != os.Getuid() {
-			return fmt.Errorf("%s, above the file store, is owned by another user (uid %d); nothing was read or written. Keep the file store under directories only you or root own", d, owner)
+			return fmt.Errorf("%s, above the file store, is owned by another user (uid %d), who could swap what is below it; nothing was read or written. Point XDG_DATA_HOME at a directory under ones only you or root own", d, owner)
 		}
 		if ancestorWritableByOthers(&st) {
-			return fmt.Errorf("%s, above the file store, is writable by others or by a shared group (mode %04o), so it could be swapped; nothing was read or written. Keep the file store under directories only you can write", d, st.Mode&0o7777)
+			if st.Mode&0o002 != 0 {
+				return fmt.Errorf("%s, above the file store, is writable by anyone (mode %04o), so what is below it could be swapped; nothing was read or written. Fix it with chmod o-w %s (or chmod +t, as /tmp has), or point XDG_DATA_HOME elsewhere", d, st.Mode&0o7777, d)
+			}
+			return fmt.Errorf("%s, above the file store, is writable by the group %s (mode %04o), which is not your own private group, so its other members could swap what is below it; nothing was read or written. Fix it with chmod g-w %s, or point XDG_DATA_HOME elsewhere", d, groupName(st.Gid), st.Mode&0o7777, d)
 		}
 		if d == "/" || d == "." {
 			return nil
@@ -186,6 +223,10 @@ func checkAncestors(p string) error {
 // directory is not there and create is false.
 func (f fileStore) openDir(create bool) (*os.File, error) {
 	if create {
+		// The directories that are there are judged before any is made.
+		if err := checkAncestors(nearestExisting(filepath.Dir(f.dir))); err != nil {
+			return nil, err
+		}
 		if err := os.MkdirAll(f.dir, 0o700); err != nil {
 			return nil, fmt.Errorf("the file store %s could not be made (%v); nothing was stored", f.dir, err)
 		}
@@ -330,6 +371,19 @@ func sweepTemps(d *os.File, name string) {
 	}
 }
 
+// sweepTemps removes name's temporary files a killed write left (under
+// name's lock: the caller holds it). A store with no directory yet has
+// none.
+func (f fileStore) sweepTemps(name string) {
+	if safeSecretFileName(name) != nil {
+		return
+	}
+	if d, err := f.openDir(false); err == nil && d != nil {
+		sweepTemps(d, name)
+		d.Close()
+	}
+}
+
 // write creates the file and never replaces one: the value goes to a
 // temporary file (0600, created exclusively) in the same directory, is
 // synced, and is linked to its name, which fails when the name exists, a
@@ -378,19 +432,23 @@ func (f fileStore) write(name string, value []byte) error {
 	return nil
 }
 
+// nearestExisting is p, or its nearest ancestor that exists.
+func nearestExisting(p string) string {
+	for {
+		if _, err := os.Lstat(p); err == nil || filepath.Dir(p) == p {
+			return p
+		}
+		p = filepath.Dir(p)
+	}
+}
+
 // ready reports whether the file store could take a value now: its
 // directory can be made (or opened) and trusted, and written. Nothing is
 // written.
 func (f fileStore) ready() error {
 	if _, err := os.Lstat(f.dir); os.IsNotExist(err) {
 		// The nearest existing ancestor must be trusted and writable.
-		p := filepath.Dir(f.dir)
-		for {
-			if _, err := os.Lstat(p); err == nil || filepath.Dir(p) == p {
-				break
-			}
-			p = filepath.Dir(p)
-		}
+		p := nearestExisting(filepath.Dir(f.dir))
 		if err := checkAncestors(p); err != nil {
 			return err
 		}

@@ -39,13 +39,40 @@ type linuxStore struct {
 	file fileStore
 }
 
+// helperSecretTool is the secret-tool the running cpb found and handed the
+// helper ("" when it found none): the helper never looks it up on a PATH a
+// playbook's launch environment may have changed.
+var helperSecretTool string
+
+func setHelperSecretTool(p string) { helperSecretTool = p }
+
+// secretToolPath is the secret-tool this store uses, or "": in helper mode
+// the one the running cpb handed over, otherwise cpb's own lookup.
+func secretToolPath() string {
+	if helperHanded {
+		return helperSecretTool
+	}
+	if tool, err := lookSecretTool(); err == nil {
+		return tool
+	}
+	return ""
+}
+
+// storeToolForHelper is the secret-tool handed to the default helper.
+func storeToolForHelper() string {
+	if tool, err := lookSecretTool(); err == nil {
+		return tool
+	}
+	return ""
+}
+
 func osDefaultSecretStore() (osSecretStore, error) {
 	dir, err := secretsDir()
 	if err != nil {
 		return nil, err
 	}
 	st := linuxStore{file: fileStore{dir: dir}}
-	if tool, err := lookSecretTool(); err == nil {
+	if tool := secretToolPath(); tool != "" {
 		st.ss = &secretServiceStore{tool: tool}
 	}
 	return st, nil
@@ -59,7 +86,11 @@ const (
 	keyringAbsent                          // it answers, and holds no such item
 	keyringFound                           // it holds the item, unlocked
 	keyringLocked                          // it holds the item in a locked collection
+	keyringBypassed                        // it fails outright, and CPB_SECRET_FILE_STORE=1 sends values to the file
 )
+
+// fileAnswers reports whether the file store answers for a name in state k.
+func fileAnswers(k keyringState) bool { return k == keyringUnreachable || k == keyringBypassed }
 
 // keyring asks the Secret Service about name. With deep, a missing answer
 // is checked with search, which tells a locked item from a missing one but
@@ -79,7 +110,12 @@ func (s linuxStore) keyring(name string, deep bool) (keyringState, error) {
 		return keyringUnreachable, nil
 	}
 	found, noService, err := s.ss.lookup(name)
+	var ue *unavailableError
 	switch {
+	case err != nil && errors.As(err, &ue) && ue.keyringFailed && fileStoreOptIn():
+		// A keyring that fails outright (never one that is slow or locked),
+		// and the person said to use the file store on this machine.
+		return keyringBypassed, nil
 	case err != nil:
 		return keyringUnreachable, err
 	case noService != "":
@@ -117,9 +153,11 @@ func (s linuxStore) target(name string) (storeTarget, error) {
 		t.why = "secret-tool is not installed"
 	case k == keyringUnreachable:
 		t.why = "no keyring can be reached"
+	case k == keyringBypassed:
+		t.why = "the keyring fails here, and " + fileStoreOptInEnv + "=1 sends values to the file"
 	}
 	inFile, ferr := s.file.exists(name)
-	if (ferr == nil && inFile) || k == keyringUnreachable {
+	if (ferr == nil && inFile) || fileAnswers(k) {
 		return t, nil
 	}
 	return storeTarget{kind: storeSecretService}, nil
@@ -127,13 +165,21 @@ func (s linuxStore) target(name string) (storeTarget, error) {
 
 func (s linuxStore) where(name string) string {
 	t, err := s.target(name)
-	switch {
-	case err != nil:
+	if err != nil {
 		return "your Secret Service keyring, which cannot answer now (" + err.Error() + ")"
+	}
+	return s.describe(name, t)
+}
+
+// describe words t for the store step's prompt.
+func (s linuxStore) describe(name string, t storeTarget) string {
+	switch {
 	case t.kind == storeSecretService:
 		return "your Secret Service keyring, as the item \"cpb " + name + "\" (service cpb, name " + name + ")"
 	case s.ss == nil:
 		return "the file " + t.path + ", readable by you (and root), since this machine has no keyring: secret-tool is not installed (installing it and a keyring such as GNOME Keyring or KWallet would keep it there instead)"
+	case strings.HasPrefix(t.why, "the keyring fails"):
+		return "the file " + t.path + ", readable by you (and root), since the keyring fails on this machine and " + fileStoreOptInEnv + "=1 is set"
 	case t.why != "":
 		return "the file " + t.path + ", readable by you (and root), since no keyring can be reached on this machine (a keyring such as GNOME Keyring or KWallet running in your session would keep it there instead)"
 	default:
@@ -144,6 +190,9 @@ func (s linuxStore) where(name string) string {
 // maxValue is the Secret Service's limit, which the file store keeps too,
 // so a value fits whichever store takes it.
 func (s linuxStore) maxValue() int { return min(secretServiceMaxValue, fileStoreMaxValue) }
+
+// sweepTemps sweeps the file store's temporary files of name.
+func (s linuxStore) sweepTemps(name string) { s.file.sweepTemps(name) }
 
 // readyToStore asks what a write of name would meet, with nothing that
 // carries a value: a keyring that cannot answer or holds the name locked,
@@ -157,7 +206,7 @@ func (s linuxStore) readyToStore(name string) error {
 		return err
 	case k == keyringLocked:
 		return unavailable("cpb:%s is in your Secret Service keyring, which is locked: unlock the keyring (log in to your desktop session, or unlock it in your keyring's tool), then run this again; nothing was asked for or stored", name)
-	case k == keyringUnreachable:
+	case fileAnswers(k):
 		return s.file.ready()
 	}
 	return nil
@@ -219,8 +268,11 @@ func (s linuxStore) read(name string) ([]byte, error) {
 	v, err := s.file.read(name)
 	if err == nil && s.ss != nil && announceFileReads {
 		why := "the keyring does not hold it"
-		if k == keyringUnreachable {
+		switch k {
+		case keyringUnreachable:
 			why = "no keyring can be reached"
+		case keyringBypassed:
+			why = "the keyring fails here, and " + fileStoreOptInEnv + "=1 is set"
 		}
 		fmt.Fprintf(os.Stderr, "cpb:%s is read from the file %s: %s\n", name, s.file.path(name), why)
 	}
@@ -240,7 +292,7 @@ func (s linuxStore) write(name string, value []byte, want string) error {
 	kind := storeSecretService
 	switch k {
 	case keyringAbsent:
-	case keyringUnreachable:
+	case keyringUnreachable, keyringBypassed:
 		kind = storeFile
 	default:
 		return fmt.Errorf("cpb:%s is in your Secret Service keyring already; nothing was stored", name)
@@ -355,7 +407,7 @@ func (s secretServiceStore) lookup(name string) (found bool, noService string, e
 	if why == "" {
 		why = err.Error()
 	}
-	return false, "", unavailable("secret-tool could not answer about cpb:%s (%s); nothing was read or stored, in the keyring or in a file. Check your keyring, then run this again, or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, why)
+	return false, "", &unavailableError{keyringFailed: true, msg: fmt.Sprintf("secret-tool could not answer about cpb:%s (%s); nothing was read or stored, in the keyring or in a file. Check your keyring, then run this again; or, on a machine whose keyring cannot be used, set %s=1 in your own shell (never in a playbook), and cpb keeps cpb:<name> values in the file store instead (plaintext, readable by you and root); or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, why, fileStoreOptInEnv)}
 }
 
 // lockedItem reports whether search lists an item for name: it lists a

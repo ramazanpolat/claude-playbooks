@@ -1563,3 +1563,35 @@ func TestStoreStepReadyDiscardsTypingWithoutEnter(t *testing.T) {
 		t.Fatalf("stored %q", b)
 	}
 }
+
+// The prompt and the store the write is held to come from one answer: a
+// store that would answer differently on a second question (a keyring
+// that flaps) cannot print one store and bind the other.
+func TestStoreStepPromptAndBindingAgree(t *testing.T) {
+	_, log := storeHelper(t)
+	m := asDefaultHelper(t, log)
+	m.targetSeq = []string{storeSecretService, storeFile}
+	typeIt, finish := onPty(t)
+	defer finish()
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+	if err != nil || !strings.Contains(out, "the test store ("+storeSecretService+")") || !strings.Contains(readLog(t, log), "--into "+storeSecretService) || m.targetCalls != 1 {
+		t.Fatalf("%v; asked %d times; %q; log %q", err, m.targetCalls, out, readLog(t, log))
+	}
+}
+
+// When cpb's default helper cannot answer --check (exit 5: a locked
+// keyring item, say), the report does not claim where the value is.
+func TestSecretReportUnknownWhenTheHelperCannotAnswer(t *testing.T) {
+	_, log := storeHelper(t)
+	asDefaultHelper(t, log)
+	t.Setenv("FORCE_CHECK_FAIL", "1")
+	t.Setenv("CHECK_EXIT", "5")
+	t.Setenv("CHECK_SAYS", "cpb:tok is in your Secret Service keyring, which is locked")
+	r := secretReport([]string{"cpb:tok"})
+	if r[0].Store != storeUnknown || r[0].Path != "" || !strings.Contains(r[0].Note, "locked") {
+		t.Fatalf("%+v", r)
+	}
+}

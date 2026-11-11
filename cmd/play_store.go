@@ -275,6 +275,12 @@ func secretReport(refs []string) []playSecretJSON {
 				why += ": " + line
 			}
 			e.Note = "the helper could not say whether it is stored (" + why + ")"
+			// cpb's default helper asks deeper than cpb's own process (a
+			// locked keyring item is seen only there): when it cannot
+			// answer, where the value is cannot be said either.
+			if x.def && errors.As(err, &ee) && ee.ExitCode() == unavailableExit {
+				e.Store, e.Path = storeUnknown, ""
+			}
 		}
 		out = append(out, e)
 	}
@@ -388,16 +394,18 @@ func storeSecret(ref string) (err error) {
 	// write is held to that answer (--into): a store that cannot say stops
 	// the step before anything is asked for.
 	into := ""
+	where := "the store of your secret helper " + x.name
 	if x.def {
 		if st, err := defaultSecretStore(); err == nil {
-			t, terr := st.target(strings.TrimPrefix(ref, manifest.CPBRefPrefix))
+			name := strings.TrimPrefix(ref, manifest.CPBRefPrefix)
+			t, terr := st.target(name)
 			if terr != nil {
 				return fmt.Errorf("%s was not stored: %v; nothing was asked for or written", ref, terr)
 			}
-			into = t.kind
+			into, where = t.kind, st.describe(name, t)
 		}
 	}
-	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
+	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, where)
 	if x.def {
 		// Before anyone types a value, the store is asked whether it can
 		// take one, with nothing that carries a value: a Keychain locked

@@ -10,6 +10,8 @@ func osDefaultSecretStore() (osSecretStore, error) {
 }
 
 // No store, so nothing to hand the helper.
-func storeDirForHelper() string { return "" }
-func setHelperStoreDir(string)  {}
-func quietFileReads() func()    { return func() {} }
+func storeDirForHelper() string  { return "" }
+func setHelperStoreDir(string)   {}
+func quietFileReads() func()     { return func() {} }
+func storeToolForHelper() string { return "" }
+func setHelperSecretTool(string) {}

@@ -40,9 +40,12 @@
   store would have written (empty, a trailing newline). Only `secret-tool`'s
   two messages for "no Secret Service" let the file answer: a keyring that
   fails in any other way is exit 5, never a quiet fall back to the file, and
-  the write goes to the store the prompt named or nowhere. The store is
-  always the one of the cpb that runs the helper, whatever `HOME`,
-  `XDG_DATA_HOME` or session bus a playbook's launch sets. When a keyring
+  the write goes to the store the prompt named or nowhere.
+  `CPB_SECRET_FILE_STORE=1` in your own shell is the deliberate way to the
+  file where the keyring is installed but cannot be used. The store, and
+  the `secret-tool` it uses, are always those of the cpb that runs the
+  helper (a launch, `cpb ask`), whatever `HOME`, `XDG_DATA_HOME`, `PATH` or
+  session bus a playbook's launch sets. When a keyring
   starts later, a value in
   the file is still found and new values go to the keyring; a name in both is
   the keyring's, and a locked keyring item is never written over or beside.

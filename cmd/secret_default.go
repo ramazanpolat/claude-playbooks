@@ -91,14 +91,30 @@ const storeEnvPrefix = "CPB_SECRET_STORE_"
 // store's tools: what the Keychain and the keyring are found through.
 var storeEnvKeys = []string{"HOME", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "DISPLAY"}
 
+// fileStoreOptInEnv is the one variable that sends cpb:<name> values to
+// the file store on a Linux machine whose keyring is installed but fails
+// (a bus cpb does not know, a keyring that cannot be started). cpb reads
+// it from its own environment only and hands it to the helper: a
+// playbook's environment never sets it.
+const fileStoreOptInEnv = "CPB_SECRET_FILE_STORE"
+
 // defaultHelperEnv is env for running cpb's default helper: env without any
 // CPB_SECRET_STORE_* of its own, plus CPB_SECRET_STORE_SET=1, the file
-// store's directory (CPB_SECRET_STORE_DIR) and cpb's own value of each
-// storeEnvKeys (CPB_SECRET_STORE_<KEY>; absent when cpb's own is unset).
+// store's directory (CPB_SECRET_STORE_DIR), the secret-tool cpb found
+// (CPB_SECRET_STORE_SECRET_TOOL, absent when it found none), the file
+// store opt-in (CPB_SECRET_STORE_FILE_OK=1 when cpb's own
+// CPB_SECRET_FILE_STORE is 1), and cpb's own value of each storeEnvKeys
+// (CPB_SECRET_STORE_<KEY>; absent when cpb's own is unset).
 func defaultHelperEnv(env []string) []string {
 	env = append(withoutPrefix(env, storeEnvPrefix), storeEnvPrefix+"SET=1")
 	if d := storeDirForHelper(); d != "" {
 		env = append(env, storeEnvPrefix+"DIR="+d)
+	}
+	if t := storeToolForHelper(); t != "" {
+		env = append(env, storeEnvPrefix+"SECRET_TOOL="+t)
+	}
+	if os.Getenv(fileStoreOptInEnv) == "1" {
+		env = append(env, storeEnvPrefix+"FILE_OK=1")
 	}
 	for _, k := range storeEnvKeys {
 		if v, ok := os.LookupEnv(k); ok {
@@ -114,13 +130,33 @@ func defaultHelperEnv(env []string) []string {
 // CPB_SECRET_STORE_*.
 var helperToolEnv []string
 
+// helperHanded: the cpb that runs the helper handed it the store
+// (defaultHelperEnv); helperFileOK is its file store opt-in.
+var helperHanded, helperFileOK bool
+
+// fileStoreOptIn reports CPB_SECRET_FILE_STORE=1: in helper mode as the
+// running cpb handed it, never from the launch environment; in cpb's own
+// process from its own environment.
+func fileStoreOptIn() bool {
+	if helperHanded {
+		return helperFileOK
+	}
+	return os.Getenv(fileStoreOptInEnv) == "1"
+}
+
 // applyHelperStoreEnv reads, in helper mode, what the cpb that runs the
 // helper handed it (defaultHelperEnv); nothing when it handed nothing.
 func applyHelperStoreEnv() {
+	helperHanded, helperFileOK, helperToolEnv = false, false, nil
+	setHelperStoreDir("")
+	setHelperSecretTool("")
 	if os.Getenv(storeEnvPrefix+"SET") != "1" {
 		return
 	}
+	helperHanded = true
+	helperFileOK = os.Getenv(storeEnvPrefix+"FILE_OK") == "1"
 	setHelperStoreDir(os.Getenv(storeEnvPrefix + "DIR"))
+	setHelperSecretTool(os.Getenv(storeEnvPrefix + "SECRET_TOOL"))
 	env := withoutPrefix(os.Environ(), storeEnvPrefix)
 	env = withoutKeys(env, storeEnvKeys)
 	for _, k := range storeEnvKeys {
@@ -140,13 +176,18 @@ func storeToolEnv() []string {
 }
 
 // unavailableError is a store error that storeCannotAnswer reports: the
-// store could not answer, as opposed to refusing this value.
-type unavailableError struct{ msg string }
+// store could not answer, as opposed to refusing this value. keyringFailed
+// marks a keyring that failed outright (not a timeout, not a locked item),
+// the one failure CPB_SECRET_FILE_STORE=1 turns into "use the file store".
+type unavailableError struct {
+	msg           string
+	keyringFailed bool
+}
 
 func (e *unavailableError) Error() string { return e.msg }
 
 func unavailable(format string, a ...any) error {
-	return &unavailableError{fmt.Sprintf(format, a...)}
+	return &unavailableError{msg: fmt.Sprintf(format, a...)}
 }
 
 // The bounds on the default helper's own waits (a test shortens them):
@@ -162,6 +203,9 @@ var (
 type osSecretStore interface {
 	// where names the store and the item, for the store step's prompt.
 	where(name string) string
+	// describe is where's wording for a target already asked for, so the
+	// prompt and the write the store step binds come from one answer.
+	describe(name string, t storeTarget) string
 	// target is where name's value is kept, or would be kept when it is not
 	// stored yet. It reads no value; a store that cannot answer is an
 	// error, never a guess.
@@ -265,6 +309,29 @@ var flockName = syscall.Flock
 // at most lockTimeout, and then says which name was locked and nothing
 // else. It does not stop another program from writing the item.
 func lockSecretName(name string) (func(), error) {
+	return lockSecretNameWithin(name, lockTimeout)
+}
+
+// tempSweeper is a store that keeps temporary files a killed write can
+// leave (the file store): sweepTemps removes those of name. Called only
+// under name's lock.
+type tempSweeper interface{ sweepTemps(name string) }
+
+// sweepUnderLock sweeps name's temporary files when the store keeps any
+// and name's lock is free at once; a lock someone holds is a write in
+// progress, whose temporary file is not stale.
+func sweepUnderLock(st osSecretStore, name string) {
+	sw, ok := st.(tempSweeper)
+	if !ok {
+		return
+	}
+	if unlock, err := lockSecretNameWithin(name, 0); err == nil {
+		sw.sweepTemps(name)
+		unlock()
+	}
+}
+
+func lockSecretNameWithin(name string, wait time.Duration) (func(), error) {
 	dir, err := secretLockDir()
 	if err == nil {
 		err = os.MkdirAll(dir, 0o700)
@@ -276,7 +343,7 @@ func lockSecretName(name string) (func(), error) {
 	if err != nil {
 		return nil, unavailable("the lock for cpb:%s could not be taken (%v); nothing was stored", name, err)
 	}
-	deadline := time.Now().Add(lockTimeout)
+	deadline := time.Now().Add(wait)
 	for {
 		err = flockName(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
@@ -285,7 +352,7 @@ func lockSecretName(name string) (func(), error) {
 		if !errors.Is(err, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
 			f.Close()
 			if errors.Is(err, syscall.EWOULDBLOCK) {
-				return nil, unavailable("cpb:%s is being stored by another process, and its lock was not free within %s; nothing was stored", name, lockTimeout)
+				return nil, unavailable("cpb:%s is being stored by another process, and its lock was not free within %s; nothing was stored", name, wait)
 			}
 			return nil, unavailable("the lock for cpb:%s could not be taken (%v); nothing was stored", name, err)
 		}
@@ -379,6 +446,12 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 			return storeCannotAnswer(err)
 		}
 		defer unlock()
+		// Every store step sweeps what a killed write of name left, the
+		// name stored or not: a temporary file linked before the kill is a
+		// second name for the value.
+		if sw, ok := st.(tempSweeper); ok {
+			sw.sweepTemps(name)
+		}
 		found, err := st.exists(name)
 		if err != nil {
 			return storeCannotAnswer(err)
@@ -437,6 +510,7 @@ func secretHelperExec(st osSecretStore, args, env []string) (string, []string, [
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
+		sweepUnderLock(st, name)
 		value, err := st.read(name)
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("%s: %s could not be read (%w)", key, ref, err)

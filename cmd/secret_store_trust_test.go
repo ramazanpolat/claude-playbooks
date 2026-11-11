@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -15,7 +16,10 @@ import (
 // helperStoreReset undoes what helper mode reads from its environment.
 func helperStoreReset(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() { helperStoreDir, helperToolEnv = "", nil })
+	t.Cleanup(func() {
+		helperStoreDir, helperToolEnv = "", nil
+		helperHanded, helperFileOK, helperSecretTool = false, false, ""
+	})
 }
 
 // storeExit runs the helper's --store and returns its exit status (0 for
@@ -201,7 +205,7 @@ func TestFileStoreAncestors(t *testing.T) {
 	open := t.TempDir()
 	os.Chmod(open, 0o777)
 	f := fileStore{dir: filepath.Join(open, "data", "cpb", "secrets")}
-	if err := f.write("tok", []byte("v")); err == nil || !strings.Contains(err.Error(), "writable by others or by a shared group") {
+	if err := f.write("tok", []byte("v")); err == nil || !strings.Contains(err.Error(), "writable by anyone") {
 		t.Fatalf("an other-writable ancestor: %v", err)
 	}
 	os.Chmod(open, 0o777|os.ModeSticky)
@@ -414,5 +418,203 @@ func TestReadBackStaysQuiet(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "tok")); err != nil {
 		t.Fatal("not stored")
+	}
+}
+
+// helperMode makes the following runSecretHelper calls helper-mode calls
+// that the running cpb handed env (defaultHelperEnv's result).
+func helperMode(t *testing.T, env []string) {
+	t.Helper()
+	helperStoreReset(t)
+	t.Cleanup(func() { helperHanded, helperFileOK, helperSecretTool = false, false, "" })
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(k, storeEnvPrefix) {
+			t.Setenv(k, v)
+		}
+	}
+}
+
+// CPB_SECRET_FILE_STORE=1 in cpb's own environment sends values to the
+// file store when the keyring fails outright; never when it is slow or
+// holds the name locked. Without it the failure is exit 5, and the line
+// names the opt-in.
+func TestFileStoreOptIn(t *testing.T) {
+	items, _ := stubSecretTool(t)
+	dir := fileStoreHome(t)
+	locks := t.TempDir()
+	savedLocks := secretLockDir
+	secretLockDir = func() (string, error) { return locks, nil }
+	t.Cleanup(func() { secretLockDir = savedLocks })
+	t.Setenv("STUB_LOOKUP_EXIT", "1")
+	t.Setenv("STUB_LOOKUP_SAYS", "The name is not activatable")
+	t.Setenv(fileStoreOptInEnv, "")
+	env := defaultHelperEnv(nil)
+	// The launch environment says 1; the cpb that runs the helper did not.
+	t.Setenv(fileStoreOptInEnv, "1")
+	helperMode(t, env)
+	if code, out := storeExit(t, []string{"--store", "cpb:a"}, "v-1"); code != unavailableExit || !strings.Contains(out, fileStoreOptInEnv+"=1") {
+		t.Fatalf("no opt-in from cpb: exit %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a")); err == nil {
+		t.Fatal("the launch environment's opt-in was taken")
+	}
+	t.Setenv(fileStoreOptInEnv, "1")
+	helperMode(t, defaultHelperEnv(nil))
+	if code, out := storeExit(t, []string{"--store", "cpb:b", "--into", storeFile}, "v-1"); code != 0 {
+		t.Fatalf("opted in: exit %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "b")); err != nil {
+		t.Fatal("not in the file store")
+	}
+	st, _ := defaultSecretStore()
+	if tg, err := st.target("b"); err != nil || tg.kind != storeFile || !strings.Contains(tg.why, fileStoreOptInEnv) {
+		t.Fatalf("target: %+v %v", tg, err)
+	}
+	// Slow is not failed: a timeout stays exit 5.
+	t.Setenv("STUB_LOOKUP_EXIT", "")
+	t.Setenv("STUB_SLOW", "1")
+	saved := toolTimeout
+	toolTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { toolTimeout = saved })
+	if code, _ := storeExit(t, []string{"--store", "cpb:c"}, "v-1"); code != unavailableExit {
+		t.Fatalf("a timeout, opted in: exit %d", code)
+	}
+	// Locked is not failed: the item is never written beside.
+	t.Setenv("STUB_SLOW", "")
+	t.Setenv("STUB_LOCKED", "1")
+	if code, _ := storeExit(t, []string{"--store", "cpb:d"}, "v-1"); code != unavailableExit {
+		t.Fatalf("locked, opted in: exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "d")); err == nil {
+		t.Fatal("written beside a locked item")
+	}
+	_ = items
+}
+
+// The helper uses the secret-tool the running cpb found, never one a
+// launch's PATH finds or misses: with none handed it has no keyring; with
+// one handed it asks it, whatever its own PATH says.
+func TestHelperUsesCPBsSecretTool(t *testing.T) {
+	_, log := stubSecretTool(t)
+	fileStoreHome(t)
+	env := defaultHelperEnv(nil)
+	if !strings.Contains(strings.Join(env, "\n"), storeEnvPrefix+"SECRET_TOOL=") {
+		t.Fatalf("no secret-tool handed: %q", env)
+	}
+	saved := lookSecretTool
+	lookSecretTool = func() (string, error) { return "", os.ErrNotExist } // the launch's PATH has none
+	t.Cleanup(func() { lookSecretTool = saved })
+	helperMode(t, env)
+	applyHelperStoreEnv()
+	st, _ := defaultSecretStore()
+	st.exists("tok")
+	if !strings.Contains(readLog(t, log), "lookup service cpb name tok") {
+		t.Fatal("the handed secret-tool was not asked")
+	}
+	// Handed none: no keyring, even where the helper's own PATH has one.
+	lookSecretTool = saved
+	helperMode(t, []string{storeEnvPrefix + "SET=1"})
+	os.Unsetenv(storeEnvPrefix + "SECRET_TOOL")
+	applyHelperStoreEnv()
+	st, _ = defaultSecretStore()
+	if tg, err := st.target("tok"); err != nil || tg.kind != storeFile || tg.why != "secret-tool is not installed" {
+		t.Fatalf("handed none: %+v %v", tg, err)
+	}
+}
+
+// The ancestor refusals name what is wrong and the fix; the private group
+// is the user's primary group, named as the user, with no other member.
+func TestAncestorMessagesAndPrivateGroup(t *testing.T) {
+	open := t.TempDir()
+	os.Chmod(open, 0o777)
+	f := fileStore{dir: filepath.Join(open, "data", "cpb", "secrets")}
+	err := f.write("tok", []byte("v"))
+	if err == nil || !strings.Contains(err.Error(), "chmod o-w "+open) {
+		t.Fatalf("other-writable: %v", err)
+	}
+	if _, serr := os.Stat(filepath.Join(open, "data")); serr == nil {
+		t.Fatal("a directory was made before the ancestors were judged")
+	}
+	os.Chmod(open, 0o775)
+	saved := privateGroup
+	privateGroup = func() int { return -1 }
+	t.Cleanup(func() { privateGroup = saved })
+	if err := f.write("tok", []byte("v")); err == nil || !strings.Contains(err.Error(), "chmod g-w "+open) || !strings.Contains(err.Error(), "not your own private group") {
+		t.Fatalf("a shared group: %v", err)
+	}
+	group := []byte("root:x:0:\nusers:x:100:alice,bob\nalice:x:1000:\nbob:x:1001:alice\nshared:x:1002:\n")
+	for _, c := range []struct {
+		user, gid string
+		want      int
+	}{
+		{"alice", "1000", 1000}, // her own, no other member
+		{"bob", "1001", -1},     // named as him, but alice is in it
+		{"alice", "100", -1},    // users: shared
+		{"carol", "1002", -1},   // not named as her
+		{"dave", "4242", -1},    // not in /etc/group (a directory service)
+	} {
+		if got := privateGroupIn(group, c.user, c.gid); got != c.want {
+			t.Errorf("%s/%s: %d, want %d", c.user, c.gid, got, c.want)
+		}
+	}
+}
+
+// A link among the ancestors is judged by where it leads.
+func TestFileStoreLinkedAncestor(t *testing.T) {
+	base := t.TempDir()
+	private := filepath.Join(base, "private")
+	open := filepath.Join(base, "open")
+	os.Mkdir(private, 0o700)
+	os.Mkdir(open, 0o700)
+	os.Chmod(open, 0o777)
+	os.Symlink(private, filepath.Join(base, "to-private"))
+	os.Symlink(open, filepath.Join(base, "to-open"))
+	if err := (fileStore{dir: filepath.Join(base, "to-private", "cpb", "secrets")}).write("tok", []byte("v")); err != nil {
+		t.Fatalf("through a link to a private directory: %v", err)
+	}
+	if err := (fileStore{dir: filepath.Join(base, "to-open", "cpb", "secrets")}).write("tok", []byte("v")); err == nil || !strings.Contains(err.Error(), open) {
+		t.Fatalf("through a link to an open directory: %v", err)
+	}
+}
+
+// Every store step, and a read when no write holds the name's lock, sweeps
+// a temporary file a killed write left, also one linked to the stored file.
+func TestStaleTempsSweptOnStoreAndRead(t *testing.T) {
+	stubSecretTool(t)
+	dir := fileStoreHome(t)
+	locks := t.TempDir()
+	savedLocks := secretLockDir
+	secretLockDir = func() (string, error) { return locks, nil }
+	t.Cleanup(func() { secretLockDir = savedLocks })
+	t.Setenv("STUB_NO_SERVICE", noSecretServiceMessages[0])
+	if code, out := storeExit(t, []string{"--store", "cpb:tok"}, "v-1"); code != 0 {
+		t.Fatalf("store: %d %s", code, out)
+	}
+	stale := filepath.Join(dir, tempPrefix("tok")+"0123")
+	os.Link(filepath.Join(dir, "tok"), stale)
+	if code, _ := storeExit(t, []string{"--store", "cpb:tok"}, "v-2"); code == 0 {
+		t.Fatal("a second store of the name was taken")
+	}
+	if _, err := os.Lstat(stale); err == nil {
+		t.Fatal("the store step left the linked temporary file")
+	}
+	os.Link(filepath.Join(dir, "tok"), stale)
+	st, _ := defaultSecretStore()
+	if _, _, _, err := secretHelperExec(st, []string{"K=cpb:tok", "--", "true"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(stale); err == nil {
+		t.Fatal("a read left the linked temporary file")
+	}
+	// A write holding the lock keeps its temporary file.
+	unlock, err := lockSecretName("tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(stale, []byte("in-progress"), 0o600)
+	secretHelperExec(st, []string{"K=cpb:tok", "--", "true"}, nil)
+	unlock()
+	if _, err := os.Lstat(stale); err != nil {
+		t.Fatal("a read swept a temporary file under a held lock")
 	}
 }

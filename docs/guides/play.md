@@ -180,7 +180,10 @@ cpb:service-token is not stored on this machine yet. Its value will be written t
 
 - The value is plaintext in that file. You and root can read it.
 - It lives in your home: a container or VM whose home is thrown away takes
-  it along. Keep the home on a volume if the playbook should outlive it.
+  it along. To keep it, keep the home on a volume that you own and only you
+  can write: cpb refuses a file store under a directory others can change,
+  such as a root-owned volume mounted group-writable for a pod (a
+  Kubernetes `fsGroup` mount), and says which directory and the `chmod`.
 - Before you run anything, `cpb play <ref> --check --json` shows where each
   secret would be kept (`secrets`, with `store` and `path`), so an agent can
   tell you first.
@@ -200,7 +203,11 @@ cpb:service-token is not stored on this machine yet. Its value will be written t
   ```
 - A keyring that is installed but fails (a crash, a broken session bus)
   stops cpb with nothing stored: it never quietly falls back to the file.
-  The value goes to the store the prompt named, or nowhere.
+  The value goes to the store the prompt named, or nowhere. On a machine
+  whose keyring cannot be used at all (some systems' session buses answer
+  in a way cpb does not count as "no keyring"), set
+  `CPB_SECRET_FILE_STORE=1` in your own shell, and cpb keeps the value in
+  the file instead.
 
 What this protects, and what it does not: the value stays out of command
 lines and out of cpb's output, so no log or transcript of them holds it. It
