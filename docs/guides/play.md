@@ -130,7 +130,7 @@ Type it again to confirm, or press Enter to stop:
 - cpb's own store keeps values up to 1536 bytes in the macOS Keychain and
   4096 bytes on Linux (the Secret Service and the file store below): the
   tools cut a longer value short without saying so, so cpb refuses it first.
-  A helper of your own takes longer ones.
+  A helper of your own takes longer ones, up to 64 KiB through this step.
 - On Linux a locked keyring holding the name stops the step: unlock it, then
   run the command again. cpb never writes over it, or beside it in a file.
 - A macOS Keychain that is locked where it cannot show its unlock window (in

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A stub /usr/bin/security: items are files, its argv goes to a log, and
@@ -27,6 +28,7 @@ func stubSecurity(t *testing.T) (string, string) {
 printf '%s\n' "$*" >> "` + log + `"
 case "$1" in
   find-generic-password)
+    [ -n "$STUB_SLOW" ] && sleep 5
     [ -n "$STUB_EXIT" ] && exit "$STUB_EXIT"
     f="` + items + `/$5"
     [ -f "$f" ] || exit 44
@@ -35,7 +37,7 @@ case "$1" in
   -i)
     read -r line
     printf '%s\n' "$line" >> "` + log + `.stdin"
-    if [ -n "$STUB_LOCKED" ]; then echo "SecKeychainItemCreateFromContent (<default>): User interaction is not allowed." >&2; exit 0; fi
+    if [ -n "$STUB_LOCKED" ]; then echo "SecKeychainItemCreateFromContent (<default>): Interaktion nicht erlaubt. (-25308)" >&2; exit 0; fi
     set -- $line
     [ "$1" = add-generic-password ] && [ "$8" = -X ] || exit 1
     [ -f "` + items + `/$5" ] && exit 1
@@ -50,6 +52,7 @@ exit 2
 	}
 	t.Setenv("STUB_EXIT", "")
 	t.Setenv("STUB_LOCKED", "")
+	t.Setenv("STUB_SLOW", "")
 	saved := securityPath
 	securityPath = path
 	t.Cleanup(func() { securityPath = saved })
@@ -125,8 +128,9 @@ func TestKeychainAddHasNoU(t *testing.T) {
 }
 
 // A Keychain that is locked where it cannot ask for its password: the add
-// fails with security's "interaction is not allowed" on stderr, which is
-// kept in-process; the helper says so plainly and exits 5.
+// fails with security's status -25308 on stderr (here in another language,
+// as macOS localises the text), which is kept in-process; the helper says
+// so plainly and exits 5.
 func TestKeychainLockedWithoutUIIsExit5(t *testing.T) {
 	stubSecurity(t)
 	t.Setenv("STUB_LOCKED", "1")
@@ -218,6 +222,23 @@ func TestKeychainRealStoreKeepsTheCapWhole(t *testing.T) {
 	jobSummary(t, fmt.Sprintf("Keychain cap test: ran on the macOS runner. A %d-byte value under a 64-byte name came back whole; the longest value kept whole was %d bytes (the throwaway keychain's path adds %d bytes to the line).", keychainMaxValue, lo, len(kc)+1))
 	if lo < keychainMaxValue {
 		t.Fatalf("the cap %d is over the measured limit %d", keychainMaxValue, lo)
+	}
+}
+
+// A security that does not answer is not waited on: the Keychain cannot
+// answer, after toolTimeout.
+func TestKeychainToolTimeout(t *testing.T) {
+	stubSecurity(t)
+	saved := toolTimeout
+	toolTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { toolTimeout = saved })
+	t.Setenv("STUB_SLOW", "1")
+	st, _ := osDefaultSecretStore()
+	start := time.Now()
+	ok, err := st.exists("tok")
+	var ue *unavailableError
+	if ok || !errors.As(err, &ue) || time.Since(start) > 4*time.Second {
+		t.Fatalf("after %s: %v %v", time.Since(start), ok, err)
 	}
 }
 

@@ -167,6 +167,10 @@ var secretLockDir = func() (string, error) {
 	return filepath.Join(d, "cpb", "secret-locks"), nil
 }
 
+// flockName takes the per-name lock, never waiting: the loop below waits,
+// bounded by lockTimeout (a test checks the flags).
+var flockName = syscall.Flock
+
 // lockSecretName holds an exclusive lock on name until the returned
 // function runs, so two default helpers storing the same name never both
 // find it absent; the check and the write both happen under it. It waits
@@ -186,7 +190,7 @@ func lockSecretName(name string) (func(), error) {
 	}
 	deadline := time.Now().Add(lockTimeout)
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err = flockName(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			break
 		}
@@ -286,12 +290,20 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 		// the same moment, so neither exit status proves the value is ours.
 		got, err := st.read(name)
 		defer clear(got)
+		var ue *unavailableError
+		if errors.As(err, &ue) {
+			return storeCannotAnswer(fmt.Errorf("%s: the store did not answer when the value was read back (%v); it may be stored: run this again to see", args[1], err))
+		}
 		if err != nil || subtle.ConstantTimeCompare(got, value) != 1 {
 			return fmt.Errorf("the store does not hold the value given for %s; it was not stored", args[1])
 		}
 		return nil
 	}
 	path, argv, env, err := secretHelperExec(st, args, os.Environ())
+	var ue *unavailableError
+	if errors.As(err, &ue) {
+		return storeCannotAnswer(err)
+	}
 	if err != nil {
 		return err
 	}
@@ -317,7 +329,7 @@ func secretHelperExec(st osSecretStore, args, env []string) (string, []string, [
 		}
 		value, err := st.read(name)
 		if err != nil {
-			return "", nil, nil, fmt.Errorf("%s: %s could not be read (%v)", key, ref, err)
+			return "", nil, nil, fmt.Errorf("%s: %s could not be read (%w)", key, ref, err)
 		}
 		env = append(withoutKeys(env, []string{key}), key+"="+string(value))
 		clear(value)
