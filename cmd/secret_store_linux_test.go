@@ -173,6 +173,71 @@ func TestSecretServiceLockedItemIsNotNotStored(t *testing.T) {
 	if strings.Contains(readLog(t, log), "store --label") {
 		t.Fatal("secret-tool store ran over a locked item")
 	}
+	if dir, _ := secretsDir(); fileExists(filepath.Join(dir, "tok")) {
+		t.Fatal("the value went to the file store beside a locked item")
+	}
+}
+
+func fileExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+// A secret-tool that does not answer in time is a store that cannot
+// answer, never a reason to use the file store: --store writes nothing.
+func TestSecretServiceTimeoutNeverFallsBackToTheFile(t *testing.T) {
+	stubSecretTool(t)
+	dir := fileStoreHome(t)
+	saved := toolTimeout
+	toolTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { toolTimeout = saved })
+	t.Setenv("STUB_SLOW", "1")
+	locks := t.TempDir()
+	savedLocks := secretLockDir
+	secretLockDir = func() (string, error) { return locks, nil }
+	t.Cleanup(func() { secretLockDir = savedLocks })
+	var herr error
+	captureStderr(t, func() { herr = runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-1")) })
+	if code, ok := exitCode(herr); !ok || code != unavailableExit {
+		t.Fatalf("--store with a keyring that does not answer: %v", herr)
+	}
+	if fileExists(filepath.Join(dir, "tok")) {
+		t.Fatal("the value went to the file store")
+	}
+}
+
+// What cpb's own process asks (target and where, for the prompt and the
+// play report) is lookup alone, with its output going nowhere: never
+// search, which prints the values of unlocked matches.
+func TestTargetAndWhereNeverSearch(t *testing.T) {
+	_, log := stubSecretTool(t)
+	fileStoreHome(t)
+	st, _ := osDefaultSecretStore()
+	for _, locked := range []string{"", "1"} {
+		t.Setenv("STUB_LOCKED", locked)
+		st.target("tok")
+		st.where("tok")
+	}
+	if l := readLog(t, log); !strings.Contains(l, "lookup") || strings.Contains(l, "search") {
+		t.Fatalf("secret-tool calls: %q", l)
+	}
+}
+
+// The file store keeps no more than the Secret Service does.
+func TestFileStoreLimit(t *testing.T) {
+	dir := fileStoreHome(t)
+	noSecretTool(t)
+	st, _ := osDefaultSecretStore()
+	if st.maxValue() != 4096 {
+		t.Fatalf("maxValue %d", st.maxValue())
+	}
+	f := fileStore{dir: dir}
+	if err := f.write("big", make([]byte, 4097)); err == nil || fileExists(filepath.Join(dir, "big")) {
+		t.Fatalf("a value over the limit: %v", err)
+	}
+	if err := f.write("fits", []byte(strings.Repeat("a", 4096))); err != nil {
+		t.Fatalf("a value at the limit: %v", err)
+	}
 }
 
 // A secret-tool that does not answer is not waited on: the store cannot

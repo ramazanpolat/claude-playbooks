@@ -151,18 +151,25 @@ func TestKeychainRealStoreKeepsTheCapWhole(t *testing.T) {
 	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_OS") != "macOS" {
 		t.Skip("runs only on CI's macOS runner, against a throwaway keychain it makes and deletes")
 	}
+	// On the runner the outcome goes to the job's summary, where CI's
+	// plain `go test` shows it, and not running there is a failure.
+	notRun := func(format string, a ...any) {
+		reason := fmt.Sprintf(format, a...)
+		jobSummary(t, "Keychain cap test: NOT RUN on the macOS runner: "+reason)
+		t.Fatalf("the Keychain cap test did not run on the macOS runner: %s", reason)
+	}
 	const real = "/usr/bin/security"
 	saved := securityPath
 	securityPath = real
 	t.Cleanup(func() { securityPath = saved })
 	kc := filepath.Join(t.TempDir(), "cpb-cap-test.keychain-db")
 	if strings.ContainsAny(kc, " \t\"'") {
-		t.Skipf("the throwaway keychain path has a character security -i would split on: %s", kc)
+		notRun("the throwaway keychain path has a character security -i would split on: %s", kc)
 	}
 	pw := make([]byte, 16)
 	rand.Read(pw)
 	if out, err := exec.Command(real, "create-keychain", "-p", hex.EncodeToString(pw), kc).CombinedOutput(); err != nil {
-		t.Skipf("the throwaway keychain could not be made (%v: %s); this test never uses the default keychain", err, out)
+		notRun("the throwaway keychain could not be made (%v: %s); this test never uses the default keychain", err, out)
 	}
 	t.Cleanup(func() { exec.Command(real, "delete-keychain", kc).Run() })
 	if out, err := exec.Command(real, "unlock-keychain", "-p", hex.EncodeToString(pw), kc).CombinedOutput(); err != nil {
@@ -208,7 +215,25 @@ func TestKeychainRealStoreKeepsTheCapWhole(t *testing.T) {
 		}
 	}
 	t.Logf("longest value kept whole: %d bytes (cap %d; the keychain path adds %d bytes to the line)", lo, keychainMaxValue, len(kc)+1)
+	jobSummary(t, fmt.Sprintf("Keychain cap test: ran on the macOS runner. A %d-byte value under a 64-byte name came back whole; the longest value kept whole was %d bytes (the throwaway keychain's path adds %d bytes to the line).", keychainMaxValue, lo, len(kc)+1))
 	if lo < keychainMaxValue {
 		t.Fatalf("the cap %d is over the measured limit %d", keychainMaxValue, lo)
 	}
+}
+
+// jobSummary appends a line to the GitHub Actions job summary, when there
+// is one.
+func jobSummary(t *testing.T, line string) {
+	t.Helper()
+	p := os.Getenv("GITHUB_STEP_SUMMARY")
+	if p == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		t.Logf("job summary: %v", err)
+		return
+	}
+	defer f.Close()
+	fmt.Fprintln(f, line)
 }
