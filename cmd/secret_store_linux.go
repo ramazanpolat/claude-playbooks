@@ -135,6 +135,11 @@ func (s linuxStore) unreachable(name string) bool {
 // so a value fits whichever store takes it.
 func (s linuxStore) maxValue() int { return min(secretServiceMaxValue, fileStoreMaxValue) }
 
+// readyToStore has nothing to ask on Linux: exists already tells a locked
+// keyring item from a missing one, the file store needs no unlocking, and
+// secret-tool store asks for the keyring's password itself where it can.
+func (linuxStore) readyToStore() error { return nil }
+
 // exists looks in the Secret Service when it can answer, then in the file.
 // A name in both is the keyring's, and one stderr line says where the file
 // copy is. A name in a locked keyring is a store that cannot answer, never
@@ -191,6 +196,11 @@ func (s linuxStore) write(name string, value []byte) error {
 }
 
 func (s secretServiceStore) maxValue() int { return secretServiceMaxValue }
+
+// readyToStore has nothing to ask on Linux: exists already tells a locked
+// item from a missing one, and secret-tool store asks for the keyring's
+// password itself where it can.
+func (secretServiceStore) readyToStore() error { return nil }
 
 // run runs secret-tool with args, bounded by toolTimeout; a run that does
 // not end in time is killed and reported as a store that cannot answer.
@@ -270,7 +280,10 @@ func (s secretServiceStore) lookup(name string) (bool, error) {
 // helper), is scanned in place for an item line, with no copy made, and
 // is cleared.
 func (s secretServiceStore) lockedItem(name string) (bool, error) {
+	// One array, grown up front, so no earlier copy of the output is left
+	// behind uncleared as it grows.
 	var out bytes.Buffer
+	out.Grow(64 << 10)
 	err := s.run(name, nil, &out, io.Discard, "search", "service", "cpb", "name", name)
 	defer func() { b := out.Bytes(); clear(b[:cap(b)]) }()
 	if err != nil {

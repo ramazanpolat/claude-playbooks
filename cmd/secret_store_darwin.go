@@ -40,6 +40,30 @@ const keychainMaxValue = 1536
 // "not there".
 const keychainNotFound = 44
 
+// keychainInteractionNotAllowed is errSecInteractionNotAllowed, -25308, as
+// security's exit status (its low byte): the Keychain is locked and cannot
+// show its unlock dialog, as in an SSH session. Observed on GitHub's
+// macos-15-arm64 (macOS 15.8.2) and macos-26-arm64 (macOS 26.7.2) runner
+// images, over ssh localhost, for a locked keychain: show-keychain-info,
+// find-generic-password -w, a one-shot add and the add through security -i
+// each exit 36, while find-generic-password without -w answers as it does
+// for an unlocked keychain (0, or 44). Where the dialog can be shown, each
+// of the first four waits on it instead.
+const keychainInteractionNotAllowed = 36
+
+// lockedExit reports whether a security run ended with
+// keychainInteractionNotAllowed.
+func lockedExit(err error) bool {
+	var ee *exec.ExitError
+	return errors.As(err, &ee) && ee.ExitCode() == keychainInteractionNotAllowed
+}
+
+// keychainLocked is the answer for a Keychain locked where it cannot ask
+// for its password; stored says what became of a value, if one was given.
+func keychainLocked(stored string) error {
+	return unavailable("the Keychain is locked and cannot ask for its password here (no window to show it in, as in an SSH session)%s. Unlock it (security unlock-keychain), then run this again", stored)
+}
+
 // keychainStore is the default Keychain; keychain names another keychain
 // file instead, for a test on a throwaway one (never set in cpb itself).
 type keychainStore struct{ keychain string }
@@ -80,7 +104,11 @@ func (keychainStore) run(name string, stdin io.Reader, stdout, stderr io.Writer,
 	c.WaitDelay = time.Second
 	err := c.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return unavailable("the Keychain did not answer within %s about cpb/%s (an unlock dialog nobody answered?): unlock it (security unlock-keychain), then run this again", toolTimeout, name)
+		about := ""
+		if name != "" {
+			about = " about cpb/" + name
+		}
+		return unavailable("the Keychain did not answer within %s%s (an unlock dialog nobody answered?): unlock it (security unlock-keychain), then run this again", toolTimeout, about)
 	}
 	return err
 }
@@ -98,15 +126,42 @@ func (k keychainStore) exists(name string) (bool, error) {
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() == keychainNotFound {
+		// The search answers on a locked Keychain too, and brings up no
+		// dialog: "not there" says nothing about the lock, which
+		// readyToStore asks about when a value is about to be typed.
 		return false, nil
 	}
+	if lockedExit(err) {
+		return false, keychainLocked("")
+	}
 	return false, fmt.Errorf("the Keychain could not be asked about cpb/%s (%v); unlock it (security unlock-keychain), or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, err)
+}
+
+// readyToStore asks the Keychain with show-keychain-info, which carries no
+// value: where it is locked and cannot ask for its password, it exits 36,
+// as the add would; where it can ask, it brings up the unlock dialog now
+// (bounded by toolTimeout), before anything is typed.
+func (k keychainStore) readyToStore() error {
+	err := k.run("", nil, nil, nil, k.args("show-keychain-info")...)
+	var ue *unavailableError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &ue):
+		return err
+	case lockedExit(err):
+		return keychainLocked("; nothing was asked for or stored")
+	}
+	return unavailable("the Keychain could not be asked whether it can take a value (%v); nothing was asked for or stored. Unlock it (security unlock-keychain), or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", err)
 }
 
 func (k keychainStore) read(name string) ([]byte, error) {
 	var out bytes.Buffer
 	if err := k.run(name, nil, &out, nil, k.args("find-generic-password", "-s", "cpb", "-a", name, "-w")...); err != nil {
 		clear(out.Bytes())
+		if lockedExit(err) {
+			return nil, keychainLocked("")
+		}
 		return nil, fmt.Errorf("the Keychain did not return cpb/%s (%w)", name, err)
 	}
 	v := out.Bytes()
@@ -116,10 +171,15 @@ func (k keychainStore) read(name string) ([]byte, error) {
 	return v, nil
 }
 
-// keychainLockedMarkers are how security reports a Keychain that is locked
-// where it cannot show an unlock dialog, as in an SSH session: the status
-// errSecInteractionNotAllowed, -25308, which does not change with the
-// system's language, and its English text as a second sign.
+// keychainLockedMarkers are how security -i reports, on stderr, an add to a
+// Keychain that is locked where it cannot show an unlock dialog. Observed
+// (see keychainInteractionNotAllowed) as two lines:
+//
+//	security: SecKeychainItemCreateFromContent (<keychain>): User interaction is not allowed.
+//	add-generic-password: returned -25308
+//
+// The number does not change with the system's language; the English text
+// is a second sign. Either one, or the exit status 36, means locked.
 var keychainLockedMarkers = [][]byte{[]byte("-25308"), []byte("nteraction is not allowed")}
 
 // write adds the item through security's interactive mode, the command on
@@ -127,9 +187,8 @@ var keychainLockedMarkers = [][]byte{[]byte("-25308"), []byte("nteraction is not
 // (-X) it needs no quoting. Without -U it never replaces an item.
 // security's output never reaches the person, since an error from it may
 // repeat the command line: its stderr is kept in this process only, to
-// tell a locked Keychain from other failures, and is cleared. security -i
-// exits 0 even when the add fails, so the caller reads the value back
-// (runSecretHelper).
+// tell a locked Keychain from other failures, and is cleared. The caller
+// reads the value back whatever the exit status says (runSecretHelper).
 func (k keychainStore) write(name string, value []byte) error {
 	line := []byte("add-generic-password -s cpb -a " + name + " -l cpb/" + name + " -X ")
 	enc := make([]byte, hex.EncodedLen(len(value)))
@@ -143,7 +202,7 @@ func (k keychainStore) write(name string, value []byte) error {
 	defer clear(enc)
 	var errb bytes.Buffer
 	err := k.run(name, bytes.NewReader(in), io.Discard, &errb, "-i")
-	locked := false
+	locked := lockedExit(err)
 	for _, m := range keychainLockedMarkers {
 		locked = locked || bytes.Contains(errb.Bytes(), m)
 	}
@@ -153,7 +212,7 @@ func (k keychainStore) write(name string, value []byte) error {
 	case errors.As(err, &ue):
 		return err
 	case locked:
-		return unavailable("the Keychain is locked and cannot ask for its password here (no window to show it in); nothing was stored. Unlock it (security unlock-keychain), then run this again")
+		return keychainLocked("; nothing was stored")
 	case err != nil:
 		return fmt.Errorf("the Keychain did not take cpb/%s (security exited: %v); nothing was stored", name, err)
 	}

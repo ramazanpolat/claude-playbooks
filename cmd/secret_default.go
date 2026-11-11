@@ -96,6 +96,12 @@ type osSecretStore interface {
 	// maxValue is the longest value the store keeps whole: its tool cuts a
 	// longer one short without saying so, so the helper refuses it first.
 	maxValue() int
+	// readyToStore asks, with nothing that carries a value, whether a value
+	// given now could be stored; an error says why not (a Keychain locked
+	// where it cannot ask for its password). It may bring up the store's
+	// own unlock dialog, so only the store step calls it (--ready), right
+	// before it asks a person for a value: never a presence check.
+	readyToStore() error
 }
 
 // defaultSecretStore is this machine's store, or an error naming the fix
@@ -213,13 +219,26 @@ func lockSecretName(name string) (func(), error) {
 // secretHelperArg. Messages never carry a value.
 func runSecretHelper(args []string, stdin io.Reader) error {
 	if len(args) == 0 {
-		return errors.New("cpb's default secret helper takes --check KEY=REF, --store REF, or KEY=REF … -- <command>; a launch runs it, never a person")
+		return errors.New("cpb's default secret helper takes --check KEY=REF, --ready REF, --store REF, or KEY=REF … -- <command>; a launch runs it, never a person")
 	}
 	st, err := defaultSecretStore()
 	if err != nil {
 		return err
 	}
 	switch args[0] {
+	case "--ready":
+		// The default helper's own verb, not the helper interface's: the
+		// store step runs it just before it asks a person for a value.
+		if len(args) != 2 {
+			return errors.New("--ready takes one REF")
+		}
+		if _, err := cpbRefName(args[1]); err != nil {
+			return err
+		}
+		if err := st.readyToStore(); err != nil {
+			return storeCannotAnswer(err)
+		}
+		return nil
 	case "--check":
 		if len(args) != 2 {
 			return errors.New("--check takes one KEY=REF")
@@ -285,9 +304,9 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 			}
 			return err
 		}
-		// The value is read back: macOS's security -i exits 0 even when its
-		// add failed, and another program may have written the same item at
-		// the same moment, so neither exit status proves the value is ours.
+		// The value is read back: another program may have written the
+		// same item at the same moment, so no exit status proves the value
+		// stored is the one given.
 		got, err := st.read(name)
 		defer clear(got)
 		var ue *unavailableError

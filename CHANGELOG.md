@@ -15,7 +15,10 @@
   fix, and a store that cannot answer (on Linux, a locked keyring or a
   `secret-tool` that does not answer in time; on macOS, a
   Keychain locked where it cannot show its unlock dialog) exits 5 with the
-  reason, never "not stored". Values are capped at what each store keeps
+  reason, never "not stored". A presence check (`--check`) brings up no
+  unlock dialog; the store step finds a locked Keychain before it asks for
+  a value, through the default helper's own `--ready`
+  (`security show-keychain-info`, which carries no value). Values are capped at what each store keeps
   whole, 1536 bytes in the Keychain and 4096 in the Secret Service, since
   their tools cut a longer value short without saying so. Each tool call is
   bounded to 60 seconds and the per-name lock to 30. `<name>` is a lowercase
@@ -45,12 +48,20 @@
   helper). Entries that differ, or a line typed with a key that sends an
   escape sequence or any other control key, or longer than the store keeps,
   store nothing and are asked for again, three attempts in all; Backspace
-  removes whole characters, and a bracketed paste is taken. After every read
-  the terminal's pending input is discarded while echo is still off, until
-  the terminal is quiet, so a paste of any length is neither shown nor
-  reaches the next prompt or the shell; the step guards itself against
-  signals on every path, and stops after a helper call a signal arrived
-  during. A reference used twice is asked for once. It never
+  removes whole characters. The read turns the terminal's bracketed paste
+  on, so a paste is read to its end marker whatever its gaps, and a paste of
+  more than one line is refused; Backspace, `^U` and `^D` inside a paste
+  are refused too. After every read the terminal's waiting input is taken
+  while echo is still off, until nothing has come for 300 ms, and a line
+  followed by anything but line ends is refused, so a paste of several
+  lines is refused without bracketed paste too; what was typed or pasted
+  past the line is neither shown nor reaches the next prompt or the shell
+  (on a terminal without bracketed paste, a paste that pauses for longer
+  than that is the case left). Input that keeps arriving for 10 seconds is
+  named and still taken until it stops; `^C` or a signal ends that sooner.
+  The step guards itself against signals on every path, stops after a
+  helper call a signal arrived during, and then says what one check shows:
+  stored, an item of that name exists, not stored, or may be stored. A reference used twice is asked for once. It never
   runs with `--yes`, with `--trust-secret` for that reference, without a
   terminal, or when an agent's session is in the environment (a courtesy
   check, not a boundary). `^C`, an empty answer, a closed terminal, a signal

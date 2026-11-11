@@ -287,3 +287,19 @@ func TestSecretServiceSearchIsCheckedAndPlain(t *testing.T) {
 		t.Fatalf("a failed search read as %v %v", ok, err)
 	}
 }
+
+// A read secret-tool does not answer in time is a store that cannot
+// answer, to errors.As as well (a launch then exits 5).
+func TestSecretServiceReadTimeoutIsUnavailable(t *testing.T) {
+	stubSecretTool(t)
+	saved := toolTimeout
+	toolTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { toolTimeout = saved })
+	t.Setenv("STUB_SLOW", "1")
+	tool, _ := lookSecretTool()
+	_, err := secretServiceStore{tool: tool}.read("tok")
+	var ue *unavailableError
+	if !errors.As(err, &ue) {
+		t.Fatalf("a read that timed out: %v", err)
+	}
+}

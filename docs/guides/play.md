@@ -123,8 +123,16 @@ Type it again to confirm, or press Enter to stop:
 - If the two entries differ, nothing is stored and cpb asks again, three
   times at most. The same goes for an arrow, Delete, a Ctrl key or another
   key you cannot see the effect of while you type. Backspace and `^U`
-  work. Pasting works too; only the first line of a multi-line paste is
-  read, and the rest is thrown away.
+  work (not inside a paste). Pasting works too: paste the value, one line.
+  A paste of several lines is refused and asked for again, and so is a
+  value followed by anything you type within a moment of Enter. On a
+  terminal without bracketed paste that holds only when the rest of the
+  paste arrives within 300 ms of its first line; a paste that pauses for
+  longer than that is the one case where its rest is shown and answers
+  the next prompt. Nothing else you type or paste past the value is shown
+  or reaches your shell. If a paste keeps sending for more than 10
+  seconds, cpb says so and keeps discarding it until it stops; press
+  `^C` to stop instead, and what arrives after that may be shown.
 - An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
   nothing is stored.
 - cpb's own store keeps values up to 1536 bytes in the macOS Keychain and
@@ -134,8 +142,10 @@ Type it again to confirm, or press Enter to stop:
 - On Linux a locked keyring holding the name stops the step: unlock it, then
   run the command again. cpb never writes over it, or beside it in a file.
 - A macOS Keychain that is locked where it cannot show its unlock window (in
-  an SSH session, say) is found only when the value is being stored: cpb
-  stores nothing and tells you to run `security unlock-keychain` first.
+  an SSH session, say) is found before cpb asks for the value: cpb asks for
+  nothing and tells you to run `security unlock-keychain` first. Where the
+  window can be shown, the Keychain asks for its password before you type
+  the value.
 - cpb never replaces a stored secret: to change one, store it under a new name
   and point the recipe at that.
 - If the recipe is someone else's and its name is fixed, or you stored the

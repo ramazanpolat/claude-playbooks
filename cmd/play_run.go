@@ -376,6 +376,7 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 type playGuard struct {
 	sigs      chan os.Signal
 	done      chan struct{}
+	exited    chan struct{}
 	cancelled chan struct{}
 	once      sync.Once
 	mu        sync.Mutex
@@ -383,9 +384,10 @@ type playGuard struct {
 }
 
 func newPlayGuard() *playGuard {
-	g := &playGuard{sigs: make(chan os.Signal, 8), done: make(chan struct{}), cancelled: make(chan struct{})}
+	g := &playGuard{sigs: make(chan os.Signal, 8), done: make(chan struct{}), exited: make(chan struct{}), cancelled: make(chan struct{})}
 	signal.Notify(g.sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
+		defer close(g.exited)
 		for {
 			select {
 			case s := <-g.sigs:
@@ -423,10 +425,20 @@ func (g *playGuard) isCancelled() bool {
 
 // stop ends a guard the store step installed for itself (storeSecret):
 // its signals go back to their default handling, so a later ^C or TERM
-// ends cpb as it would have without the step.
-func (g *playGuard) stop() {
+// ends cpb as it would have without the step. It waits for the guard's
+// goroutine, then reports whether a signal reached the guard, including
+// one delivered just before signal.Stop that it never handled, so the
+// step cannot miss it.
+func (g *playGuard) stop() bool {
 	signal.Stop(g.sigs)
 	close(g.done)
+	<-g.exited
+	select {
+	case <-g.sigs:
+		return true
+	default:
+	}
+	return g.isCancelled()
 }
 
 // release ends the guard after clean-up. TERM and HUP stay ignored for the
