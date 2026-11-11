@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -40,14 +41,35 @@ const (
 	unavailableExit = 5
 )
 
-// storeCannotAnswer is the helper's answer when exists fails, which means
-// the store could not answer at all (as opposed to "not there"): the
-// reason on stderr, naming the store and the fix and never a value, and
-// exit unavailableExit, never notStoredExit.
+// storeCannotAnswer is the helper's answer when its store could not answer
+// at all (as opposed to "not there"): exists failed, the per-name lock or a
+// tool did not answer in time, or the store refused for a reason the
+// person must fix first (a locked Keychain or keyring). The reason goes to
+// stderr, naming the store and the fix and never a value, and the exit is
+// unavailableExit, never notStoredExit.
 func storeCannotAnswer(err error) error {
 	fmt.Fprintln(os.Stderr, err)
 	return &commandExitError{code: unavailableExit}
 }
+
+// unavailableError is a store error that storeCannotAnswer reports: the
+// store could not answer, as opposed to refusing this value.
+type unavailableError struct{ msg string }
+
+func (e *unavailableError) Error() string { return e.msg }
+
+func unavailable(format string, a ...any) error {
+	return &unavailableError{fmt.Sprintf(format, a...)}
+}
+
+// The bounds on the default helper's own waits (a test shortens them):
+// toolTimeout for each call to the store's tool (security, secret-tool),
+// long enough for a person to answer a Keychain unlock dialog; lockTimeout
+// for the per-name lock. Either ending is unavailableExit.
+var (
+	toolTimeout = 60 * time.Second
+	lockTimeout = 30 * time.Second
+)
 
 // osSecretStore is the store the default helper keeps cpb:<name> in.
 type osSecretStore interface {
@@ -59,6 +81,9 @@ type osSecretStore interface {
 	read(name string) ([]byte, error)
 	// write creates the item from value; it never replaces one.
 	write(name string, value []byte) error
+	// maxValue is the longest value the store keeps whole: its tool cuts a
+	// longer one short without saying so, so the helper refuses it first.
+	maxValue() int
 }
 
 // defaultSecretStore is this machine's store, or an error naming the fix
@@ -132,7 +157,9 @@ var secretLockDir = func() (string, error) {
 
 // lockSecretName holds an exclusive lock on name until the returned
 // function runs, so two default helpers storing the same name never both
-// find it absent. It does not stop another program from writing the item.
+// find it absent; the check and the write both happen under it. It waits
+// at most lockTimeout, and then says which name was locked and nothing
+// else. It does not stop another program from writing the item.
 func lockSecretName(name string) (func(), error) {
 	dir, err := secretLockDir()
 	if err == nil {
@@ -142,13 +169,23 @@ func lockSecretName(name string) (func(), error) {
 	if err == nil {
 		f, err = os.OpenFile(filepath.Join(dir, name+".lock"), os.O_RDWR|os.O_CREATE, 0o600)
 	}
-	if err == nil {
-		if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-			f.Close()
-		}
-	}
 	if err != nil {
-		return nil, fmt.Errorf("the lock for cpb:%s could not be taken (%v); nothing was stored", name, err)
+		return nil, unavailable("the lock for cpb:%s could not be taken (%v); nothing was stored", name, err)
+	}
+	deadline := time.Now().Add(lockTimeout)
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
+			f.Close()
+			if errors.Is(err, syscall.EWOULDBLOCK) {
+				return nil, unavailable("cpb:%s is being stored by another process, and its lock was not free within %s; nothing was stored", name, lockTimeout)
+			}
+			return nil, unavailable("the lock for cpb:%s could not be taken (%v); nothing was stored", name, err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	return func() {
 		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
@@ -209,9 +246,12 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 		if !printableASCII(value) {
 			return errors.New("cpb's default helper keeps printable ASCII values only (space to '~': no tab, newline or non-ASCII character); nothing was stored. Use a helper of your own for any other value")
 		}
+		if max := st.maxValue(); len(value) > max {
+			return fmt.Errorf("the value is %d bytes, and this store keeps at most %d bytes whole; nothing was stored. Use a helper of your own for a longer value", len(value), max)
+		}
 		unlock, err := lockSecretName(name)
 		if err != nil {
-			return err
+			return storeCannotAnswer(err)
 		}
 		defer unlock()
 		found, err := st.exists(name)
@@ -223,6 +263,10 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 			return fmt.Errorf("%s is stored already, and cpb never replaces a stored secret: store the new value under a new name", args[1])
 		}
 		if err := st.write(name, value); err != nil {
+			var ue *unavailableError
+			if errors.As(err, &ue) {
+				return storeCannotAnswer(err)
+			}
 			return err
 		}
 		// The value is read back: macOS's security -i exits 0 even when its

@@ -167,7 +167,7 @@ func playConfirmAsk(res *play.Result, interactive bool, question string) error {
 		case play.RiskUsesSecret:
 			// A recipe with references never runs sandboxed: the reader is
 			// this machine, as you, and the prompt says so where it is typed.
-			q = fmt.Sprintf("Type the secret this playbook may read, on this machine, as you (%s): ", r.Confirm)
+			q = fmt.Sprintf("Type the reference of the secret this playbook may read, on this machine, as you (%s): ", r.Confirm)
 		case play.RiskTLSOrProxy:
 			if r.Confirm == "TLS" {
 				q = "Type TLS to let this playbook change which certificates are trusted: "
@@ -419,6 +419,14 @@ func (g *playGuard) isCancelled() bool {
 	default:
 		return false
 	}
+}
+
+// stop ends a guard the store step installed for itself (storeSecret):
+// its signals go back to their default handling, so a later ^C or TERM
+// ends cpb as it would have without the step.
+func (g *playGuard) stop() {
+	signal.Stop(g.sigs)
+	close(g.done)
 }
 
 // release ends the guard after clean-up. TERM and HUP stay ignored for the

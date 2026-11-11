@@ -6,7 +6,7 @@ import (
 )
 
 func TestValidateCPBRef(t *testing.T) {
-	for _, ok := range []string{"cpb:a", "cpb:city-token", "cpb:a.b_c-9", "cpb:" + strings.Repeat("a", 64), "keychain:Anything Goes", "op://v/i/f"} {
+	for _, ok := range []string{"cpb:a", "cpb:service-token", "cpb:a.b_c-9", "cpb:" + strings.Repeat("a", 64), "keychain:Anything Goes", "op://v/i/f"} {
 		if err := ValidateCPBRef(ok); err != nil {
 			t.Errorf("%q refused: %v", ok, err)
 		}

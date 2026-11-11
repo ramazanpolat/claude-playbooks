@@ -116,6 +116,9 @@ func (a *Account) validateHeaders() error {
 		if !manifest.LooksLikeRef(a.Headers[n]) {
 			return errors.New("header " + n + " takes a secret reference: SET header." + n + " FROM '<ref>'")
 		}
+		if err := manifest.ValidateCPBRef(a.Headers[n]); err != nil {
+			return fmt.Errorf("header %s: %w", n, err)
+		}
 	}
 	return nil
 }

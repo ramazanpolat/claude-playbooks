@@ -120,15 +120,24 @@ Type it again to confirm, or press Enter to stop:
 ```
 
 - If the two entries differ, nothing is stored and cpb asks again, three
-  times at most. The same goes for an arrow, Delete or another key that
-  sends an escape sequence while you type, since you cannot see what it
-  added. Pasting works.
+  times at most. The same goes for an arrow, Delete, a Ctrl key or another
+  key you cannot see the effect of while you type. Backspace and `^U`
+  work. Pasting works too; only the first line of a multi-line paste is
+  read, and the rest is thrown away.
 - An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
   nothing is stored.
+- cpb's own store keeps values up to 1536 bytes in the macOS Keychain and
+  4096 bytes in the Secret Service: the tools cut a longer value short
+  without saying so, so cpb refuses it first. A helper of your own takes
+  longer ones.
 - On Linux the value goes to the Secret Service, so a keyring (GNOME
   Keyring, KWallet) must be running in your session. On a server or in a
   container with none, cpb says so and does not ask for the value; use a
-  helper of your own there.
+  helper of your own there. A locked keyring is the same: unlock it, then
+  run the command again.
+- A macOS Keychain that is locked where it cannot show its unlock window (in
+  an SSH session, say) is found only when the value is being stored: cpb
+  stores nothing and tells you to run `security unlock-keychain` first.
 - cpb never replaces a stored secret: to change one, store it under a new name
   and point the recipe at that.
 - If the recipe is someone else's and its name is fixed, or you stored the
@@ -137,10 +146,13 @@ Type it again to confirm, or press Enter to stop:
   `secret-tool clear service cpb name <name>` on Linux.
 - cpb's own store keeps printable ASCII values only (letters, digits,
   punctuation and spaces); a helper of your own takes any value.
+- cpb waits up to a minute for your Keychain or keyring to answer (an
+  unlock window, say), and then stops with nothing stored.
 - The step runs only from your own terminal: never with `--yes` or
-  `--trust-secret`, never without a terminal, and never inside an agent's
-  session. An agent can show you the plan (`--dry-run`) and the command; you
-  run the command and type the value yourself.
+  `--trust-secret`, never without a terminal, and not when it finds an
+  agent's session in the environment (a courtesy check, not a lock). An
+  agent can show you the plan (`--dry-run`) and the command; you run the
+  command and type the value yourself.
 
 What this protects, and what it does not: the value stays out of command
 lines and out of cpb's output, so no log or transcript of them holds it. It

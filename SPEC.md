@@ -580,7 +580,8 @@ cpb checks one thing about its shape, a scheme followed by a colon
 belongs is refused, and never echoed. Everything else about a reference is
 the helper's business, except `cpb:<name>`, whose `<name>` is a lowercase
 letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`
-(refused otherwise, at every layer, without quoting it).
+(refused otherwise, without quoting it, in every statement that takes a
+reference and in the playbook, env-set and account files that hold one).
 
 **The helper interface** (cpb's own contract):
 
@@ -599,6 +600,9 @@ letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`
   its stdin, never an argument. Exit 0 means it is stored. A helper without
   it exits non-zero (cpb then says to store the value with your own tool and
   run again). Only the store step below calls it.
+- **Time.** cpb waits at most 90 seconds for each `--check` and `--store`
+  it runs; a helper that has not answered by then is stopped, and the
+  statement or the step fails with nothing written.
 
 **Without a configured helper**, cpb stays fully usable. A `cpb:<name>`
 reference is resolved by cpb's default helper (below). Any other `SET … FROM`
@@ -616,8 +620,8 @@ values in the operating system's store:
 
 | System | Store | Item |
 |---|---|---|
-| macOS | the default Keychain (normally the login one), through `/usr/bin/security` | a generic password, service `cpb`, account `<name>`, label `cpb/<name>` |
-| Linux | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>` |
+| macOS | the default Keychain (normally the login one), through `/usr/bin/security` | a generic password, service `cpb`, account `<name>`, label `cpb/<name>`; at most 1536 bytes |
+| Linux | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>`; at most 4096 bytes |
 | other, or no store | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
 
 - **A store that cannot answer** is never "not stored": `--check` and
@@ -628,14 +632,36 @@ values in the operating system's store:
   keyring daemon, or no session bus); the default helper tells them apart
   by its stderr, which is empty only for a missing item (libsecret 0.21).
   Any message there is a store that cannot answer, and the line quotes its
-  first line. On macOS any `security` failure other than "item not found"
-  is one.
+  first line. A **locked keyring** answers `lookup` as a missing item does,
+  also when its unlock prompt was dismissed, and `secret-tool store` would
+  then replace the item once it is unlocked; so a missing answer is checked
+  with `secret-tool search`, which lists a locked item without unlocking it,
+  and a locked item is a store that cannot answer ("unlock the keyring, then
+  run this again"). On macOS any `security` failure other than "item not
+  found" (its exit 44) is one, and the line names the fix (unlock the
+  Keychain, `security unlock-keychain`, or configure a helper of your own).
+  A **Keychain locked where it cannot show its unlock dialog** (an SSH
+  session, say) is found only when the add fails: `security` reports that
+  interaction is not allowed, which the helper reads in-process and never
+  prints, and the store exits 5 saying the Keychain is locked and how to
+  unlock it. The value has been typed by then; nothing is stored.
+- **Time.** Each call to `security` or `secret-tool` is stopped after 60
+  seconds (time enough to answer an unlock dialog), and the per-name lock
+  is waited on for 30 seconds; either ending is exit 5, and the lock's line
+  names the locked name and nothing else.
 
 - **Values.** Printable ASCII only (space to `~`: no tab, newline or
-  non-ASCII character), at most 64 KiB; any other value is refused, and
-  nothing is stored. macOS's `security` prints any other value as hex when
-  it is read, so it would not reach the launch as given. A helper of your
-  own takes any value.
+  non-ASCII character), and no longer than the store keeps whole: 1536
+  bytes in the Keychain, 4096 in the Secret Service. Any other value is
+  refused before anything is written. macOS's `security` prints any other
+  value as hex when it is read, so it would not reach the launch as given.
+  Both tools cut a longer value short without saying so: `security -i`
+  reads its commands in lines of 4096 bytes, and the add carries the value
+  as hex after up to 172 bytes of its own, so about 1960 bytes fit;
+  `secret-tool store` keeps the first 8192 bytes of its stdin (measured,
+  libsecret 0.21). A cut value would be stored, found by `--check`, and
+  launched as given. A helper of your own takes any value, up to 64 KiB
+  through the store step.
 - **Writing.** On macOS the add command goes to `security -i` on its stdin,
   the value hex-encoded (`-X`), so it is in no argument list. On Linux it
   goes to `secret-tool store` on its stdin. Neither tool's output is shown.
@@ -669,20 +695,32 @@ helper's `--check` exits 4):
 - **after the person typed the reference** (its typed confirmation), cpb
   names where the value will be written (for the default helper the store
   and the item, for another helper the helper) and asks for it **twice**,
-  with echo off, from the controlling terminal only. A stored value is never
-  replaced, so a typo nobody saw would be permanent;
-- **entries that differ, or one typed with a key that sends an escape
-  sequence** (an arrow, Delete, Home, a function key, Alt with a key: with
-  echo off its printable bytes would stay in the value unseen) store
-  nothing, say why, and are asked for again, three attempts in all; after
-  the third the run stops, saying to store the value with your own tool and
-  run again. Bracketed paste's markers are not such a sequence: they are
-  dropped, and the paste between them is the value;
+  with echo off, from standard input, which must be a terminal (below). A
+  stored value is never replaced, so a typo nobody saw would be permanent;
+- **editing:** Backspace removes the last character, all of its bytes, and
+  `^U` the whole line;
+- **entries that differ, or a line that is refused** store nothing, say
+  why, and are asked for again, three attempts in all; after the third the
+  run stops, saying to store the value with your own tool and run again. A
+  line is refused when a key that sends an escape sequence (an arrow,
+  Delete, Home, a function key, Alt with a key) or any other control key
+  (`^A`, `^W`, `^D` inside a line, …) was pressed, since with echo off what
+  it added or dropped is not seen, or when it is longer than the store
+  keeps (the default helper's store's limit, else 64 KiB). Bracketed
+  paste's markers are not such a sequence: they are dropped, and the paste
+  between them is the value;
+- **after every read** the terminal's mode is put back and whatever is
+  waiting to be read on it is discarded, so a multi-line paste fills
+  neither the confirmation nor, once cpb exits, the shell;
 - the value goes to `<helper> --store REF` on stdin, and the reference is
   checked again before anything is applied;
 - **an empty answer (to either prompt), ^C, a closed terminal, a signal to
   cpb (`SIGINT`, `SIGTERM`, `SIGHUP`) while it waits, or a helper that
-  fails** stops the run with nothing stored and nothing written.
+  fails or does not answer** stops the run with nothing stored and nothing
+  written. The step catches those signals itself wherever it runs (`cpb
+  play`, `--keep`, `cpb update`), so the terminal is put back first.
+- **A reference used more than once** is one secret: listed, checked and
+  asked for once.
 
 The step runs only when **all** of these hold, and otherwise a reference that
 does not resolve is refused as before, naming why and asking the person to
@@ -691,7 +729,8 @@ run the command from their own terminal:
 - standard input and output are both a terminal;
 - the run has no `--yes`, and no `--trust-secret` confirmed this reference;
 - the environment shows no agent session (`CLAUDECODE` or
-  `CLAUDE_CODE_ENTRYPOINT` set, even to an empty value).
+  `CLAUDE_CODE_ENTRYPOINT` set, even to an empty value). This is a
+  courtesy check, not a boundary: a program that clears both passes it.
 
 No flag, environment variable or file ever supplies a value, and none may be
 added.
@@ -3241,7 +3280,7 @@ those names, sorted, one per line.
 3. It asks for each typed confirmation in turn:
    - `Type the proxy …`, or `Type TLS …` (a recipe never moves the model
      endpoint: that is an account's, `--account`);
-   - `Type the secret this playbook may read, on this machine, as you (<ref>):`.
+   - `Type the reference of the secret this playbook may read, on this machine, as you (<ref>):`.
 
    An exact match goes on; anything else stops with nothing written. A
    reference that is not stored yet is then asked for: the store step

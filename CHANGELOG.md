@@ -13,23 +13,33 @@
   configured helper always wins; any other scheme with no helper is refused as
   before. A machine with no store refuses a `cpb:` reference and names the
   fix, and a store that cannot answer (on Linux, `secret-tool` with no
-  keyring daemon or no session bus) exits 5 with the reason, never "not
-  stored". `<name>` is a lowercase letter or digit, then up to 63 of `a-z`,
-  `0-9`, `.`, `_` and `-`.
+  keyring daemon or no session bus, or a locked keyring; on macOS, a
+  Keychain locked where it cannot show its unlock dialog) exits 5 with the
+  reason, never "not stored". Values are capped at what each store keeps
+  whole, 1536 bytes in the Keychain and 4096 in the Secret Service, since
+  their tools cut a longer value short without saying so. Each tool call is
+  bounded to 60 seconds and the per-name lock to 30. `<name>` is a lowercase
+  letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`, checked
+  in statements and in playbook, env-set and account files.
 - **The store step in `cpb play`.** When a played recipe's secret reference is
   not stored yet (the helper's `--check` exits 4, a status the helper
   interface now names; a store that cannot answer is refused as before),
   `cpb play`, `--keep` and `cpb update` show it in the plan
   (`"not_stored"` in `--json`), and after you type the reference they ask for
-  its value twice with echo off, from your own terminal only, and hand it to
-  the helper on stdin (`<helper> --store REF`, a new optional verb of the
-  helper interface). Entries that differ, or one typed with a key that sends
-  an escape sequence (an arrow, Delete; a bracketed paste is taken), store
-  nothing and are asked for again, three attempts in all. It never runs with
-  `--yes`, with `--trust-secret` for that reference, without a terminal, or
-  inside an agent's session. `^C`, an empty answer, a closed terminal, a
-  signal or a failing helper store nothing, and cpb never replaces a stored
-  value. It keeps the value out of command lines and cpb's output; it does
+  its value twice with echo off, from standard input, which must be a
+  terminal, and hand it to the helper on stdin (`<helper> --store REF`, a new
+  optional verb of the helper interface; cpb waits 90 seconds at most for a
+  helper). Entries that differ, or a line typed with a key that sends an
+  escape sequence or any other control key, or longer than the store keeps,
+  store nothing and are asked for again, three attempts in all; Backspace
+  removes whole characters, and a bracketed paste is taken. After every read
+  the terminal's pending input is discarded, so a multi-line paste reaches
+  neither the next prompt nor the shell, and the step guards itself against
+  signals on every path. A reference used twice is asked for once. It never
+  runs with `--yes`, with `--trust-secret` for that reference, without a
+  terminal, or when an agent's session is in the environment (a courtesy
+  check, not a boundary). `^C`, an empty answer, a closed terminal, a signal
+  or a failing helper store nothing, and cpb never replaces a stored value. It keeps the value out of command lines and cpb's output; it does
   not hide it from programs that run as you. See *Secrets* in SPEC.md and
   [the play guide](docs/guides/play.md).
 

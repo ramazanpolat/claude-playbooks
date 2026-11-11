@@ -3,10 +3,12 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A stub secret-tool: items are files, its argv goes to a log, and store
@@ -20,9 +22,13 @@ func stubSecretTool(t *testing.T) (string, string) {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "` + log + `"
 case "$1" in
-  lookup) if [ -n "$STUB_NO_SERVICE" ]; then echo "secret-tool: $STUB_NO_SERVICE" >&2; exit 1; fi
+  lookup) [ -n "$STUB_SLOW" ] && sleep 5
+          if [ -n "$STUB_NO_SERVICE" ]; then echo "secret-tool: $STUB_NO_SERVICE" >&2; exit 1; fi
+          [ -n "$STUB_LOCKED" ] && exit 1
           f="` + items + `/$5"; [ -f "$f" ] || exit 1; cat "$f"; exit 0 ;;
   store)  f="` + items + `/$7"; cat > "$f.part" && mv "$f.part" "$f"; exit 0 ;;
+  search) if [ -n "$STUB_LOCKED" ]; then echo "[/7]"; echo "label = cpb $5"; echo "secret-tool: Cannot get secret of a locked object" >&2; exit 0; fi
+          f="` + items + `/$5"; [ -f "$f" ] && { echo "[/8]"; echo "secret = $(cat "$f")"; }; exit 0 ;;
 esac
 exit 2
 `
@@ -31,6 +37,8 @@ exit 2
 		t.Fatal(err)
 	}
 	t.Setenv("STUB_NO_SERVICE", "")
+	t.Setenv("STUB_LOCKED", "")
+	t.Setenv("STUB_SLOW", "")
 	saved := lookSecretTool
 	lookSecretTool = func() (string, error) { return path, nil }
 	t.Cleanup(func() { lookSecretTool = saved })
@@ -108,5 +116,63 @@ func TestSecretServiceUnreachableIsNotNotStored(t *testing.T) {
 		if strings.Contains(err.Error(), "secret-tool: secret-tool") {
 			t.Fatalf("the tool's prefix is doubled: %v", err)
 		}
+	}
+}
+
+// A locked keyring answers lookup as a missing item does, also when its
+// unlock prompt was dismissed, and secret-tool store would then replace
+// the item once unlocked. search lists a locked item without unlocking it
+// (libsecret 0.21, checked against GNOME Keyring), so a locked item is a
+// store that cannot answer, and --store never runs over it.
+func TestSecretServiceLockedItemIsNotNotStored(t *testing.T) {
+	_, log := stubSecretTool(t)
+	st, err := osDefaultSecretStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STUB_LOCKED", "1")
+	ok, err := st.exists("tok")
+	if ok || err == nil || !strings.Contains(err.Error(), "locked") || !strings.Contains(err.Error(), "cpb:tok") {
+		t.Fatalf("a locked item: %v %v", ok, err)
+	}
+	locks := t.TempDir()
+	savedLocks, savedStore := secretLockDir, defaultSecretStore
+	secretLockDir = func() (string, error) { return locks, nil }
+	defaultSecretStore = func() (osSecretStore, error) { return st, nil }
+	t.Cleanup(func() { secretLockDir, defaultSecretStore = savedLocks, savedStore })
+	var herr error
+	captureStderr(t, func() { herr = runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("new-value")) })
+	if code, ok := exitCode(herr); !ok || code != unavailableExit {
+		t.Fatalf("--store over a locked item: %v", herr)
+	}
+	if strings.Contains(readLog(t, log), "store --label") {
+		t.Fatal("secret-tool store ran over a locked item")
+	}
+}
+
+// A secret-tool that does not answer is not waited on: the store cannot
+// answer, after toolTimeout.
+func TestSecretServiceToolTimeout(t *testing.T) {
+	stubSecretTool(t)
+	saved := toolTimeout
+	toolTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { toolTimeout = saved })
+	t.Setenv("STUB_SLOW", "1")
+	st, _ := osDefaultSecretStore()
+	start := time.Now()
+	ok, err := st.exists("tok")
+	var ue *unavailableError
+	if ok || !errors.As(err, &ue) || time.Since(start) > 4*time.Second {
+		t.Fatalf("after %s: %v %v", time.Since(start), ok, err)
+	}
+}
+
+// The Secret Service keeps 4096 bytes whole here; secret-tool itself cuts
+// stdin at 8192 bytes without saying so (measured).
+func TestSecretServiceLimit(t *testing.T) {
+	stubSecretTool(t)
+	st, _ := osDefaultSecretStore()
+	if st.maxValue() != 4096 || st.maxValue() >= 8192 {
+		t.Fatalf("maxValue %d", st.maxValue())
 	}
 }
