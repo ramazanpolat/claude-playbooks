@@ -478,3 +478,193 @@ func TestSharedTokenLaunchOrdersTheGrantByExpiry(t *testing.T) {
 		}
 	})
 }
+
+// LinkCredentials on its own, with a login of the machine's account in the
+// playbook that cannot be ordered against the machine store's (it has no
+// expiry): both files stay byte for byte, one notice says so, and nothing is
+// linked over the playbook's login. SyncCredentials never reaches this
+// branch (syncMachineStore tells it to leave first), so only a direct call
+// can show that it returns rather than falling through to the link.
+func TestLinkCredentialsUndecidedLeavesBothFiles(t *testing.T) {
+	f := newStoreFixture(t, "", fakeLogin("m", 2000))
+	hostOS = "linux"
+	writeOld(t, f.local, fakeLogin("own", 0))
+	before, own := snap(t, f.global), snap(t, f.local)
+
+	if err := LinkCredentials(f.target, f.global); err != nil {
+		t.Fatal(err)
+	}
+	before.untouched(t, f.global)
+	own.untouched(t, f.local)
+	info, err := os.Lstat(f.local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("the playbook's login was replaced (mode %v)", info.Mode())
+	}
+	f.oneUndecidedNotice(t, f.global, f.local, "has no grant expiry")
+	if aside, _ := filepath.Glob(f.local + ".cpb-own-*"); len(aside) != 0 {
+		t.Fatalf("set aside: %v", aside)
+	}
+	noTempFiles(t, filepath.Dir(f.global))
+	if len(f.keychainCalls) != 0 {
+		t.Fatalf("Keychain calls: %q", f.keychainCalls)
+	}
+}
+
+// countChmods counts the mode changes sync makes, and makes them.
+func countChmods(t *testing.T) *int {
+	t.Helper()
+	n := 0
+	old := chmodFile
+	chmodFile = func(path string, mode os.FileMode) error {
+		n++
+		return old(path, mode)
+	}
+	t.Cleanup(func() { chmodFile = old })
+	return &n
+}
+
+// A machine store open to group or others is made owner-only in place,
+// whatever sync decides about its value: the mode changes, and the bytes,
+// the file (its inode) and its time stay. Before the rewrite was dropped,
+// every macOS sync left the store 0600; since, a store with the same bytes
+// kept 0644 until this.
+func TestSyncRepairsAnOpenStoreModeInPlace(t *testing.T) {
+	value := fakeLogin("m", 2000)
+	for _, c := range []struct {
+		name, keychain, hostOS string
+		notices                int
+	}{
+		{"the Keychain holds the same value", value, "darwin", 0},
+		{"no Keychain", "", "linux", 0},
+		{"the newest cannot be told", fakeLogin("k", 0), "darwin", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newStoreFixture(t, c.keychain, value)
+			hostOS = c.hostOS
+			if err := os.Chmod(f.global, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			chmods := countChmods(t)
+			before := snap(t, f.global)
+			ino, hasIno := inode(before.info)
+
+			if err := SyncCredentials(f.target); err != nil {
+				t.Fatal(err)
+			}
+			before.untouched(t, f.global)
+			after := snap(t, f.global)
+			if hasIno {
+				if got, _ := inode(after.info); got != ino {
+					t.Fatalf("inode %d -> %d: the store was replaced", ino, got)
+				}
+			}
+			if after.info.Mode().Perm() != 0o600 {
+				t.Fatalf("mode %v, want 0600", after.info.Mode().Perm())
+			}
+			if *chmods != 1 {
+				t.Fatalf("%d mode changes, want 1", *chmods)
+			}
+			noTempFiles(t, filepath.Dir(f.global))
+			if len(f.notices) != c.notices {
+				t.Fatalf("notices: %q", f.notices)
+			}
+		})
+	}
+}
+
+// A store that is already owner-only is not touched: no mode change, and
+// its time does not move.
+func TestSyncLeavesAPrivateStoreAlone(t *testing.T) {
+	for _, mode := range []os.FileMode{0o600, 0o400} {
+		t.Run(mode.String(), func(t *testing.T) {
+			value := fakeLogin("m", 2000)
+			f := newStoreFixture(t, value, value)
+			if err := os.Chmod(f.global, mode); err != nil {
+				t.Fatal(err)
+			}
+			chmods := countChmods(t)
+			before := snap(t, f.global)
+			if err := SyncCredentials(f.target); err != nil {
+				t.Fatal(err)
+			}
+			before.untouched(t, f.global)
+			if got := snap(t, f.global).info.Mode().Perm(); got != mode {
+				t.Fatalf("mode %v, want %v", got, mode)
+			}
+			if *chmods != 0 {
+				t.Fatalf("%d mode changes, want none", *chmods)
+			}
+		})
+	}
+}
+
+// A mode that cannot be changed is reported once, and the sync goes on.
+func TestSyncReportsAStoreModeItCannotRepair(t *testing.T) {
+	value := fakeLogin("m", 2000)
+	f := newStoreFixture(t, value, value)
+	if err := os.Chmod(f.global, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := chmodFile
+	chmodFile = func(string, os.FileMode) error { return errors.New("not permitted") }
+	t.Cleanup(func() { chmodFile = old })
+	before := snap(t, f.global)
+
+	if err := SyncCredentials(f.target); err != nil {
+		t.Fatal(err)
+	}
+	before.untouched(t, f.global)
+	f.linked(t)
+	if len(f.notices) != 1 || !strings.Contains(f.notices[0], f.global) ||
+		!strings.Contains(f.notices[0], "0644") || !strings.Contains(f.notices[0], "could not be made 0600") {
+		t.Fatalf("notices: %q", f.notices)
+	}
+	if strings.Contains(f.notices[0], "fake-") {
+		t.Fatalf("the notice carries a value: %s", f.notices[0])
+	}
+}
+
+// A machine store that does not parse is left as it is, and the one notice
+// says what to do: remove it, and what writes it again then. It carries no
+// value, of the store or of any other source.
+func TestSyncUnparsedStoreNoticeSaysWhatToDo(t *testing.T) {
+	broken := `{"claudeAiOauth":{"accessToken":"fake-access-broken"`
+	for _, c := range []struct {
+		name, keychain, own, hostOS, then string
+	}{
+		{"the Keychain holds a login", fakeLogin("k", 2000), "", "darwin",
+			"the next sync writes the Keychain value there"},
+		{"the Keychain and the playbook hold logins", fakeLogin("k", 2000), fakeLogin("own", 3000), "darwin",
+			"the next sync writes the newest of the Keychain value and this playbook's login there"},
+		{"no Keychain, the playbook holds a login", "", fakeLogin("own", 3000), "linux",
+			"log in with claude outside any playbook to write a new one"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newStoreFixture(t, c.keychain, broken)
+			hostOS = c.hostOS
+			if c.own != "" {
+				writeOld(t, f.local, c.own)
+			}
+			before := snap(t, f.global)
+
+			if err := SyncCredentials(f.target); err != nil {
+				t.Fatal(err)
+			}
+			before.untouched(t, f.global)
+			if info, err := os.Lstat(f.local); err == nil && !info.Mode().IsRegular() {
+				t.Fatal("the playbook was linked to a store that does not parse")
+			}
+			f.oneUndecidedNotice(t, f.global)
+			want := f.global + " does not parse: remove it, and " + c.then
+			if !strings.Contains(f.notices[0], want) {
+				t.Fatalf("the notice does not say what to do:\n got %s\nwant %s", f.notices[0], want)
+			}
+			if strings.ContainsAny(f.notices[0], "{}") {
+				t.Fatalf("the notice carries a value: %s", f.notices[0])
+			}
+		})
+	}
+}

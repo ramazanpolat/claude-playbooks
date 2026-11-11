@@ -73,10 +73,13 @@ func EnsureGlobalCredentials() (string, error) {
 // expires last wins (newestLogin), and is written only when its bytes differ,
 // through a temporary file renamed over the store (replaceFile). The Keychain
 // is only ever read. When no candidate can be told to be the newest, nothing
-// is written and one notice says which sources and why; leave then tells the
+// is written and one notice says which sources and why (and, when the
+// machine store does not parse, what to do about it); leave then tells the
 // caller to leave the playbook as it is too, when its own file was among
 // them or the machine store holds no usable value to link. globalCreds is ""
-// when the machine store holds no usable value.
+// when the machine store holds no usable value. Whatever is decided, a
+// machine store open to group or others is made owner-only in place
+// (repairStoreMode).
 func syncMachineStore(targetDir string) (globalCreds string, leave bool, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -86,6 +89,7 @@ func syncMachineStore(targetDir string) (globalCreds string, leave bool, err err
 	globalCreds = StorePath(globalClaude)
 
 	var cands []loginValue
+	fromKeychain := false
 	if hostOS == "darwin" {
 		out, kerr := keychainSecret(machineKeychainService)
 		out = bytes.TrimSpace(out)
@@ -93,12 +97,16 @@ func syncMachineStore(targetDir string) (globalCreds string, leave bool, err err
 			if !json.Valid(out) {
 				return "", false, fmt.Errorf("Keychain item %s did not contain valid JSON credentials", machineKeychainService)
 			}
+			fromKeychain = true
 			cands = append(cands, loginValue{source: "the Keychain item " + machineKeychainService, data: out})
 		}
 	}
 	current, err := os.ReadFile(globalCreds)
 	if err != nil && !os.IsNotExist(err) {
 		return "", false, err
+	}
+	if err == nil {
+		repairStoreMode(globalCreds)
 	}
 	current = bytes.TrimSpace(current)
 	if len(current) > 0 {
@@ -117,6 +125,9 @@ func syncMachineStore(targetDir string) (globalCreds string, leave bool, err err
 
 	win, why := newestLogin(cands)
 	if win < 0 {
+		if len(current) > 0 && !json.Valid(current) {
+			why += "; " + unparsedStoreAdvice(globalCreds, fromKeychain, withOwn)
+		}
 		Notice(why)
 		if !json.Valid(current) {
 			return "", true, nil
@@ -168,6 +179,44 @@ func sharedOwnLogin(targetDir, globalCreds string) []byte {
 		return nil
 	}
 	return bytes.TrimSpace(data)
+}
+
+// chmodFile is os.Chmod; tests count its calls.
+var chmodFile = os.Chmod
+
+// repairStoreMode makes the login store at path owner-only (0600) when its
+// mode grants group or others any permission. Only the mode changes: the
+// bytes, the file and its time stay, so a reader holding the file is not
+// disturbed and nothing is written when the value is the same. A store that
+// is already owner-only is not touched at all. When the mode cannot be
+// changed, one notice says so and the sync goes on, since the store reads
+// as it did before.
+func repairStoreMode(path string) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	perm := info.Mode().Perm()
+	if perm&0o077 == 0 {
+		return
+	}
+	if err := chmodFile(path, 0o600); err != nil {
+		Notice(fmt.Sprintf("%s is open to group or others (mode %04o) and could not be made 0600: %v", path, perm, err))
+	}
+}
+
+// unparsedStoreAdvice is what to do about a machine store that does not
+// parse, which sync leaves as it is: remove it, and what writes it again
+// then. It names the file, never a value.
+func unparsedStoreAdvice(store string, fromKeychain, withOwn bool) string {
+	then := "log in with claude outside any playbook to write a new one"
+	switch {
+	case fromKeychain && withOwn:
+		then = "the next sync writes the newest of the Keychain value and this playbook's login there"
+	case fromKeychain:
+		then = "the next sync writes the Keychain value there"
+	}
+	return store + " does not parse: remove it, and " + then
 }
 
 // loginValue is one candidate value for the machine store: where it comes
