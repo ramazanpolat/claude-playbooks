@@ -187,7 +187,20 @@ cpb:service-token is not stored on this machine yet. Its value will be written t
 - If a keyring starts later, a value already in the file is still found,
   and new values go to the keyring.
 - cpb refuses the file if the directory or the file is open to others, owned
-  by someone else, or a symbolic link, and names the `chmod` that fixes it.
+  by someone else, or a symbolic link, or if a directory above it could be
+  changed by someone else, and says what is wrong (for an open mode, the
+  `chmod` that fixes it).
+- cpb also refuses a file that does not hold what it would have stored: an
+  empty file, or one that ends in a newline. To put a value there by hand,
+  write the value alone, as `printf '%s'` does, never `echo` or an editor;
+  in bash, without echo and out of the shell's history:
+
+  ```
+  read -rs v && (umask 077; mkdir -p ~/.local/share/cpb/secrets && printf '%s' "$v" > ~/.local/share/cpb/secrets/service-token); unset v
+  ```
+- A keyring that is installed but fails (a crash, a broken session bus)
+  stops cpb with nothing stored: it never quietly falls back to the file.
+  The value goes to the store the prompt named, or nowhere.
 
 What this protects, and what it does not: the value stays out of command
 lines and out of cpb's output, so no log or transcript of them holds it. It

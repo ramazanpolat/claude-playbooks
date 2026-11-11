@@ -10,12 +10,16 @@ if cpb play --yes --no-sandbox ./recipe.cpb > "$HOME/yes.out" 2>&1; then echo "-
 grep -q "cpb asks for a value only from your own terminal" "$HOME/yes.out"
 # A reference that is not stored is refused when a statement writes it.
 if cpb APPLY uses-secret.cpb --yes > "$HOME/early.out" 2>&1; then echo "an unstored reference was written"; exit 1; fi
-# The rest needs a machine with no keyring, where cpb keeps the secret in
-# its file store (CI's runner is one): a placeholder is put there as the
-# store step would, in a 0700 directory as a 0600 file.
-[ "$(uname)" = Linux ] || exit 0
-command -v secret-tool >/dev/null && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && exit 0
-d="${XDG_DATA_HOME:-$HOME/.local/share}/cpb/secrets"
+# The rest is Linux's file store: check-one.sh runs with no session bus and
+# the data home under the throwaway home, so no keyring answers and the
+# file store is that home's. A placeholder is put there as the store step
+# would, in a 0700 directory as a 0600 file. In CI this half must run.
+if [ "$(uname)" != Linux ]; then
+  [ -z "${CI:-}" ] || { echo "the file store half of this example must run in CI (Linux)"; exit 1; }
+  exit 0
+fi
+d="$XDG_DATA_HOME/cpb/secrets"
+case "$d" in "$HOME"/*) ;; *) echo "the file store is not under the throwaway home: $d"; exit 1 ;; esac
 mkdir -p "$d" && chmod 700 "$d"
 (umask 077 && printf '%s' 'placeholder-service-token' > "$d/service-token")
 out=$(cpb play --check ./recipe.cpb)

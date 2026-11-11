@@ -136,27 +136,60 @@ func TestFileStoreRefusesLinksAndOpenModes(t *testing.T) {
 	})
 }
 
-// The file layer refuses a name that is not a plain file name, whatever
-// the caller: nothing is created anywhere.
+// A name that is not a plain file name is never used: each one below has a
+// real file reachable through it (planted), so without the name check
+// write, exists and read would reach it; with it, all three refuse, and
+// nothing in the tree changes.
 func TestFileStoreNameSafety(t *testing.T) {
 	dir := fileStoreHome(t)
 	f := fileStore{dir: dir}
-	for _, name := range []string{"", ".hidden", "a/b", "../x", "A", "x\n", "x y", strings.Repeat("a", 65)} {
+	if err := f.write("seed", []byte("v")); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("a", 65)
+	plant := map[string]string{
+		".hidden": filepath.Join(dir, ".hidden"),
+		"a/b":     filepath.Join(dir, "a", "b"),
+		"../x":    filepath.Join(filepath.Dir(dir), "x"),
+		"A":       filepath.Join(dir, "A"),
+		"x\n":     filepath.Join(dir, "x\n"),
+		"x y":     filepath.Join(dir, "x y"),
+		"x~y":     filepath.Join(dir, "x~y"),
+		long:      filepath.Join(dir, long),
+	}
+	os.Mkdir(filepath.Join(dir, "a"), 0o700)
+	for _, p := range plant {
+		if err := os.WriteFile(p, []byte("planted"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree := func() string {
+		var b strings.Builder
+		filepath.Walk(filepath.Dir(filepath.Dir(dir)), func(p string, info os.FileInfo, err error) error {
+			if err == nil {
+				b.WriteString(p + "\n")
+			}
+			return nil
+		})
+		return b.String()
+	}
+	before := tree()
+	for name := range plant {
 		if err := f.write(name, []byte("v")); err == nil {
 			t.Errorf("%q was written", name)
 		}
 		if _, err := f.exists(name); err == nil {
 			t.Errorf("%q was looked up", name)
 		}
-		if _, err := f.read(name); err == nil {
-			t.Errorf("%q was read", name)
+		if v, err := f.read(name); err == nil || v != nil {
+			t.Errorf("%q was read: %q", name, v)
 		}
 	}
-	if _, err := os.Stat(filepath.Dir(dir)); err == nil {
-		entries, _ := os.ReadDir(dir)
-		if len(entries) != 0 {
-			t.Fatalf("created: %v", entries)
-		}
+	if _, err := f.exists(""); err == nil {
+		t.Error("the empty name was looked up")
+	}
+	if after := tree(); after != before {
+		t.Fatalf("the tree changed:\n%s\nwas\n%s", after, before)
 	}
 }
 
@@ -210,9 +243,10 @@ func TestDefaultHelperFileStoreWithoutSecretTool(t *testing.T) {
 	if err != nil || !containsLine(env, "K=file-Value 9") {
 		t.Fatalf("exec mode: %v", err)
 	}
-	kind, path := st.target("new")
-	if kind != storeFile || path != filepath.Join(dir, "new") {
-		t.Fatalf("target: %s %s", kind, path)
+	tg, terr := st.target("new")
+	kind, path := tg.kind, tg.path
+	if terr != nil || kind != storeFile || path != filepath.Join(dir, "new") {
+		t.Fatalf("target: %s %s %v", kind, path, terr)
 	}
 	if w := st.where("new"); !strings.Contains(w, path) || !strings.Contains(w, "root") || !strings.Contains(w, "secret-tool is not installed") {
 		t.Fatalf("where: %s", w)
@@ -258,8 +292,8 @@ func TestLinuxStoreTwoStores(t *testing.T) {
 	if v, err := st.read("early"); err != nil || string(v) != "from-the-file" {
 		t.Fatalf("read %q %v", v, err)
 	}
-	if kind, path := st.target("early"); kind != storeFile || path != filepath.Join(dir, "early") {
-		t.Fatalf("target of a filed value: %s %s", kind, path)
+	if tg, _ := st.target("early"); tg.kind != storeFile || tg.path != filepath.Join(dir, "early") {
+		t.Fatalf("target of a filed value: %+v", tg)
 	}
 	if err := runSecretHelper([]string{"--store", "cpb:early"}, strings.NewReader("into-the-keyring")); err == nil {
 		t.Fatal("--store replaced a value kept in the file")

@@ -35,9 +35,14 @@ type memStore struct {
 	readErr error
 	// notReady, when set, is what readyToStore answers.
 	notReady error
+	// lastWant is the store kind the last write was told to keep to.
+	lastWant string
+	// targetErr and targetWhy are what target answers.
+	targetErr error
+	targetWhy string
 }
 
-func (m *memStore) readyToStore() error { return m.notReady }
+func (m *memStore) readyToStore(string) error { return m.notReady }
 
 func (m *memStore) maxValue() int {
 	if m.max > 0 {
@@ -47,8 +52,11 @@ func (m *memStore) maxValue() int {
 }
 
 func (m *memStore) where(name string) string { return "the test store, as " + name }
-func (m *memStore) target(name string) (string, string) {
-	return storeFile, "/test-store/" + name
+func (m *memStore) target(name string) (storeTarget, error) {
+	if m.targetErr != nil {
+		return storeTarget{}, m.targetErr
+	}
+	return storeTarget{kind: storeFile, path: "/test-store/" + name, why: m.targetWhy}, nil
 }
 func (m *memStore) exists(name string) (bool, error) {
 	if m.onExists != nil {
@@ -74,7 +82,8 @@ func (m *memStore) read(name string) ([]byte, error) {
 	}
 	return append([]byte{}, v...), nil
 }
-func (m *memStore) write(name string, value []byte) error {
+func (m *memStore) write(name string, value []byte, want string) error {
+	m.lastWant = want
 	if m.onWrite != nil {
 		m.onWrite(name)
 	}
@@ -406,7 +415,7 @@ func TestDefaultHelperUnavailableWriteIsExit5(t *testing.T) {
 // lockedWriteStore is a memStore whose writes find the store locked.
 type lockedWriteStore struct{ *memStore }
 
-func (l *lockedWriteStore) write(string, []byte) error {
+func (l *lockedWriteStore) write(string, []byte, string) error {
 	return unavailable("the test store is locked; nothing was stored")
 }
 

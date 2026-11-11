@@ -632,9 +632,16 @@ keeps values in the operating system's store:
   `secret-tool lookup` exits 1 both for a missing item and when no Secret
   Service can be reached (a server or a container with `secret-tool` but no
   keyring daemon, or no session bus); the default helper tells them apart
-  by its stderr, which is empty only for a missing item (libsecret 0.21).
-  Any message there means no keyring can be reached, and the file store
-  answers instead. A **locked keyring** answers `lookup` as a missing item
+  by its stderr, which is empty only for a missing item. Only two messages,
+  with exit 1, mean "no keyring" and let the file store answer: `The name
+  org.freedesktop.secrets was not provided by any .service files` (a
+  session bus with no keyring daemon) and `Cannot autolaunch D-Bus without
+  X11 $DISPLAY` (no session bus at all); measured with libsecret 0.21.4,
+  and `secret-tool` runs with `LC_ALL=C` so they are not translated.
+  Anything else (another message, such as a stale or malformed bus address;
+  another exit status; a `secret-tool` that crashed or could not start) is
+  a store that cannot answer, exit 5: nothing is written, to the keyring or
+  the file, and a read (a launch) never falls back to the file. A **locked keyring** answers `lookup` as a missing item
   does, also when its unlock prompt was dismissed, and `secret-tool store`
   would then replace the item once it is unlocked; so the helper checks a
   missing answer with `secret-tool search`, which lists a locked item
@@ -682,8 +689,21 @@ keeps values in the operating system's store:
 - **The file store** (Linux, since v4.7.0) is for a server, a container or
   a VM with no keyring, where the alternative would be no store at all.
   - It is used when `secret-tool` is not installed, or when no Secret
-    Service can be reached. A relative `XDG_DATA_HOME` is ignored, as the
-    XDG rules say. It keeps values up to 4096 bytes, as the Secret Service
+    Service can be reached (the two messages above). A relative
+    `XDG_DATA_HOME` is ignored, as the XDG rules say. A read the file
+    serves while `secret-tool` is installed (a launch, `cpb ask`) says so
+    in one stderr line: which file, and that the keyring does not hold the
+    name or cannot be reached. `--store`'s own read-back stays quiet.
+  - **Whose store.** The store is the one of the cpb that runs the helper,
+    never the launch's: cpb resolves the file store's directory and takes
+    its own `HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and
+    `DISPLAY`, and hands them to the default helper (`CPB_SECRET_STORE_*`,
+    for every call: `--check`, `--ready`, `--store`, a launch, `cpb ask`).
+    The helper uses them for its store and its tools, and drops them before
+    it runs the command; anything of that name in the launch environment is
+    replaced. So a playbook or a recipe that sets `XDG_DATA_HOME`, `HOME` or
+    the bus never moves a launch to another directory or from the keyring
+    to the file while `--check` reports the store cpb sees. It keeps values up to 4096 bytes, as the Secret Service
     does, so a value fits whichever store takes it.
   - **Two stores on one machine** (a keyring that starts later, or stops):
     reads and `--check` look in the keyring when it answers, then in the
@@ -694,20 +714,50 @@ keeps values in the operating system's store:
     keyring's item locked stops there, exit 5, and never falls back to the
     file's copy. Where cpb itself shows where a value would go (the store step's
     prompt, `cpb play --check --json`), it asks the keyring with `lookup`
-    alone, whose output goes nowhere, so no value passes through cpb.
+    alone, whose output goes nowhere, so no value passes through cpb; a
+    keyring that cannot answer is said so, never shown as "the file".
+  - **The write goes where the prompt said.** The store step passes the
+    store its prompt named to `--store REF --into <store>` (the default
+    helper's own option): a write that would go elsewhere now (the keyring
+    gone since the prompt, or back) stores nothing and exits 5 ("would now
+    be written to …, not to … as you were told"). Before the first prompt,
+    `--ready` asks what the write would meet: a keyring that cannot answer
+    or holds the name locked, or a file store that cannot be made or
+    trusted (a read-only home), stops the step before anything is typed.
   - **Trust.** The directory and the file are never followed through a
     symbolic link, must be owned by the user, and must grant group and
     others nothing (`0700`, `0600`); otherwise nothing is read or written,
-    and the line names the `chmod` that fixes it. The file layer refuses a
-    name that is not a plain file name, beside the grammar.
+    and the line says what is wrong (for an open mode, the `chmod` that
+    fixes it). Every directory above the store must be owned by root or the
+    user and writable by no one else, unless it is sticky as `/tmp` is
+    (links among them are judged by where they lead). The directory is then
+    opened once, without following a link, and every file in it is reached
+    through that handle (`openat`, `fstatat`, `linkat`), so nothing can be
+    swapped in between a check and its use. The file layer refuses a name
+    that is not a plain file name, beside the grammar.
   - **Writing** never replaces: the value goes to a temporary file (`0600`,
-    created exclusively) in the same directory, is synced, and is linked to
-    its name, which fails when the name exists. Under the per-name lock.
+    created exclusively, `.tmp-<name>~…`) in the same directory, is
+    synced, and is linked to its name, which fails when the name exists (a
+    dangling link included). Under the per-name lock, which first removes
+    any temporary file of that name a killed write left behind: each may
+    hold a value.
+  - **Reading** refuses a file that does not hold what `--store` would have
+    written: empty, ending in a line end, holding a byte outside printable
+    ASCII, or longer than 4096 bytes. The line names the file and the
+    problem, never the value.
+  - **By hand.** On a machine with no keyring, a value can also be put
+    there without `cpb play`: the file `<dir>/<name>`, mode `0600`, in the
+    `0700` directory, holding the value alone with no line end, as
+    `printf '%s'` writes it, never `echo` or an editor. Read the value
+    without echo and without the shell's history, for example in bash
+    `read -rs v && (umask 077; mkdir -p ~/.local/share/cpb/secrets &&
+    printf '%s' "$v" > ~/.local/share/cpb/secrets/<name>); unset v`.
   - **What it does not do.** The value is plaintext at rest: the user and
     root can read it, and it goes with a home, container or VM that is
     thrown away. The store step's prompt says so, and so does `cpb play
     --check --json` (`secrets[].store = "file"` and its `path`) before the
-    step. To remove a value, delete its file.
+    step. To remove a value, delete its file (and any `.tmp-<name>~*`
+    beside it that a killed write may have left).
   - The directory is outside every playbooks root: an export (`SHOW
     CREATE`) carries a `cpb:<name>` reference and never its value, and no
     statement copies, resets or drops the directory.
@@ -3373,9 +3423,12 @@ store step, *Secrets*). `secrets` (since v4.7.0; `--check` and `--dry-run`)
 lists each secret reference: `stored` is `true` or `false` from the
 helper's `--check`, or `null` with a `note` when it cannot say; `store` is
 where the value is, or would be kept: `keychain`, `secret-service` or
-`file` for cpb's default helper (with the file's `path` for `file`),
-`helper` for a configured one (named in `helper`), or `none` when no helper
-can take it (with a `note`). No value is read for it, so an agent that runs
+`file` for cpb's default helper (with the file's `path` for `file`, and
+`note` `no keyring: <why>` when no keyring can keep it), `unknown` when the
+default helper's store cannot answer now (the `note` says why), `helper`
+for a configured one (named in `helper`), or `none` when no helper can take
+it (with a `note`). A `note` for a check that could not say carries the
+first line the helper printed, which never holds a value. No value is read for it, so an agent that runs
 only these checks can tell the person where their secret will be kept
 before the person runs the store step. `--check --json` is the same object with no statements, and `sandbox`
 `null`. `sandbox.backend` is `""` when the play runs on this machine. `keep`

@@ -117,7 +117,10 @@ file. Without one it is refused before anything is written.
   the human runs `cpb play <recipe>` in their own terminal, which asks them
   for the value (that step never runs for you, with `--yes`, or without a
   terminal); otherwise they store the item SPEC.md names ("cpb's default
-  helper") in their Keychain or keyring themselves. `cpb play --check
+  helper") in their Keychain or keyring themselves, or, on a Linux machine
+  with no keyring, in the file store's file, which must hold the value
+  alone, with no trailing newline (SPEC.md, "The file store", "By hand").
+  Never write that file yourself. `cpb play --check
   --json <recipe>` lists each secret, whether it is stored and where it
   would be kept, without reading a value. Never ask for the value.
 

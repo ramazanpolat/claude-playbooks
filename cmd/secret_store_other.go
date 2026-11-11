@@ -8,3 +8,8 @@ import "errors"
 func osDefaultSecretStore() (osSecretStore, error) {
 	return nil, errors.New("cpb:<name> references need the operating system's secret store, and cpb has none for this system; configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')")
 }
+
+// No store, so nothing to hand the helper.
+func storeDirForHelper() string { return "" }
+func setHelperStoreDir(string)  {}
+func quietFileReads() func()    { return func() {} }

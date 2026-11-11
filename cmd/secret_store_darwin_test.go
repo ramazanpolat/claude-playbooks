@@ -93,7 +93,7 @@ func TestKeychainStoreKeepsTheValueOffArgv(t *testing.T) {
 	if ok, err := st.exists("tok"); ok || err != nil {
 		t.Fatalf("exists before: %v %v", ok, err)
 	}
-	if err := st.write("tok", value); err != nil {
+	if err := st.write("tok", value, ""); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if ok, err := st.exists("tok"); !ok || err != nil {
@@ -138,7 +138,7 @@ func TestKeychainOnlyExit44IsNotStored(t *testing.T) {
 func TestKeychainAddHasNoU(t *testing.T) {
 	_, log := stubSecurity(t)
 	st, _ := osDefaultSecretStore()
-	if err := st.write("tok", []byte("v-1")); err != nil {
+	if err := st.write("tok", []byte("v-1"), ""); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(log + ".stdin")
@@ -161,7 +161,7 @@ func TestKeychainLockedWithoutUIIsExit5(t *testing.T) {
 	st, _ := osDefaultSecretStore()
 	for _, mode := range []string{"1", "text", "english", "exit"} {
 		t.Setenv("STUB_LOCKED", mode)
-		err := st.write("tok", []byte("Value-77"))
+		err := st.write("tok", []byte("Value-77"), "")
 		var ue *unavailableError
 		if !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") || !strings.Contains(err.Error(), "nothing was stored") || !strings.Contains(err.Error(), "security unlock-keychain") || strings.Contains(err.Error(), "Value-77") || strings.Contains(err.Error(), hex.EncodeToString([]byte("Value-77"))) {
 			t.Fatalf("a locked Keychain (%s): %v", mode, err)
@@ -169,6 +169,19 @@ func TestKeychainLockedWithoutUIIsExit5(t *testing.T) {
 	}
 	if st.maxValue() != 1536 {
 		t.Fatalf("maxValue %d", st.maxValue())
+	}
+}
+
+// The Keychain never takes a write meant for another store.
+func TestKeychainWriteKeepsToTheNamedStore(t *testing.T) {
+	_, log := stubSecurity(t)
+	st, _ := osDefaultSecretStore()
+	var ue *unavailableError
+	if err := st.write("tok", []byte("v-1"), storeFile); !errors.As(err, &ue) || strings.Contains(readLog(t, log), "-i") {
+		t.Fatalf("a write named for the file store: %v", err)
+	}
+	if err := st.write("tok", []byte("v-1"), storeKeychain); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -203,7 +216,7 @@ func TestKeychainPresenceAsksNoUnlock(t *testing.T) {
 func TestKeychainReadyToStore(t *testing.T) {
 	_, log := stubSecurity(t)
 	st, _ := osDefaultSecretStore()
-	if err := st.readyToStore(); err != nil {
+	if err := st.readyToStore("tok"); err != nil {
 		t.Fatalf("unlocked: %v", err)
 	}
 	if !strings.Contains(readLog(t, log), "show-keychain-info") {
@@ -211,12 +224,12 @@ func TestKeychainReadyToStore(t *testing.T) {
 	}
 	var ue *unavailableError
 	t.Setenv("STUB_LOCKED", "1")
-	if err := st.readyToStore(); !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") || !strings.Contains(err.Error(), "security unlock-keychain") || !strings.Contains(err.Error(), "nothing was asked for") {
+	if err := st.readyToStore("tok"); !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") || !strings.Contains(err.Error(), "security unlock-keychain") || !strings.Contains(err.Error(), "nothing was asked for") {
 		t.Fatalf("locked: %v", err)
 	}
 	t.Setenv("STUB_LOCKED", "")
 	t.Setenv("STUB_INFO_EXIT", "51")
-	if err := st.readyToStore(); !errors.As(err, &ue) || !strings.Contains(err.Error(), "security unlock-keychain") {
+	if err := st.readyToStore("tok"); !errors.As(err, &ue) || !strings.Contains(err.Error(), "security unlock-keychain") {
 		t.Fatalf("show-keychain-info failing otherwise: %v", err)
 	}
 	t.Setenv("STUB_INFO_EXIT", "")
@@ -225,7 +238,7 @@ func TestKeychainReadyToStore(t *testing.T) {
 	t.Cleanup(func() { toolTimeout = saved })
 	t.Setenv("STUB_SLOW", "1")
 	start := time.Now()
-	if err := st.readyToStore(); !errors.As(err, &ue) || !strings.Contains(err.Error(), "did not answer within") || strings.Contains(err.Error(), "cpb/") || time.Since(start) > 3*time.Second {
+	if err := st.readyToStore("tok"); !errors.As(err, &ue) || !strings.Contains(err.Error(), "did not answer within") || strings.Contains(err.Error(), "cpb/") || time.Since(start) > 3*time.Second {
 		t.Fatalf("a dialog nobody answers, after %s: %v", time.Since(start), err)
 	}
 }
@@ -271,7 +284,7 @@ func TestKeychainRealStoreKeepsTheCapWhole(t *testing.T) {
 	}
 	// show-keychain-info, the store step's question before it asks for a
 	// value, answers 0 for an unlocked keychain.
-	if err := st.readyToStore(); err != nil {
+	if err := st.readyToStore("tok"); err != nil {
 		t.Fatalf("an unlocked keychain is not ready: %v", err)
 	}
 	value := func(n int) []byte {
@@ -283,14 +296,14 @@ func TestKeychainRealStoreKeepsTheCapWhole(t *testing.T) {
 	}
 	name := strings.Repeat("n", 64)
 	want := value(keychainMaxValue)
-	if err := st.write(name, want); err != nil {
+	if err := st.write(name, want, ""); err != nil {
 		t.Fatalf("write at the cap: %v", err)
 	}
 	got, err := st.read(name)
 	if err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("a value at the cap came back %d bytes (want %d): %v", len(got), len(want), err)
 	}
-	st.write(name, value(10))
+	st.write(name, value(10), "")
 	if got, _ := st.read(name); !bytes.Equal(got, want) {
 		t.Fatal("a second add replaced the item")
 	}
@@ -301,7 +314,7 @@ func TestKeychainRealStoreKeepsTheCapWhole(t *testing.T) {
 		mid := (lo + hi + 1) / 2
 		n := strings.Repeat("p", 60) + fmt.Sprintf("%04d", i)
 		v := value(mid)
-		st.write(n, v)
+		st.write(n, v, "")
 		if got, err := st.read(n); err == nil && bytes.Equal(got, v) {
 			lo = mid
 		} else {

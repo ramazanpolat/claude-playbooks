@@ -34,7 +34,16 @@
   mode `0600` in a `0700` directory, up to 4096 bytes, written through a
   temporary file and a link, so it never replaces one. The value is plaintext at rest, readable by
   the user and root, and the store step's prompt says so. Links, other
-  owners and open modes are refused. When a keyring starts later, a value in
+  owners and open modes are refused, and so is a directory above it that
+  someone else could change; the directory is opened once and every file
+  reached through it. A read refuses a file that does not hold what the
+  store would have written (empty, a trailing newline). Only `secret-tool`'s
+  two messages for "no Secret Service" let the file answer: a keyring that
+  fails in any other way is exit 5, never a quiet fall back to the file, and
+  the write goes to the store the prompt named or nowhere. The store is
+  always the one of the cpb that runs the helper, whatever `HOME`,
+  `XDG_DATA_HOME` or session bus a playbook's launch sets. When a keyring
+  starts later, a value in
   the file is still found and new values go to the keyring; a name in both is
   the keyring's, and a locked keyring item is never written over or beside.
   `cpb play --check --json` and `--dry-run --json` list each

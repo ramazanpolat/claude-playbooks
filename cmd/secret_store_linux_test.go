@@ -12,7 +12,10 @@ import (
 )
 
 // A stub secret-tool: items are files, its argv goes to a log, and store
-// reads the value from stdin as secret-tool does.
+// reads the value from stdin as secret-tool does. STUB_NO_SERVICE makes
+// lookup print that message and exit 1; STUB_LOOKUP_EXIT makes it exit with
+// that status (with STUB_LOOKUP_SAYS on stderr); STUB_LOOKUP_CRASH makes it
+// die of a signal. Its environment's LC_ALL goes to the log too.
 func stubSecretTool(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -21,8 +24,11 @@ func stubSecretTool(t *testing.T) (string, string) {
 	log := filepath.Join(dir, "secret-tool.log")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "` + log + `"
+printf 'LC_ALL=%s HOME=%s BUS=%s\n' "$LC_ALL" "$HOME" "${DBUS_SESSION_BUS_ADDRESS-unset}" >> "` + log + `.env"
 case "$1" in
   lookup) [ -n "$STUB_SLOW" ] && sleep 5
+          [ -n "$STUB_LOOKUP_CRASH" ] && kill -KILL $$
+          if [ -n "$STUB_LOOKUP_EXIT" ]; then [ -n "$STUB_LOOKUP_SAYS" ] && echo "secret-tool: $STUB_LOOKUP_SAYS" >&2; exit "$STUB_LOOKUP_EXIT"; fi
           if [ -n "$STUB_NO_SERVICE" ]; then echo "secret-tool: $STUB_NO_SERVICE" >&2; exit 1; fi
           [ -n "$STUB_LOCKED" ] && exit 1
           f="` + items + `/$5"; [ -f "$f" ] || exit 1; cat "$f"; exit 0 ;;
@@ -42,6 +48,9 @@ exit 2
 	t.Setenv("STUB_LOCKED", "")
 	t.Setenv("STUB_SLOW", "")
 	t.Setenv("STUB_SEARCH_FAIL", "")
+	t.Setenv("STUB_LOOKUP_EXIT", "")
+	t.Setenv("STUB_LOOKUP_SAYS", "")
+	t.Setenv("STUB_LOOKUP_CRASH", "")
 	saved := lookSecretTool
 	lookSecretTool = func() (string, error) { return path, nil }
 	t.Cleanup(func() { lookSecretTool = saved })
@@ -58,7 +67,7 @@ func TestSecretServiceStoreKeepsTheValueOffArgv(t *testing.T) {
 	if ok, err := st.exists("tok"); ok || err != nil {
 		t.Fatalf("exists before: %v %v", ok, err)
 	}
-	if err := st.write("tok", value); err != nil {
+	if err := st.write("tok", value, ""); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if ok, err := st.exists("tok"); !ok || err != nil {
@@ -84,8 +93,8 @@ func TestNoSecretToolUsesTheFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no secret-tool: %v", err)
 	}
-	if kind, path := st.target("tok"); kind != storeFile || path != filepath.Join(dir, "tok") {
-		t.Fatalf("target: %s %s", kind, path)
+	if tg, _ := st.target("tok"); tg.kind != storeFile || tg.path != filepath.Join(dir, "tok") {
+		t.Fatalf("target: %+v", tg)
 	}
 }
 
@@ -101,19 +110,19 @@ func TestSecretServiceUnreachableIsNotNotStored(t *testing.T) {
 		t.Fatalf("a missing item: %v %v", ok, err)
 	}
 	// The two errors seen on a real host (a session bus with no provider;
-	// no bus at all), and any other: every non-empty stderr is a store
-	// that cannot answer.
-	for _, reason := range []string{
-		"The name org.freedesktop.secrets was not provided by any .service files",
-		"Cannot autolaunch D-Bus without X11 $DISPLAY",
-		"some error a later libsecret prints",
+	// no bus at all) say no Secret Service can be reached; any other
+	// message is one that cannot answer. Neither is "not stored".
+	for reason, says := range map[string]string{
+		"The name org.freedesktop.secrets was not provided by any .service files": "no Secret Service can be reached",
+		"Cannot autolaunch D-Bus without X11 $DISPLAY":                            "no Secret Service can be reached",
+		"some error a later libsecret prints":                                     "could not answer",
 	} {
 		t.Setenv("STUB_NO_SERVICE", reason)
 		ok, err := st.exists("tok")
 		if ok || err == nil {
 			t.Fatalf("%q read as %v %v", reason, ok, err)
 		}
-		for _, want := range []string{"no Secret Service can be reached", reason, "secret_helper"} {
+		for _, want := range []string{says, reason, "secret_helper"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("the error does not say %q: %v", want, err)
 			}
@@ -138,8 +147,8 @@ func TestUnreachableSecretServiceFallsBackToTheFile(t *testing.T) {
 	if ok, err := st.exists("tok"); ok || err != nil {
 		t.Fatalf("exists: %v %v", ok, err)
 	}
-	if kind, path := st.target("tok"); kind != storeFile || path != filepath.Join(dir, "tok") {
-		t.Fatalf("target: %s %s", kind, path)
+	if tg, _ := st.target("tok"); tg.kind != storeFile || tg.path != filepath.Join(dir, "tok") {
+		t.Fatalf("target: %+v", tg)
 	}
 	if w := st.where("tok"); !strings.Contains(w, "no keyring can be reached") || !strings.Contains(w, "root") {
 		t.Fatalf("where: %s", w)

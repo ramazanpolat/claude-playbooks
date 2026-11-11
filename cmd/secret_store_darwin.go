@@ -75,7 +75,14 @@ func osDefaultSecretStore() (osSecretStore, error) {
 	return keychainStore{}, nil
 }
 
-func (keychainStore) target(string) (string, string) { return storeKeychain, "" }
+func (keychainStore) target(string) (storeTarget, error) {
+	return storeTarget{kind: storeKeychain}, nil
+}
+
+// There is no file store on macOS: nothing to hand the helper.
+func storeDirForHelper() string { return "" }
+func setHelperStoreDir(string)  {}
+func quietFileReads() func()    { return func() {} }
 
 func (keychainStore) where(name string) string {
 	return "your default macOS Keychain, as the item cpb/" + name + " (service cpb, account " + name + ")"
@@ -99,6 +106,9 @@ func (keychainStore) run(name string, stdin io.Reader, stdout, stderr io.Writer,
 	defer cancel()
 	c := exec.CommandContext(ctx, securityPath, args...)
 	c.Stdin, c.Stdout, c.Stderr = stdin, stdout, stderr
+	// The store's environment: cpb's own home in helper mode, so a launch
+	// environment that sets HOME never moves the Keychain.
+	c.Env = storeToolEnv()
 	// A child the tool left behind may hold its output open: Run returns
 	// a second after the kill all the same.
 	c.WaitDelay = time.Second
@@ -141,7 +151,7 @@ func (k keychainStore) exists(name string) (bool, error) {
 // value: where it is locked and cannot ask for its password, it exits 36,
 // as the add would; where it can ask, it brings up the unlock dialog now
 // (bounded by toolTimeout), before anything is typed.
-func (k keychainStore) readyToStore() error {
+func (k keychainStore) readyToStore(string) error {
 	err := k.run("", nil, nil, nil, k.args("show-keychain-info")...)
 	var ue *unavailableError
 	switch {
@@ -189,7 +199,10 @@ var keychainLockedMarkers = [][]byte{[]byte("-25308"), []byte("nteraction is not
 // repeat the command line: its stderr is kept in this process only, to
 // tell a locked Keychain from other failures, and is cleared. The caller
 // reads the value back whatever the exit status says (runSecretHelper).
-func (k keychainStore) write(name string, value []byte) error {
+func (k keychainStore) write(name string, value []byte, want string) error {
+	if want != "" && want != storeKeychain {
+		return unavailable("cpb/%s would be written to your macOS Keychain, not to %s as you were told; nothing was stored", name, storeKindWords(want))
+	}
 	line := []byte("add-generic-password -s cpb -a " + name + " -l cpb/" + name + " -X ")
 	enc := make([]byte, hex.EncodedLen(len(value)))
 	hex.Encode(enc, value)

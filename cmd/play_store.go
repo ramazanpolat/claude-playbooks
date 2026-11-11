@@ -80,10 +80,14 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 }
 
 // runHelper runs one helper call bounded by helperTimeout. A call that
-// does not end in time is killed, and the error says so.
+// does not end in time is killed, and the error says so. cpb's default
+// helper gets cpb's own store environment (defaultHelperEnv).
 func runHelper(x helperExe, stdin io.Reader, stdout, stderr io.Writer, env []string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
 	defer cancel()
+	if x.def {
+		env = defaultHelperEnv(env)
+	}
 	c := exec.CommandContext(ctx, x.path, append(append([]string{}, x.pre...), args...)...)
 	c.Stdin, c.Stdout, c.Stderr, c.Env = stdin, stdout, stderr, env
 	c.WaitDelay = 2 * time.Second
@@ -240,27 +244,58 @@ func secretReport(refs []string) []playSecretJSON {
 		}
 		if x.def {
 			if st, err := defaultSecretStore(); err == nil {
-				e.Store, e.Path = st.target(strings.TrimPrefix(r, manifest.CPBRefPrefix))
+				t, terr := st.target(strings.TrimPrefix(r, manifest.CPBRefPrefix))
+				switch {
+				case terr != nil:
+					e.Store, e.Note = storeUnknown, terr.Error()
+					out = append(out, e)
+					continue
+				case t.kind == storeFile && t.why != "":
+					e.Note = "no keyring: " + t.why
+				}
+				e.Store, e.Path = t.kind, t.path
 			}
 		} else {
 			e.Store, e.Helper = "helper", x.name
 		}
 		// Bounded like every other check (helperCheck): a helper that does
-		// not answer leaves "stored" unknown, never the report waiting.
+		// not answer leaves "stored" unknown, never the report waiting. Its
+		// own reason, one line of what it printed (never a value), is kept.
 		var ee *exec.ExitError
-		switch err := helperCheck(x, "CPB_SECRET", r, nil); {
+		var said limitedBuffer
+		switch err := helperCheck(x, "CPB_SECRET", r, &said); {
 		case err == nil:
 			e.Stored = new(bool)
 			*e.Stored = true
 		case errors.As(err, &ee) && ee.ExitCode() == notStoredExit:
 			e.Stored = new(bool)
 		default:
-			e.Note = "the helper could not say whether it is stored (" + err.Error() + ")"
+			why := err.Error()
+			if line := firstLine(said.String()); line != "" {
+				why += ": " + line
+			}
+			e.Note = "the helper could not say whether it is stored (" + why + ")"
 		}
 		out = append(out, e)
 	}
 	return out
 }
+
+// storeUnknown is the report's store when the default helper's store cannot
+// answer now (a keyring that failed): the note says why.
+const storeUnknown = "unknown"
+
+// limitedBuffer keeps the first 1 KiB written to it.
+type limitedBuffer struct{ b []byte }
+
+func (l *limitedBuffer) Write(p []byte) (int, error) {
+	if room := 1024 - len(l.b); room > 0 {
+		l.b = append(l.b, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func (l *limitedBuffer) String() string { return string(l.b) }
 
 // printSecretReport is secretReport for a person, in --check's text report.
 func printSecretReport(report []playSecretJSON) {
@@ -269,6 +304,8 @@ func printSecretReport(report []playSecretJSON) {
 		switch {
 		case e.Store == "none":
 			state = "no secret helper can take it here: " + e.Note
+		case e.Store == storeUnknown:
+			state = "its store cannot answer now: " + e.Note
 		case e.Stored != nil && *e.Stored:
 			state = "stored here"
 		case e.Stored != nil:
@@ -277,7 +314,11 @@ func printSecretReport(report []playSecretJSON) {
 		where := ""
 		switch e.Store {
 		case storeFile:
-			where = "; kept in the file " + e.Path + " (readable by you and root: no keyring)"
+			where = "; kept in the file " + e.Path + " (readable by you and root"
+			if strings.HasPrefix(e.Note, "no keyring: ") {
+				where += "; " + e.Note
+			}
+			where += ")"
 		case storeSecretService:
 			where = "; kept in your Secret Service keyring"
 		case storeKeychain:
@@ -343,6 +384,19 @@ func storeSecret(ref string) (err error) {
 	stopped := fmt.Errorf("%s was not stored; nothing was written", ref)
 	notQuiet := fmt.Errorf("%s was not stored: the step was stopped while input was still arriving on the terminal (a paste still running?), and what arrives from now on may be shown and reach your shell; nothing was written. Run this again once it has stopped", ref)
 	undiscarded := fmt.Errorf("%s was not stored: this terminal's waiting input could not be discarded, so what was typed or pasted past the value could be shown or reach your shell; nothing was written. Use another terminal, or store the value with your own tool", ref)
+	// The default helper's store is asked where the value would go, and the
+	// write is held to that answer (--into): a store that cannot say stops
+	// the step before anything is asked for.
+	into := ""
+	if x.def {
+		if st, err := defaultSecretStore(); err == nil {
+			t, terr := st.target(strings.TrimPrefix(ref, manifest.CPBRefPrefix))
+			if terr != nil {
+				return fmt.Errorf("%s was not stored: %v; nothing was asked for or written", ref, terr)
+			}
+			into = t.kind
+		}
+	}
 	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
 	if x.def {
 		// Before anyone types a value, the store is asked whether it can
@@ -423,7 +477,11 @@ func storeSecret(ref string) (err error) {
 	// A signal that arrives while a helper runs is caught by the guard and
 	// does not stop the helper; the step checks for it after each call, so
 	// the run stops there and says how far it got.
-	err = runHelper(x, bytes.NewReader(value), os.Stderr, os.Stderr, os.Environ(), "--store", ref)
+	storeArgs := []string{"--store", ref}
+	if into != "" {
+		storeArgs = append(storeArgs, "--into", into)
+	}
+	err = runHelper(x, bytes.NewReader(value), os.Stderr, os.Stderr, os.Environ(), storeArgs...)
 	var ee *exec.ExitError
 	switch {
 	case isCancelled(promptCancel) && err == nil:
