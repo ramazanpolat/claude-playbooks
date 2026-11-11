@@ -12,22 +12,26 @@
   each value back after writing it, and stores one name at a time. A
   configured helper always wins; any other scheme with no helper is refused as
   before. A machine with no store refuses a `cpb:` reference and names the
-  fix. `<name>` is a lowercase letter or digit, then up to 63 of `a-z`, `0-9`,
-  `.`, `_` and `-`.
+  fix, and a store that cannot answer (on Linux, `secret-tool` with no
+  keyring daemon or no session bus) exits 5 with the reason, never "not
+  stored". `<name>` is a lowercase letter or digit, then up to 63 of `a-z`,
+  `0-9`, `.`, `_` and `-`.
 - **The store step in `cpb play`.** When a played recipe's secret reference is
   not stored yet (the helper's `--check` exits 4, a status the helper
   interface now names; a store that cannot answer is refused as before),
   `cpb play`, `--keep` and `cpb update` show it in the plan
   (`"not_stored"` in `--json`), and after you type the reference they ask for
-  its value with echo off, from your own terminal only, and hand it to the
-  helper on stdin (`<helper> --store REF`, a new optional verb of the helper
-  interface). It never runs with `--yes`, with `--trust-secret` for that
-  reference, without a terminal, or inside an agent's session. `^C`, an empty
-  answer, a closed terminal, a signal, a key that sends an escape sequence
-  (an arrow, Delete; a bracketed paste is taken) or a failing helper store
-  nothing, and cpb never replaces a stored value. It keeps the value out of command lines and
-  cpb's output; it does not hide it from programs that run as you. See
-  *Secrets* in SPEC.md and [the play guide](docs/guides/play.md).
+  its value twice with echo off, from your own terminal only, and hand it to
+  the helper on stdin (`<helper> --store REF`, a new optional verb of the
+  helper interface). Entries that differ, or one typed with a key that sends
+  an escape sequence (an arrow, Delete; a bracketed paste is taken), store
+  nothing and are asked for again, three attempts in all. It never runs with
+  `--yes`, with `--trust-secret` for that reference, without a terminal, or
+  inside an agent's session. `^C`, an empty answer, a closed terminal, a
+  signal or a failing helper store nothing, and cpb never replaces a stored
+  value. It keeps the value out of command lines and cpb's output; it does
+  not hide it from programs that run as you. See *Secrets* in SPEC.md and
+  [the play guide](docs/guides/play.md).
 
 ## [v4.6.0] -- 2026-11-10
 

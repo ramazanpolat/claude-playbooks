@@ -21,12 +21,17 @@ type memStore struct {
 	writes int
 	fail   bool
 	other  []byte
+	// unavailable makes exists fail, as a store that cannot be reached.
+	unavailable bool
 }
 
 func (m *memStore) where(name string) string { return "the test store, as " + name }
 func (m *memStore) exists(name string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.unavailable {
+		return false, errors.New("the test store cannot be reached")
+	}
 	_, ok := m.items[name]
 	return ok, nil
 }
@@ -237,5 +242,22 @@ func TestDefaultHelperLaunchArgv(t *testing.T) {
 	}
 	if slices.Contains(c.Env, "TOKEN=stale") {
 		t.Fatal("a stale shell value reached the launch")
+	}
+}
+
+// A store that cannot answer is never "not stored": --check and --store
+// both exit 5 (unavailableExit), so the store step is not armed, and
+// nothing is written.
+func TestDefaultHelperUnavailableStoreIsNotNotStored(t *testing.T) {
+	m := useMemStore(t)
+	m.unavailable = true
+	for _, args := range [][]string{{"--check", "K=cpb:tok"}, {"--store", "cpb:tok"}} {
+		err := runSecretHelper(args, strings.NewReader("v-1"))
+		if code, ok := exitCode(err); !ok || code != unavailableExit {
+			t.Fatalf("%v on an unavailable store: %v", args, err)
+		}
+	}
+	if m.writes != 0 {
+		t.Fatalf("%d writes to an unavailable store", m.writes)
 	}
 }

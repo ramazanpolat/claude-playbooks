@@ -56,7 +56,8 @@ exit 2
 
 // onPty gives the store step a pseudo-terminal: secretIn is its terminal
 // end. typeIt types input on the other end once the read is in raw mode
-// (and closes that end after, for a terminal that goes away); finish
+// (and closes that end after, for a terminal that goes away), each call
+// after the one before; finish
 // restores secretIn and returns what the terminal showed.
 func onPty(t *testing.T) (typeIt func(input string, closeAfter bool), finish func() string) {
 	t.Helper()
@@ -66,16 +67,24 @@ func onPty(t *testing.T) (typeIt func(input string, closeAfter bool), finish fun
 	}
 	saved := secretIn
 	secretIn = tty
-	typeIt = func(input string, closeAfter bool) {
-		go func() {
+	// One writer types each input in the order given, after a pause, so a
+	// second entry is typed while the second read waits for it.
+	type typed struct {
+		input      string
+		closeAfter bool
+	}
+	queue := make(chan typed, 16)
+	go func() {
+		for in := range queue {
 			time.Sleep(300 * time.Millisecond) // the read is in raw mode by now
-			io.WriteString(ptmx, input)
-			if closeAfter {
+			io.WriteString(ptmx, in.input)
+			if in.closeAfter {
 				time.Sleep(100 * time.Millisecond)
 				ptmx.Close()
 			}
-		}()
-	}
+		}
+	}()
+	typeIt = func(input string, closeAfter bool) { queue <- typed{input, closeAfter} }
 	finish = func() string {
 		secretIn = saved
 		tty.Close()
@@ -102,11 +111,18 @@ func TestStoreStepStoresThroughStdinOnly(t *testing.T) {
 	store, log := storeHelper(t)
 	typeIt, finish := onPty(t)
 	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
 	var err error
 	out := captureStdout(t, func() { err = storeSecret(testRef) })
 	shown := finish()
 	if err != nil {
 		t.Fatalf("store step: %v", err)
+	}
+	if !strings.Contains(out, "Type it again to confirm") {
+		t.Fatalf("the value was not asked for twice: %q", out)
+	}
+	if n := strings.Count(readLog(t, log), "--store"); n != 1 {
+		t.Fatalf("--store called %d times, want 1", n)
 	}
 	if strings.Contains(shown, testValue) {
 		t.Fatal("the terminal echoed the value")
@@ -131,16 +147,20 @@ func TestStoreStepStoresThroughStdinOnly(t *testing.T) {
 
 func TestStoreStepInterruptedStoresNothing(t *testing.T) {
 	for _, tc := range []struct {
-		name, input string
+		name        string
+		inputs      []string
 		closeAfter  bool
 		failStore   bool
 		storeCalled bool
 	}{
-		{name: "ctrl-c", input: "abc\x03"},
-		{name: "empty answer", input: "\r"},
-		{name: "ctrl-d", input: "\x04"},
-		{name: "terminal closed", input: "abc", closeAfter: true},
-		{name: "helper fails", input: testValue + "\r", failStore: true, storeCalled: true},
+		{name: "ctrl-c", inputs: []string{"abc\x03"}},
+		{name: "empty answer", inputs: []string{"\r"}},
+		{name: "ctrl-d", inputs: []string{"\x04"}},
+		{name: "terminal closed", inputs: []string{"abc"}, closeAfter: true},
+		{name: "ctrl-c at the confirmation", inputs: []string{testValue + "\r", "abc\x03"}},
+		{name: "empty confirmation", inputs: []string{testValue + "\r", "\r"}},
+		{name: "terminal closed at the confirmation", inputs: []string{testValue + "\r", "abc"}, closeAfter: true},
+		{name: "helper fails", inputs: []string{testValue + "\r", testValue + "\r"}, failStore: true, storeCalled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, log := storeHelper(t)
@@ -148,7 +168,9 @@ func TestStoreStepInterruptedStoresNothing(t *testing.T) {
 				t.Setenv("FAIL_STORE", "1")
 			}
 			typeIt, finish := onPty(t)
-			typeIt(tc.input, tc.closeAfter)
+			for i, in := range tc.inputs {
+				typeIt(in, tc.closeAfter && i == len(tc.inputs)-1)
+			}
 			var err error
 			out := captureStdout(t, func() { err = storeSecret(testRef) })
 			shown := finish()
@@ -360,23 +382,88 @@ func TestReadHiddenEscapeSequences(t *testing.T) {
 	}
 }
 
-// The store step refuses a value typed with an arrow in it, says why, and
-// stores nothing.
-func TestStoreStepRefusesAnEscapedValue(t *testing.T) {
+// A value typed with an arrow in it is not stored: the step says why and
+// asks again, and the next value, entered twice, is stored once.
+func TestStoreStepAsksAgainAfterAnEscapedValue(t *testing.T) {
 	store, log := storeHelper(t)
 	typeIt, finish := onPty(t)
 	typeIt("s3cr3t\x1b[D-Value\r", false)
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
 	var err error
 	out := captureStdout(t, func() { err = storeSecret(testRef) })
 	finish()
-	if err == nil || !strings.Contains(err.Error(), "escape sequence") || !strings.Contains(err.Error(), "nothing was written") {
+	if err != nil {
+		t.Fatalf("store step: %v", err)
+	}
+	if !strings.Contains(out, "escape sequence") || !strings.Contains(out, "Try again (2 of 3)") {
+		t.Fatalf("the step did not say why and ask again: %q", out)
+	}
+	if v, ok := storedValue(store); !ok || v != testValue {
+		t.Fatalf("stored %q (%v)", v, ok)
+	}
+	if n := strings.Count(readLog(t, log), "--store"); n != 1 {
+		t.Fatalf("--store called %d times, want 1", n)
+	}
+	if strings.Contains(out, "s3cr3t") || strings.Contains(out, testValue) {
+		t.Fatal("a typed value was shown")
+	}
+}
+
+// Two entries that differ store nothing and are asked for again; a match
+// then stores once. The values never reach stdout or the helper's argv.
+func TestStoreStepAsksAgainWhenTheEntriesDiffer(t *testing.T) {
+	store, log := storeHelper(t)
+	typeIt, finish := onPty(t)
+	typeIt("first-try-1\r", false)
+	typeIt("first-try-2\r", false)
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeSecret(testRef) })
+	finish()
+	if err != nil {
+		t.Fatalf("store step: %v", err)
+	}
+	if !strings.Contains(out, "the two entries differ") || !strings.Contains(out, "Try again (2 of 3)") {
+		t.Fatalf("a mismatch was not reported: %q", out)
+	}
+	if v, ok := storedValue(store); !ok || v != testValue {
+		t.Fatalf("stored %q (%v)", v, ok)
+	}
+	argv := readLog(t, log)
+	if n := strings.Count(argv, "--store"); n != 1 {
+		t.Fatalf("--store called %d times, want 1", n)
+	}
+	for _, v := range []string{"first-try", testValue} {
+		if strings.Contains(out, v) || strings.Contains(argv, v) {
+			t.Fatalf("%q reached stdout or argv", v)
+		}
+	}
+}
+
+// After three failed attempts (an escaped value, then two mismatches) the
+// step stops, says to store the value with your own tool, and stores
+// nothing.
+func TestStoreStepStopsAfterThreeAttempts(t *testing.T) {
+	store, log := storeHelper(t)
+	typeIt, finish := onPty(t)
+	for _, in := range []string{"abc\x1b[A\r", "aaa\r", "bbb\r", "ccc\r", "ddd\r"} {
+		typeIt(in, false)
+	}
+	var err error
+	out := captureStdout(t, func() { err = storeSecret(testRef) })
+	finish()
+	if err == nil || !strings.Contains(err.Error(), "after 3 attempts") || !strings.Contains(err.Error(), "Store the value with your own tool, then run this again") {
 		t.Fatalf("store step: %v", err)
 	}
 	if _, ok := storedValue(store); ok || strings.Contains(readLog(t, log), "--store") {
-		t.Fatal("an escaped value was stored")
+		t.Fatal("something was stored")
 	}
-	if strings.Contains(out, "s3cr3t") || strings.Contains(err.Error(), "s3cr3t") {
-		t.Fatal("the typed text was shown")
+	for _, v := range []string{"abc", "aaa", "bbb", "ccc", "ddd"} {
+		if strings.Contains(out, v) || strings.Contains(err.Error(), v) {
+			t.Fatalf("%q was shown", v)
+		}
 	}
 }
 
@@ -386,6 +473,7 @@ func TestStoreStepFailedStoreNamesTheWayOut(t *testing.T) {
 	storeHelper(t)
 	t.Setenv("FAIL_STORE", "1")
 	typeIt, finish := onPty(t)
+	typeIt(testValue+"\r", false)
 	typeIt(testValue+"\r", false)
 	var err error
 	captureStdout(t, func() { err = storeSecret(testRef) })

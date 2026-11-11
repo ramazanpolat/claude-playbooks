@@ -620,6 +620,17 @@ values in the operating system's store:
 | Linux | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>` |
 | other, or no store | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
 
+- **A store that cannot answer** is never "not stored": `--check` and
+  `--store` exit 5, with one line naming the store, the reason and the fix,
+  so the store step below is not offered against it. On Linux,
+  `secret-tool lookup` exits 1 both for a missing item and when no Secret
+  Service can be reached (a server or a container with `secret-tool` but no
+  keyring daemon, or no session bus); the default helper tells them apart
+  by its stderr, which is empty only for a missing item (libsecret 0.21).
+  Any message there is a store that cannot answer, and the line quotes its
+  first line. On macOS any `security` failure other than "item not found"
+  is one.
+
 - **Values.** Printable ASCII only (space to `~`: no tab, newline or
   non-ASCII character), at most 64 KiB; any other value is refused, and
   nothing is stored. macOS's `security` prints any other value as hex when
@@ -657,19 +668,21 @@ helper's `--check` exits 4):
   (`--dry-run`, `--check`) never stores anything;
 - **after the person typed the reference** (its typed confirmation), cpb
   names where the value will be written (for the default helper the store
-  and the item, for another helper the helper) and asks for it with echo
-  off, from the controlling terminal only;
+  and the item, for another helper the helper) and asks for it **twice**,
+  with echo off, from the controlling terminal only. A stored value is never
+  replaced, so a typo nobody saw would be permanent;
+- **entries that differ, or one typed with a key that sends an escape
+  sequence** (an arrow, Delete, Home, a function key, Alt with a key: with
+  echo off its printable bytes would stay in the value unseen) store
+  nothing, say why, and are asked for again, three attempts in all; after
+  the third the run stops, saying to store the value with your own tool and
+  run again. Bracketed paste's markers are not such a sequence: they are
+  dropped, and the paste between them is the value;
 - the value goes to `<helper> --store REF` on stdin, and the reference is
   checked again before anything is applied;
-- **an empty answer, ^C, a closed terminal, a signal to cpb (`SIGINT`,
-  `SIGTERM`, `SIGHUP`) while it waits, or a helper that fails** stops the
-  run with nothing stored and nothing written;
-- **a key that sends an escape sequence** (an arrow, Delete, Home, a
-  function key, Alt with a key) while the value is typed stops the run the
-  same way, saying why: with echo off, the sequence's printable bytes would
-  otherwise stay in the value unseen, and a stored value is never replaced.
-  Bracketed paste's markers are the exception: they are dropped, and the
-  paste between them is the value.
+- **an empty answer (to either prompt), ^C, a closed terminal, a signal to
+  cpb (`SIGINT`, `SIGTERM`, `SIGHUP`) while it waits, or a helper that
+  fails** stops the run with nothing stored and nothing written.
 
 The step runs only when **all** of these hold, and otherwise a reference that
 does not resolve is refused as before, naming why and asking the person to

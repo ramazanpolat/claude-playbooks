@@ -111,17 +111,24 @@ Not stored on this machine yet: cpb:service-token. You will be asked for its val
 ```
 
 After you type the reference, cpb names where the value will go and asks for
-it, without showing what you type:
+it twice, without showing what you type:
 
 ```
 cpb:service-token is not stored on this machine yet. Its value will be written to your default macOS Keychain, as the item cpb/service-token (service cpb, account service-token).
 Type the value now (it is not shown), or press Enter to stop:
+Type it again to confirm, or press Enter to stop:
 ```
 
+- If the two entries differ, nothing is stored and cpb asks again, three
+  times at most. The same goes for an arrow, Delete or another key that
+  sends an escape sequence while you type, since you cannot see what it
+  added. Pasting works.
 - An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
-  nothing is stored. So does an arrow, Delete or another key that sends an
-  escape sequence while you type: you cannot see what it added, so cpb asks
-  you to run the command again. Pasting works.
+  nothing is stored.
+- On Linux the value goes to the Secret Service, so a keyring (GNOME
+  Keyring, KWallet) must be running in your session. On a server or in a
+  container with none, cpb says so and does not ask for the value; use a
+  helper of your own there.
 - cpb never replaces a stored secret: to change one, store it under a new name
   and point the recipe at that.
 - If the recipe is someone else's and its name is fixed, or you stored the

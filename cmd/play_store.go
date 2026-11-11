@@ -61,12 +61,11 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 	return ""
 }
 
-// notStoredExit is the --check exit status that says a reference is not
-// stored (cpb's default helper's, and the usual one of helpers that tell
-// "missing" from "cannot answer"). Any other failure, such as a locked or
-// unreachable store, is not a reason to ask for a value: the plan refuses
-// it with the helper's message, as before the store step.
-const notStoredExit = 4
+// Only --check's notStoredExit (secret_default.go; cpb's default helper's,
+// and the usual one of helpers that tell "missing" from "cannot answer")
+// arms the store step. Any other failure, such as a locked or unreachable
+// store (unavailableExit), is not a reason to ask for a value: the plan
+// refuses it with the helper's message, as before the store step.
 
 // refsNotStored asks the helper which of refs are not stored (--check exits
 // notStoredExit), quietly; it returns nil and the helper's error when no
@@ -139,24 +138,61 @@ func printPendingNote(pending []string, planOnly bool) {
 	}
 }
 
+// storeAttempts is how many times the store step asks for a value whose
+// two entries differ (or that held an escape sequence) before it stops.
+const storeAttempts = 3
+
 // storeSecret is the store step for one reference: it names where the
-// value goes, reads it with echo off from the terminal, hands it to the
-// helper's --store on stdin, and checks the reference again. An empty
-// answer, ^C, a closed terminal, a signal the play guard caught
-// (promptCancel) or a helper that fails stops the run with nothing stored.
+// value goes, reads it twice with echo off from the terminal (a stored
+// value is never replaced, so a typo nobody saw would be permanent), hands
+// it to the helper's --store on stdin, and checks the reference again.
+// Entries that differ, or one with an escape sequence, are asked for again,
+// storeAttempts times in all. An empty answer, ^C, a closed terminal, a
+// signal the play guard caught (promptCancel) or a helper that fails stops
+// the run with nothing stored.
 func storeSecret(ref string) error {
 	x, err := resolveHelperFor([]string{ref})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\nType the value now (it is not shown), or press Enter to stop: ", ref, storeWhere(x, ref))
-	value, ok, escaped := readHidden(secretIn, promptCancel)
-	defer clear(value)
-	if escaped {
-		return fmt.Errorf("%s was not stored: a key that sends an escape sequence (an arrow, Delete, Home, a function key or Alt) was pressed while you typed the value, so it may not be the value you meant; nothing was written. Run the command again and type or paste only the value", ref)
-	}
-	if !ok || len(value) == 0 || isCancelled(promptCancel) {
-		return fmt.Errorf("%s was not stored; nothing was written", ref)
+	stopped := fmt.Errorf("%s was not stored; nothing was written", ref)
+	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
+	var value []byte
+	defer func() { clear(value) }()
+	for attempt := 1; ; attempt++ {
+		fmt.Print("Type the value now (it is not shown), or press Enter to stop: ")
+		first, ok, escaped := readHidden(secretIn, promptCancel)
+		if isCancelled(promptCancel) || (!ok && !escaped) || (ok && len(first) == 0) {
+			clear(first)
+			return stopped
+		}
+		why := ""
+		if escaped {
+			why = "a key that sends an escape sequence (an arrow, Delete, Home, a function key or Alt) was pressed, so the value may not be the one you meant"
+		} else {
+			fmt.Print("Type it again to confirm, or press Enter to stop: ")
+			second, ok2, escaped2 := readHidden(secretIn, promptCancel)
+			switch {
+			case isCancelled(promptCancel) || (!ok2 && !escaped2) || (ok2 && len(second) == 0):
+				clear(first)
+				clear(second)
+				return stopped
+			case escaped2:
+				why = "a key that sends an escape sequence (an arrow, Delete, Home, a function key or Alt) was pressed, so the value may not be the one you meant"
+			case !bytes.Equal(first, second):
+				why = "the two entries differ"
+			}
+			clear(second)
+		}
+		if why == "" {
+			value = first
+			break
+		}
+		clear(first)
+		if attempt == storeAttempts {
+			return fmt.Errorf("%s was not stored after %d attempts (the last: %s); nothing was written. Store the value with your own tool, then run this again", ref, storeAttempts, why)
+		}
+		fmt.Printf("Not stored: %s. Try again (%d of %d).\n", why, attempt+1, storeAttempts)
 	}
 	c := x.command("--store", ref)
 	c.Stdin = bytes.NewReader(value)

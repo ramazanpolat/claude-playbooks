@@ -30,10 +30,31 @@ import (
 // value, as with any helper.
 const secretHelperArg = "__secret-helper"
 
+// The helper's exit statuses for --check (SPEC.md, "The helper
+// interface"): notStoredExit says the reference is not stored, the one
+// failure the store step acts on; unavailableExit says the store cannot
+// answer (no keyring daemon, a locked or unreachable store), so a value
+// could not be stored there either.
+const (
+	notStoredExit   = 4
+	unavailableExit = 5
+)
+
+// storeCannotAnswer is the helper's answer when exists fails, which means
+// the store could not answer at all (as opposed to "not there"): the
+// reason on stderr, naming the store and the fix and never a value, and
+// exit unavailableExit, never notStoredExit.
+func storeCannotAnswer(err error) error {
+	fmt.Fprintln(os.Stderr, err)
+	return &commandExitError{code: unavailableExit}
+}
+
 // osSecretStore is the store the default helper keeps cpb:<name> in.
 type osSecretStore interface {
 	// where names the store and the item, for the store step's prompt.
 	where(name string) string
+	// exists reports whether the item is there; an error means the store
+	// could not answer (storeCannotAnswer), never "not there".
 	exists(name string) (bool, error)
 	read(name string) ([]byte, error)
 	// write creates the item from value; it never replaces one.
@@ -160,11 +181,11 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 		}
 		found, err := st.exists(name)
 		if err != nil {
-			return err
+			return storeCannotAnswer(err)
 		}
 		if !found {
 			fmt.Fprintln(os.Stderr, ref+" is not stored on this machine")
-			return &commandExitError{code: 4}
+			return &commandExitError{code: notStoredExit}
 		}
 		return nil
 	case "--store":
@@ -195,7 +216,7 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 		defer unlock()
 		found, err := st.exists(name)
 		if err != nil {
-			return err
+			return storeCannotAnswer(err)
 		}
 		if found {
 			// Rotation is add-new, verify, retire old: never in place.

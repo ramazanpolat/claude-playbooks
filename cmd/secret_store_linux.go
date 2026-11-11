@@ -32,19 +32,46 @@ func (s secretServiceStore) where(name string) string {
 	return "your Secret Service keyring, as the item \"cpb " + name + "\" (service cpb, name " + name + ")"
 }
 
+// exists asks lookup, whose exit status is 1 both when the item is not
+// there and when no Secret Service can be reached (a server or a container
+// with secret-tool but no keyring daemon, or no session bus). Only stderr
+// tells them apart: lookup prints nothing there for a missing item, and its
+// error otherwise (libsecret 0.21: "The name org.freedesktop.secrets was
+// not provided by any .service files", "Cannot autolaunch D-Bus without
+// X11 $DISPLAY"). A store that cannot be reached is an error (the helper
+// then exits unavailableExit), never "not stored".
 func (s secretServiceStore) exists(name string) (bool, error) {
-	// lookup prints the value: it goes nowhere.
+	// lookup prints the value on stdout: it goes nowhere. Its stderr holds
+	// only its own errors, never a value.
+	var errb bytes.Buffer
 	c := exec.Command(s.tool, "lookup", "service", "cpb", "name", name)
-	c.Stdout, c.Stderr = io.Discard, io.Discard
+	c.Stdout, c.Stderr = io.Discard, &errb
 	err := c.Run()
 	if err == nil {
 		return true, nil
 	}
+	why := toolError(errb.Bytes())
 	var ee *exec.ExitError
-	if errors.As(err, &ee) && ee.ExitCode() == 1 {
+	if errors.As(err, &ee) && ee.ExitCode() == 1 && why == "" {
 		return false, nil
 	}
-	return false, fmt.Errorf("the Secret Service could not be asked about cpb %s (%v)", name, err)
+	if why == "" {
+		why = err.Error()
+	}
+	return false, fmt.Errorf("no Secret Service can be reached on this machine (secret-tool: %s), so cpb:%s cannot be checked or stored here; run a keyring such as GNOME Keyring or KWallet in this session, or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", why, name)
+}
+
+// toolError is the first line of a tool's stderr, without its "<tool>: "
+// prefix and at most 200 bytes, or "" when it printed nothing.
+func toolError(stderr []byte) string {
+	line, _, _ := bytes.Cut(bytes.TrimSpace(stderr), []byte("\n"))
+	if _, rest, ok := bytes.Cut(line, []byte(": ")); ok && bytes.HasPrefix(line, []byte("secret-tool")) {
+		line = rest
+	}
+	if len(line) > 200 {
+		line = line[:200]
+	}
+	return string(bytes.TrimSpace(line))
 }
 
 func (s secretServiceStore) read(name string) ([]byte, error) {
