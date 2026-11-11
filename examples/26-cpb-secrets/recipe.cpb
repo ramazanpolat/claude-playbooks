@@ -1,0 +1,6 @@
+-- title: Service client
+-- description: Calls a service with a token you keep on your own machine.
+-- min-cpb: 4.7.0
+
+ALTER PLAYBOOK
+  SET VAR SERVICE_TOKEN FROM 'cpb:service-token';

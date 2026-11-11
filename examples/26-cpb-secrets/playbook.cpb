@@ -1,0 +1,4 @@
+-- A playbook that will use a secret cpb keeps itself. No secret helper to
+-- configure and no value here: the variable is added by reference once the
+-- secret is stored (the README; .check does it with a placeholder).
+CREATE PLAYBOOK IF NOT EXISTS client SET launcher = '';

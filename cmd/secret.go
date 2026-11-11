@@ -61,11 +61,6 @@ type helperExe struct {
 	name string // for messages: the configured command, or the default's name
 }
 
-// command is the helper process for args (its own arguments).
-func (x helperExe) command(args ...string) *exec.Cmd {
-	return exec.Command(x.path, append(append([]string{}, x.pre...), args...)...)
-}
-
 // allCPBRefs reports references that are all cpb:<name>, the only scheme
 // the default helper resolves.
 func allCPBRefs(refs []string) bool {
@@ -200,6 +195,7 @@ func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 type launchPlan struct {
 	helper    string            // executable; "" launches claude directly
 	helperPre []string          // the helper's arguments before its own (the default helper's)
+	def       bool              // cpb's default helper: it gets cpb's own store environment
 	refs      map[string]string // key -> reference
 	// headers are the account's header names (account.Rendered.Headers):
 	// the helper then execs cpb's header step, self, before claude
@@ -219,7 +215,7 @@ func planLaunch(eff *manifest.Env) (*launchPlan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("this launch uses secret references (%s): %w", strings.Join(sortedKeys(eff.Refs), ", "), err)
 	}
-	return &launchPlan{helper: x.path, helperPre: x.pre, refs: eff.Refs}, nil
+	return &launchPlan{helper: x.path, helperPre: x.pre, def: x.def, refs: eff.Refs}, nil
 }
 
 // withHeaders makes a launch through the helper pass the account's headers.
@@ -263,6 +259,11 @@ func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec
 	}
 	c := exec.Command(lp.helper, argv...)
 	c.Env = withoutKeys(env, keys)
+	if lp.def {
+		// The launch environment is the command's; the store is cpb's own,
+		// whatever HOME, XDG_DATA_HOME or bus the playbook sets.
+		c.Env = defaultHelperEnv(c.Env)
+	}
 	return c
 }
 

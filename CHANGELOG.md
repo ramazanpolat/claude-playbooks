@@ -12,18 +12,46 @@
   each value back after writing it, and stores one name at a time. A
   configured helper always wins; any other scheme with no helper is refused as
   before. A machine with no store refuses a `cpb:` reference and names the
-  fix, and a store that cannot answer (on Linux, `secret-tool` with no
-  keyring daemon or no session bus, or a locked keyring; on macOS, a
+  fix, and a store that cannot answer (on Linux, a locked keyring or a
+  `secret-tool` that does not answer in time; on macOS, a
   Keychain locked where it cannot show its unlock dialog) exits 5 with the
   reason, never "not stored". A presence check (`--check`) brings up no
   unlock dialog; the store step finds a locked Keychain before it asks for
   a value, through the default helper's own `--ready`
-  (`security show-keychain-info`, which carries no value). Values are capped at what each store keeps
+  (`security show-keychain-info`, which carries no value), saying so and
+  with the terminal's echo off while it waits. On a Linux desktop a check
+  of a locked keyring item may bring up the keyring's unlock prompt; over
+  SSH and on servers it does not. Values are capped at what each store keeps
   whole, 1536 bytes in the Keychain and 4096 in the Secret Service, since
   their tools cut a longer value short without saying so. Each tool call is
   bounded to 60 seconds and the per-name lock to 30. `<name>` is a lowercase
   letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`, checked
   in statements and in playbook, env-set and account files.
+- **A file store on Linux machines with no keyring.** On a server, a
+  container or a VM with no `secret-tool`, or with no keyring daemon or
+  session bus, cpb's default helper keeps a `cpb:<name>` value in
+  `$XDG_DATA_HOME/cpb/secrets/<name>` (default `~/.local/share/cpb/secrets/`),
+  mode `0600` in a `0700` directory, up to 4096 bytes, written through a
+  temporary file and a link, so it never replaces one. The value is plaintext at rest, readable by
+  the user and root, and the store step's prompt says so. Links, other
+  owners and open modes are refused, and so is a directory above it that
+  someone else could change; the directory is opened once and every file
+  reached through it. A read refuses a file that does not hold what the
+  store would have written (empty, a trailing newline). Only `secret-tool`'s
+  two messages for "no Secret Service" let the file answer: a keyring that
+  fails in any other way is exit 5, never a quiet fall back to the file, and
+  the write goes to the store the prompt named or nowhere.
+  `CPB_SECRET_FILE_STORE=1` in your own shell is the deliberate way to the
+  file where the keyring is installed but cannot be used. The store, and
+  the `secret-tool` it uses, are always those of the cpb that runs the
+  helper (a launch, `cpb ask`), whatever `HOME`, `XDG_DATA_HOME`, `PATH` or
+  session bus a playbook's launch sets. When a keyring
+  starts later, a value in
+  the file is still found and new values go to the keyring; a name in both is
+  the keyring's, and a locked keyring item is never written over or beside.
+  `cpb play --check --json` and `--dry-run --json` list each
+  secret (`secrets`): whether it is stored, and where it is or would be kept,
+  with the file's path for the file store.
 - **The store step in `cpb play`.** When a played recipe's secret reference is
   not stored yet (the helper's `--check` exits 4, a status the helper
   interface now names; a store that cannot answer is refused as before),

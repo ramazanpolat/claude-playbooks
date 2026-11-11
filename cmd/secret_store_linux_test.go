@@ -12,7 +12,10 @@ import (
 )
 
 // A stub secret-tool: items are files, its argv goes to a log, and store
-// reads the value from stdin as secret-tool does.
+// reads the value from stdin as secret-tool does. STUB_NO_SERVICE makes
+// lookup print that message and exit 1; STUB_LOOKUP_EXIT makes it exit with
+// that status (with STUB_LOOKUP_SAYS on stderr); STUB_LOOKUP_CRASH makes it
+// die of a signal. Its environment's LC_ALL goes to the log too.
 func stubSecretTool(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -21,8 +24,11 @@ func stubSecretTool(t *testing.T) (string, string) {
 	log := filepath.Join(dir, "secret-tool.log")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "` + log + `"
+printf 'LC_ALL=%s HOME=%s BUS=%s\n' "$LC_ALL" "$HOME" "${DBUS_SESSION_BUS_ADDRESS-unset}" >> "` + log + `.env"
 case "$1" in
   lookup) [ -n "$STUB_SLOW" ] && sleep 5
+          [ -n "$STUB_LOOKUP_CRASH" ] && kill -KILL $$
+          if [ -n "$STUB_LOOKUP_EXIT" ]; then [ -n "$STUB_LOOKUP_SAYS" ] && echo "secret-tool: $STUB_LOOKUP_SAYS" >&2; exit "$STUB_LOOKUP_EXIT"; fi
           if [ -n "$STUB_NO_SERVICE" ]; then echo "secret-tool: $STUB_NO_SERVICE" >&2; exit 1; fi
           [ -n "$STUB_LOCKED" ] && exit 1
           f="` + items + `/$5"; [ -f "$f" ] || exit 1; cat "$f"; exit 0 ;;
@@ -38,9 +44,13 @@ exit 2
 		t.Fatal(err)
 	}
 	t.Setenv("STUB_NO_SERVICE", "")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("STUB_LOCKED", "")
 	t.Setenv("STUB_SLOW", "")
 	t.Setenv("STUB_SEARCH_FAIL", "")
+	t.Setenv("STUB_LOOKUP_EXIT", "")
+	t.Setenv("STUB_LOOKUP_SAYS", "")
+	t.Setenv("STUB_LOOKUP_CRASH", "")
 	saved := lookSecretTool
 	lookSecretTool = func() (string, error) { return path, nil }
 	t.Cleanup(func() { lookSecretTool = saved })
@@ -57,7 +67,7 @@ func TestSecretServiceStoreKeepsTheValueOffArgv(t *testing.T) {
 	if ok, err := st.exists("tok"); ok || err != nil {
 		t.Fatalf("exists before: %v %v", ok, err)
 	}
-	if err := st.write("tok", value); err != nil {
+	if err := st.write("tok", value, ""); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if ok, err := st.exists("tok"); !ok || err != nil {
@@ -75,12 +85,16 @@ func TestSecretServiceStoreKeepsTheValueOffArgv(t *testing.T) {
 	}
 }
 
-func TestNoSecretToolNamesTheFix(t *testing.T) {
-	saved := lookSecretTool
-	lookSecretTool = func() (string, error) { return "", os.ErrNotExist }
-	t.Cleanup(func() { lookSecretTool = saved })
-	if _, err := osDefaultSecretStore(); err == nil || !strings.Contains(err.Error(), "secret_helper") {
-		t.Fatalf("no store: %v", err)
+// With no secret-tool the store is the file store, never a refusal.
+func TestNoSecretToolUsesTheFileStore(t *testing.T) {
+	dir := fileStoreHome(t)
+	noSecretTool(t)
+	st, err := osDefaultSecretStore()
+	if err != nil {
+		t.Fatalf("no secret-tool: %v", err)
+	}
+	if tg, _ := st.target("tok"); tg.kind != storeFile || tg.path != filepath.Join(dir, "tok") {
+		t.Fatalf("target: %+v", tg)
 	}
 }
 
@@ -90,27 +104,25 @@ func TestNoSecretToolNamesTheFix(t *testing.T) {
 // store that cannot answer, named with its reason and the fix.
 func TestSecretServiceUnreachableIsNotNotStored(t *testing.T) {
 	stubSecretTool(t)
-	st, err := osDefaultSecretStore()
-	if err != nil {
-		t.Fatal(err)
-	}
+	tool, _ := lookSecretTool()
+	st := secretServiceStore{tool: tool}
 	if ok, err := st.exists("tok"); ok || err != nil {
 		t.Fatalf("a missing item: %v %v", ok, err)
 	}
 	// The two errors seen on a real host (a session bus with no provider;
-	// no bus at all), and any other: every non-empty stderr is a store
-	// that cannot answer.
-	for _, reason := range []string{
-		"The name org.freedesktop.secrets was not provided by any .service files",
-		"Cannot autolaunch D-Bus without X11 $DISPLAY",
-		"some error a later libsecret prints",
+	// no bus at all) say no Secret Service can be reached; any other
+	// message is one that cannot answer. Neither is "not stored".
+	for reason, says := range map[string]string{
+		"The name org.freedesktop.secrets was not provided by any .service files": "no Secret Service can be reached",
+		"Cannot autolaunch D-Bus without X11 $DISPLAY":                            "no Secret Service can be reached",
+		"some error a later libsecret prints":                                     "could not answer",
 	} {
 		t.Setenv("STUB_NO_SERVICE", reason)
 		ok, err := st.exists("tok")
 		if ok || err == nil {
 			t.Fatalf("%q read as %v %v", reason, ok, err)
 		}
-		for _, want := range []string{"no Secret Service can be reached", reason, "secret_helper"} {
+		for _, want := range []string{says, reason, "secret_helper"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("the error does not say %q: %v", want, err)
 			}
@@ -118,6 +130,28 @@ func TestSecretServiceUnreachableIsNotNotStored(t *testing.T) {
 		if strings.Contains(err.Error(), "secret-tool: secret-tool") {
 			t.Fatalf("the tool's prefix is doubled: %v", err)
 		}
+	}
+}
+
+// With the Secret Service out of reach, the default store falls back to
+// the file store instead of failing: not there, and a new value goes to
+// the file, named with the reason.
+func TestUnreachableSecretServiceFallsBackToTheFile(t *testing.T) {
+	stubSecretTool(t) // sets a data home of its own: replaced below
+	dir := fileStoreHome(t)
+	t.Setenv("STUB_NO_SERVICE", "Cannot autolaunch D-Bus without X11 $DISPLAY")
+	st, err := osDefaultSecretStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.exists("tok"); ok || err != nil {
+		t.Fatalf("exists: %v %v", ok, err)
+	}
+	if tg, _ := st.target("tok"); tg.kind != storeFile || tg.path != filepath.Join(dir, "tok") {
+		t.Fatalf("target: %+v", tg)
+	}
+	if w := st.where("tok"); !strings.Contains(w, "no keyring can be reached") || !strings.Contains(w, "root") {
+		t.Fatalf("where: %s", w)
 	}
 }
 
@@ -149,6 +183,71 @@ func TestSecretServiceLockedItemIsNotNotStored(t *testing.T) {
 	}
 	if strings.Contains(readLog(t, log), "store --label") {
 		t.Fatal("secret-tool store ran over a locked item")
+	}
+	if dir, _ := secretsDir(); fileExists(filepath.Join(dir, "tok")) {
+		t.Fatal("the value went to the file store beside a locked item")
+	}
+}
+
+func fileExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+// A secret-tool that does not answer in time is a store that cannot
+// answer, never a reason to use the file store: --store writes nothing.
+func TestSecretServiceTimeoutNeverFallsBackToTheFile(t *testing.T) {
+	stubSecretTool(t)
+	dir := fileStoreHome(t)
+	saved := toolTimeout
+	toolTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { toolTimeout = saved })
+	t.Setenv("STUB_SLOW", "1")
+	locks := t.TempDir()
+	savedLocks := secretLockDir
+	secretLockDir = func() (string, error) { return locks, nil }
+	t.Cleanup(func() { secretLockDir = savedLocks })
+	var herr error
+	captureStderr(t, func() { herr = runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-1")) })
+	if code, ok := exitCode(herr); !ok || code != unavailableExit {
+		t.Fatalf("--store with a keyring that does not answer: %v", herr)
+	}
+	if fileExists(filepath.Join(dir, "tok")) {
+		t.Fatal("the value went to the file store")
+	}
+}
+
+// What cpb's own process asks (target and where, for the prompt and the
+// play report) is lookup alone, with its output going nowhere: never
+// search, which prints the values of unlocked matches.
+func TestTargetAndWhereNeverSearch(t *testing.T) {
+	_, log := stubSecretTool(t)
+	fileStoreHome(t)
+	st, _ := osDefaultSecretStore()
+	for _, locked := range []string{"", "1"} {
+		t.Setenv("STUB_LOCKED", locked)
+		st.target("tok")
+		st.where("tok")
+	}
+	if l := readLog(t, log); !strings.Contains(l, "lookup") || strings.Contains(l, "search") {
+		t.Fatalf("secret-tool calls: %q", l)
+	}
+}
+
+// The file store keeps no more than the Secret Service does.
+func TestFileStoreLimit(t *testing.T) {
+	dir := fileStoreHome(t)
+	noSecretTool(t)
+	st, _ := osDefaultSecretStore()
+	if st.maxValue() != 4096 {
+		t.Fatalf("maxValue %d", st.maxValue())
+	}
+	f := fileStore{dir: dir}
+	if err := f.write("big", make([]byte, 4097)); err == nil || fileExists(filepath.Join(dir, "big")) {
+		t.Fatalf("a value over the limit: %v", err)
+	}
+	if err := f.write("fits", []byte(strings.Repeat("a", 4096))); err != nil {
+		t.Fatalf("a value at the limit: %v", err)
 	}
 }
 

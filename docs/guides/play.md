@@ -102,7 +102,8 @@ A recipe can name a secret it needs as `cpb:<name>`, for example
 `SET VAR SERVICE_TOKEN FROM 'cpb:service-token'`. With no secret helper of your
 own, cpb keeps such a secret in your system's store: your default macOS
 Keychain (normally the login one), or the Secret Service on Linux (through
-`secret-tool`).
+`secret-tool`). A Linux machine with no keyring (a server, a container, a VM)
+gets a file instead; see below.
 
 If it is not stored yet, the preview says so:
 
@@ -135,25 +136,27 @@ Type it again to confirm, or press Enter to stop:
 - An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
   nothing is stored.
 - cpb's own store keeps values up to 1536 bytes in the macOS Keychain and
-  4096 bytes in the Secret Service: the tools cut a longer value short
-  without saying so, so cpb refuses it first. A helper of your own takes
-  longer ones, up to 64 KiB through this step.
-- On Linux the value goes to the Secret Service, so a keyring (GNOME
-  Keyring, KWallet) must be running in your session. On a server or in a
-  container with none, cpb says so and does not ask for the value; use a
-  helper of your own there. A locked keyring is the same: unlock it, then
-  run the command again.
+  4096 bytes on Linux (the Secret Service and the file store below): the
+  tools cut a longer value short without saying so, so cpb refuses it first.
+  A helper of your own takes longer ones, up to 64 KiB through this step.
+- On Linux a locked keyring holding the name stops the step: unlock it, then
+  run the command again. cpb never writes over it, or beside it in a file.
 - A macOS Keychain that is locked where it cannot show its unlock window (in
   an SSH session, say) is found before cpb asks for the value: cpb asks for
   nothing and tells you to run `security unlock-keychain` first. Where the
   window can be shown, the Keychain asks for its password before you type
-  the value.
+  the value; cpb says it is asking, and anything you type meanwhile is not
+  shown and is discarded, so type the value only when you are asked.
+- On a Linux desktop, checking whether a locked keyring holds a name may
+  bring up the keyring's unlock prompt; over SSH and on servers it does
+  not.
 - cpb never replaces a stored secret: to change one, store it under a new name
   and point the recipe at that.
 - If the recipe is someone else's and its name is fixed, or you stored the
   wrong value, remove the item yourself and run the command again:
-  `security delete-generic-password -s cpb -a <name>` on macOS, or
-  `secret-tool clear service cpb name <name>` on Linux.
+  `security delete-generic-password -s cpb -a <name>` on macOS,
+  `secret-tool clear service cpb name <name>` on Linux with a keyring, or
+  `rm ~/.local/share/cpb/secrets/<name>` for the file store.
 - cpb's own store keeps printable ASCII values only (letters, digits,
   punctuation and spaces); a helper of your own takes any value.
 - cpb waits up to a minute for your Keychain or keyring to answer (an
@@ -163,6 +166,48 @@ Type it again to confirm, or press Enter to stop:
   agent's session in the environment (a courtesy check, not a lock). An
   agent can show you the plan (`--dry-run`) and the command; you run the
   command and type the value yourself.
+
+### On a Linux machine with no keyring
+
+A server, a container or a VM usually has no keyring: no `secret-tool`, or no
+keyring daemon running. There cpb keeps the value in a file,
+`~/.local/share/cpb/secrets/<name>` (under `$XDG_DATA_HOME` when that is set),
+mode `0600` in a `0700` directory, and the prompt says so:
+
+```
+cpb:service-token is not stored on this machine yet. Its value will be written to the file /home/user/.local/share/cpb/secrets/service-token, readable by you (and root), since this machine has no keyring: secret-tool is not installed (installing it and a keyring such as GNOME Keyring or KWallet would keep it there instead).
+```
+
+- The value is plaintext in that file. You and root can read it.
+- It lives in your home: a container or VM whose home is thrown away takes
+  it along. To keep it, keep the home on a volume that you own and only you
+  can write: cpb refuses a file store under a directory others can change,
+  such as a root-owned volume mounted group-writable for a pod (a
+  Kubernetes `fsGroup` mount), and says which directory and the `chmod`.
+- Before you run anything, `cpb play <ref> --check --json` shows where each
+  secret would be kept (`secrets`, with `store` and `path`), so an agent can
+  tell you first.
+- If a keyring starts later, a value already in the file is still found,
+  and new values go to the keyring.
+- cpb refuses the file if the directory or the file is open to others, owned
+  by someone else, or a symbolic link, or if a directory above it could be
+  changed by someone else, and says what is wrong (for an open mode, the
+  `chmod` that fixes it).
+- cpb also refuses a file that does not hold what it would have stored: an
+  empty file, or one that ends in a newline. To put a value there by hand,
+  write the value alone, as `printf '%s'` does, never `echo` or an editor;
+  in bash, without echo and out of the shell's history:
+
+  ```
+  read -rs v && (umask 077; mkdir -p ~/.local/share/cpb/secrets && printf '%s' "$v" > ~/.local/share/cpb/secrets/service-token); unset v
+  ```
+- A keyring that is installed but fails (a crash, a broken session bus)
+  stops cpb with nothing stored: it never quietly falls back to the file.
+  The value goes to the store the prompt named, or nowhere. On a machine
+  whose keyring cannot be used at all (some systems' session buses answer
+  in a way cpb does not count as "no keyring"), set
+  `CPB_SECRET_FILE_STORE=1` in your own shell, and cpb keeps the value in
+  the file instead.
 
 What this protects, and what it does not: the value stays out of command
 lines and out of cpb's output, so no log or transcript of them holds it. It
