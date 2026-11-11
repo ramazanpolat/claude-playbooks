@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The shared login store is written only when it changes, atomically, and
+  never with an older login.** On macOS every shared launch rewrote
+  `~/.claude/.credentials.json` from the Keychain in place, even when nothing
+  had changed, so a reader at that moment could see an empty or partial file.
+  The rewrite also gave the store a new file time, so a newer login a shared
+  playbook had left in a file of its own looked older and was replaced by the
+  link. Sync now compares the Keychain value, the store and the playbook's
+  file first and writes the one whose grant expires last
+  (`claudeAiOauth.expiresAt`), only when its bytes differ, through a
+  temporary file renamed over the store. When it cannot tell which is
+  newest, it writes nothing and says so in one stderr line. The copy of a
+  playbook's login over the machine store, on the sync and before a token
+  launch, follows the same rule. The Keychain is only read.
+
 ## [v4.6.0] -- 2026-11-10
 
 v4.6.0 keeps every playbook's `/model` menu current when a new model ships.
