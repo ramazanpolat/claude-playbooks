@@ -158,20 +158,44 @@ jobs:
     permissions:
       contents: write
     steps:
+      # For release-refs.sh, which decides Latest.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
 
+      # Latest is the highest release, never merely the newest by date: a
+      # hotfix to an older major or minor published later stays off it.
+      # install.sh and cpb self-update read Latest from github.com's
+      # redirect, without GitHub's API, and rely on that. A tag with a
+      # suffix (a release candidate) is never Latest.
+      # The rule lives in .github/scripts/release-refs.sh (latest), tested by
+      # release-refs_test.sh in CI. A failed release list stops the job
+      # before anything is published (pipefail), never guessing true.
+      - name: Is this the highest release?
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -o pipefail
+          make=$(gh api "repos/$REPO/releases?per_page=100" --paginate --jq '.[] | select(.draft | not) | select(.prerelease | not) | .tag_name' \
+            | sh .github/scripts/release-refs.sh latest "$TAG")
+          echo "make=$make" >> "$GITHUB_OUTPUT"
+          echo "$TAG becomes Latest: $make"
+
       # A release candidate (vX.Y.Z-rcN) is a pre-release and never the
       # Latest release. Run phase 2 on its commit before the tag
       # (`gentar/mirror.sh dispatch <sha>`), or the first run of this
       # workflow on it stops at arena-gate; then re-run it once arena/phase2
-      # is success, and it publishes. A final release keeps GitHub's default.
+      # is success, and it publishes.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-rc') }}
-          make_latest: ${{ contains(github.ref_name, '-rc') && 'false' || 'legacy' }}
+          make_latest: ${{ steps.latest.outputs.make }}

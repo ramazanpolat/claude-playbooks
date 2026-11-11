@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,8 @@ type selfUpdateConfig struct {
 	currentVersion string
 	repo           string
 	apiBase        string // GitHub API base (default https://api.github.com)
+	latestURL      string // the page whose redirect names the latest release ("" asks only the API)
+	pinned         string // CPB_UPDATE_VERSION: the release to install, with no lookup
 	downloadBase   string // release-asset base (default https://github.com/<repo>/releases/download)
 	goos           string
 	goarch         string
@@ -66,7 +69,12 @@ var selfUpdateCmd = &cobra.Command{
 
 A new major version is never installed on its own: self-update says it is
 available and stays put. --major installs it; read its release notes first.
-Pre-releases are never installed.`,
+Pre-releases are never installed.
+
+The newest release is read from github.com's latest-release redirect, which
+GitHub's API rate limit does not touch; the API is asked only when that is not
+enough. CPB_UPDATE_VERSION=<tag> names the release and looks nothing up, for a
+network where both fail.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSelfUpdate(selfUpdateForce, selfUpdateCheck, selfUpdateMajor)
@@ -95,6 +103,8 @@ func runSelfUpdate(force, checkOnly, major bool) error {
 		currentVersion: Version,
 		repo:           envOr("CPB_UPDATE_REPO", defaultUpdateRepo),
 		apiBase:        envOr("CPB_UPDATE_API_BASE", "https://api.github.com"),
+		latestURL:      envOr("CPB_UPDATE_LATEST_URL", "https://github.com/"+envOr("CPB_UPDATE_REPO", defaultUpdateRepo)+"/releases/latest"),
+		pinned:         os.Getenv("CPB_UPDATE_VERSION"),
 		downloadBase:   os.Getenv("CPB_UPDATE_DOWNLOAD_BASE"),
 		goos:           runtime.GOOS,
 		goarch:         runtime.GOARCH,
@@ -137,12 +147,15 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 		return fmt.Errorf("%s is managed by Nix and cannot be replaced in place.\n%s", cfg.execPath, nixUpdateHint)
 	}
 
-	tags, err := fetchReleaseTags(cfg)
-	if err != nil {
-		return fmt.Errorf("could not read the release list, so nothing is installed: %w", err)
-	}
 	cur, curOK := parseVersion(runningVersion, cfg.currentVersion)
+	tags, err := releaseCandidates(cfg, cur, curOK)
+	if err != nil {
+		return err
+	}
 	newest, newestOK := pickRelease(tags, -1)
+	if cfg.pinned != "" && curOK && newestOK && newest.major != cur.major && !cfg.major {
+		return fmt.Errorf("CPB_UPDATE_VERSION=%s is a new major version: add --major to install it (read its release notes first); nothing is installed", cfg.pinned)
+	}
 	if !newestOK {
 		return fmt.Errorf("the release list holds no release (vMAJOR.MINOR.PATCH, not a pre-release), so nothing is installed")
 	}
@@ -162,12 +175,17 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 		target, latest = newest, newest.String()
 	default:
 		same, sameOK := pickRelease(tags, cur.major)
-		if sameOK {
+		switch {
+		case cfg.pinned != "":
+			fmt.Fprintf(w, "Release named:   %s (CPB_UPDATE_VERSION; nothing was looked up)\n", newest)
+		case sameOK:
 			fmt.Fprintf(w, "Newest v%d release: %s\n", cur.major, same)
-		} else {
+		default:
 			fmt.Fprintf(w, "Newest v%d release: none\n", cur.major)
 		}
-		fmt.Fprintf(w, "Newest release:  %s\n", newest)
+		if cfg.pinned == "" {
+			fmt.Fprintf(w, "Newest release:  %s\n", newest)
+		}
 		target, latest = same, same.String()
 		if cfg.major {
 			target, latest, sameOK = newest, newest.String(), true
@@ -329,6 +347,107 @@ func pickRelease(tags []string, major int) (semver, bool) {
 	return best, found
 }
 
+// releaseCandidates is the releases self-update chooses from, asking as
+// little as it can. CPB_UPDATE_VERSION names one, and nothing is looked up.
+// Otherwise github.com's latest-release page is asked first, its redirect
+// read and not followed: it is not under the API's per-IP limit, which an
+// office, a VPN or a CI fleet shares. Its tag is enough when it is in the
+// running major, or --major is given, or this build has no major (the
+// release workflow marks Latest only the highest release, so it is the
+// newest of its major and of all). Only otherwise, or when the redirect
+// names no release, is GitHub's API asked for the whole list. When that
+// fails too, nothing is installed, and the error names each cause and the
+// line that needs no lookup.
+func releaseCandidates(cfg selfUpdateConfig, cur semver, curOK bool) ([]string, error) {
+	page := fmt.Sprintf("https://github.com/%s/releases", cfg.repo)
+	if cfg.pinned != "" {
+		if !releaseTag.MatchString(cfg.pinned) {
+			return nil, fmt.Errorf("CPB_UPDATE_VERSION=%s is not a release (vMAJOR.MINOR.PATCH; never a pre-release), so nothing is installed; the tags are at %s", cfg.pinned, page)
+		}
+		return []string{cfg.pinned}, nil
+	}
+	var latest string
+	var rerr error
+	if cfg.latestURL != "" {
+		latest, rerr = latestByRedirect(cfg)
+		if rerr == nil {
+			lv, _ := parseVersion(releaseTag, latest)
+			if !curOK || cfg.major || lv.major == cur.major {
+				return []string{latest}, nil
+			}
+		}
+	}
+	tags, err := fetchReleaseTags(cfg)
+	if err == nil {
+		return tags, nil
+	}
+	why := "the release list could not be read: " + err.Error()
+	var se *apiStatusError
+	if errors.As(err, &se) && (se.code == http.StatusForbidden || se.code == http.StatusTooManyRequests) {
+		why = fmt.Sprintf("GitHub's API rate-limited the release list (HTTP %d; unauthenticated requests share your IP)", se.code)
+	}
+	pin := "CPB_UPDATE_VERSION=<tag> cpb self-update"
+	switch {
+	case latest != "":
+		return nil, fmt.Errorf("could not read the release list, so nothing is installed: the newest release is %s, a new major version; finding the newest v%d release needs GitHub's API, and %s. Name the v%d release instead (the tags are at %s): %s; or install %s with `cpb self-update --major` (read its release notes first)",
+			latest, cur.major, lowerFirst(why), cur.major, page, pin, latest)
+	case rerr != nil:
+		return nil, fmt.Errorf("could not read the release list, so nothing is installed: %v, and %s. Name the release instead (the tags are at %s): %s", rerr, lowerFirst(why), page, pin)
+	}
+	return nil, fmt.Errorf("could not read the release list, so nothing is installed: %s. Name the release instead (the tags are at %s): %s", why, page, pin)
+}
+
+func lowerFirst(s string) string {
+	if strings.HasPrefix(s, "GitHub") {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// latestByRedirect is the tag github.com's latest-release page redirects to
+// (.../releases/tag/<tag>), read from the redirect, which is not followed.
+// It carries no token: the token is the API's alone.
+func latestByRedirect(cfg selfUpdateConfig) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, cfg.latestURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "cpb-selfupdate")
+	c := *cfg.httpClient
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("no answer from %s (%v)", cfg.latestURL, err)
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+	default:
+		return "", fmt.Errorf("%s answered %s without naming a release", cfg.latestURL, resp.Status)
+	}
+	loc, err := resp.Location()
+	if err != nil {
+		return "", fmt.Errorf("%s redirected without a location", cfg.latestURL)
+	}
+	i := strings.LastIndex(loc.Path, "/releases/tag/")
+	if i < 0 || !releaseTag.MatchString(loc.Path[i+len("/releases/tag/"):]) {
+		return "", fmt.Errorf("%s redirected to %s, which is not a release", cfg.latestURL, loc)
+	}
+	return loc.Path[i+len("/releases/tag/"):], nil
+}
+
+// apiStatusError is a GitHub API answer other than 200.
+type apiStatusError struct {
+	code   int
+	status string
+	body   string
+}
+
+func (e *apiStatusError) Error() string {
+	return fmt.Sprintf("GitHub API returned %s: %s", e.status, e.body)
+}
+
 // releasePages is how many pages of the release list self-update reads, at
 // 100 a page; a longer list fails closed rather than missing a release.
 const releasePages = 10
@@ -368,7 +487,7 @@ func fetchReleaseTags(cfg selfUpdateConfig) ([]string, error) {
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			resp.Body.Close()
-			return nil, fmt.Errorf("GitHub API returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+			return nil, &apiStatusError{code: resp.StatusCode, status: resp.Status, body: strings.TrimSpace(string(body))}
 		}
 		var releases []struct {
 			TagName    string `json:"tag_name"`

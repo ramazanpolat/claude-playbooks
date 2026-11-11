@@ -90,4 +90,21 @@ git tag v4.0.0 "$m1"
 want 1 -  sh "$refs" npx-check 4.0.0-rc1                  # the final is out: main must name it
 want 0 -  sh "$refs" npx-check 4.0.0
 
+# latest: GitHub's Latest is the highest release by version. A patch on an
+# older line, or a hotfix to an older major, published after a newer release
+# never moves it backwards; a release candidate is never Latest.
+latest_is() { # latest_is <want> <tag> [published tags...]
+  w=$1 tag=$2; shift 2
+  got=$(printf '%s\n' "$@" | sh "$refs" latest "$tag")
+  if [ "$got" = "$w" ]; then echo "ok:   latest $tag over [$*] -> $got"; else echo "FAIL: latest $tag over [$*] -> $got (want $w)"; fail=1; fi
+}
+latest_is true  v4.7.0     v4.6.1 v4.6.0        # the highest: Latest
+latest_is false v4.6.2     v4.7.0 v4.6.1        # a patch on an older line after a newer one
+latest_is false v4.3.1     v5.0.0 v4.3.0        # a hotfix to an older major
+latest_is true  v4.10.0    v4.9.0               # by number, not by text
+latest_is true  v4.7.0     v4.7.0 v4.6.1        # the workflow run again after publishing
+latest_is true  v4.7.0     v5.0.0-rc1 v4.6.1    # a pre-release above it does not count
+latest_is false v4.7.0-rc1 v4.6.1               # a release candidate is never Latest
+latest_is true  v1.0.0                          # the first release
+
 exit $fail

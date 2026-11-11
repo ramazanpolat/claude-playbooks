@@ -19,6 +19,15 @@
 #       for a new major (bin/npx-shim.sh never falls back across one). A
 #       release candidate (X.Y.Z-rcN) that is tagged and newer than the
 #       highest release passes: npx serves that pre-release, which is right.
+#
+#   release-refs.sh latest <tag>   (the published release tags on stdin)
+#       Prints true when <tag> becomes GitHub's Latest release, else false.
+#       Latest is the highest release by version, never merely the newest
+#       by date: a patch on an older line (v4.6.2 after v4.7.0) or a hotfix
+#       to an older major (v4.3.1 after v5.0.0) never moves it backwards. A
+#       tag with a suffix (a release candidate) is never Latest. install.sh
+#       and cpb self-update read Latest from github.com's redirect and rely
+#       on this.
 set -eu
 
 # minor_of v3.24.1 → v3.24; v3.24.0-rc1 → v3.24; anything else ("-beta",
@@ -89,8 +98,23 @@ npx-check)
   echo "::error::package.json version ($pkg) != the latest release ($latest). npx would serve the wrong binary: bump package.json to ${latest#v} (or to the release this commit prepares)." >&2
   exit 1
   ;;
+latest)
+  tag=${2:?usage: release-refs.sh latest <tag>  (the published release tags on stdin)}
+  if ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo false
+    exit 0
+  fi
+  while IFS= read -r t; do
+    printf '%s\n' "$t" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || continue
+    if newer "${t#v}" "${tag#v}"; then
+      echo false
+      exit 0
+    fi
+  done
+  echo true
+  ;;
 *)
-  echo "usage: release-refs.sh gate <tag> <sha> | npx-check <version>" >&2
+  echo "usage: release-refs.sh gate <tag> <sha> | npx-check <version> | latest <tag>" >&2
   exit 2
   ;;
 esac
