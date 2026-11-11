@@ -4,8 +4,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -291,6 +293,18 @@ func TestLinuxStoreTwoStores(t *testing.T) {
 		if strings.Contains(out, v) {
 			t.Fatalf("a value was printed: %q", out)
 		}
+	}
+	// In both, with the keyring's item locked: a read stops, as a store
+	// that cannot answer, and a launch gets nothing; neither falls back to
+	// the file's copy.
+	t.Setenv("STUB_LOCKED", "1")
+	var ue *unavailableError
+	if v, err := st.read("late"); v != nil || !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("a locked keyring item read as %q %v", v, err)
+	}
+	_, _, env, err := secretHelperExec(st, []string{"K=cpb:late", "--", "true"}, nil)
+	if !errors.As(err, &ue) || slices.Contains(env, "K=stale-copy") {
+		t.Fatalf("a launch over a locked keyring item: %v %q", err, env)
 	}
 }
 

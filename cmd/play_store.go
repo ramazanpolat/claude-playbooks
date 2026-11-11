@@ -245,10 +245,10 @@ func secretReport(refs []string) []playSecretJSON {
 		} else {
 			e.Store, e.Helper = "helper", x.name
 		}
-		c := x.command("--check", "CPB_SECRET="+r)
-		c.Env = withoutKeys(os.Environ(), []string{"CPB_SECRET"})
+		// Bounded like every other check (helperCheck): a helper that does
+		// not answer leaves "stored" unknown, never the report waiting.
 		var ee *exec.ExitError
-		switch err := c.Run(); {
+		switch err := helperCheck(x, "CPB_SECRET", r, nil); {
 		case err == nil:
 			e.Stored = new(bool)
 			*e.Stored = true

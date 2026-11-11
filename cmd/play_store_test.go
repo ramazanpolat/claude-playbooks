@@ -44,7 +44,8 @@ key() { printf '%s' "$1" | tr ':/' '__'; }
 case "$1" in
   --ready) [ -n "$READY_SLEEP" ] && sleep "$READY_SLEEP"
            [ -n "$READY_EXIT" ] && { echo "the test store is locked and cannot ask for its password here" >&2; exit "$READY_EXIT"; }; exit 0 ;;
-  --check) [ -z "$FORCE_CHECK_FAIL" ] && [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
+  --check) [ -n "$CHECK_SLEEP" ] && sleep "$CHECK_SLEEP"
+           [ -z "$FORCE_CHECK_FAIL" ] && [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
   --store) if [ -n "$SLOW_STORE" ]; then sleep "${STORE_SLEEP:-5}"; fi
            if [ -n "$FAIL_STORE" ]; then cat >/dev/null; exit "${STORE_EXIT:-1}"; fi
            f="$STORE_DIR/$(key "$2")"; cat > "$f.part" && mv "$f.part" "$f"
@@ -68,6 +69,7 @@ exit 2
 	t.Setenv("FAIL_AFTER_STORE", "")
 	t.Setenv("READY_EXIT", "")
 	t.Setenv("READY_SLEEP", "")
+	t.Setenv("CHECK_SLEEP", "")
 	t.Setenv(envset.SecretHelperEnv, path)
 	for _, v := range agentSessionVars {
 		t.Setenv(v, "") // restored after the test
@@ -1360,6 +1362,22 @@ func TestStoreStepReadyKeepsTypingOut(t *testing.T) {
 	b, rerr := os.ReadFile(filepath.Join(store, "cpb_tok"))
 	if rerr != nil || string(b) != testValue {
 		t.Fatalf("stored %q (%v): what was typed during --ready was taken?", b, rerr)
+	}
+}
+
+// The secret report (cpb play --check, --dry-run --json) waits for a helper
+// no longer than every other check does: one that does not answer leaves
+// "stored" unknown, with a note, and the report ends.
+func TestSecretReportDoesNotWaitForeverOnAHelper(t *testing.T) {
+	storeHelper(t)
+	saved := helperTimeout
+	helperTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { helperTimeout = saved })
+	t.Setenv("CHECK_SLEEP", "5")
+	start := time.Now()
+	r := secretReport([]string{testRef})
+	if len(r) != 1 || r[0].Stored != nil || !strings.Contains(r[0].Note, "did not answer within") || time.Since(start) > 4*time.Second {
+		t.Fatalf("after %s: %+v", time.Since(start), r)
 	}
 }
 

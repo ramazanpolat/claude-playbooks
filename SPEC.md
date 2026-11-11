@@ -690,7 +690,9 @@ keeps values in the operating system's store:
     file; `--store` writes to the keyring when it answers, else to the
     file. A name found in either refuses `--store`. A name in both is the
     keyring's, and `--check` says in one stderr line where the file copy
-    is. Where cpb itself shows where a value would go (the store step's
+    is. A read (a launch, the read-back after a store) that finds the
+    keyring's item locked stops there, exit 5, and never falls back to the
+    file's copy. Where cpb itself shows where a value would go (the store step's
     prompt, `cpb play --check --json`), it asks the keyring with `lookup`
     alone, whose output goes nowhere, so no value passes through cpb.
   - **Trust.** The directory and the file are never followed through a

@@ -167,13 +167,20 @@ func (s linuxStore) exists(name string) (bool, error) {
 	return inFile, nil
 }
 
+// read runs in the helper's own process (a launch, the read-back after a
+// store), so it asks deep: a name in a locked keyring is a store that
+// cannot answer, and the read stops there; it never falls back to a file
+// copy of the same name, which the keyring's value outranks.
 func (s linuxStore) read(name string) ([]byte, error) {
-	k, err := s.keyring(name, false)
+	k, err := s.keyring(name, true)
 	if err != nil {
 		return nil, err
 	}
-	if k == keyringFound {
+	switch k {
+	case keyringFound:
 		return s.ss.read(name)
+	case keyringLocked:
+		return nil, unavailable("cpb:%s is in your Secret Service keyring, which is locked: unlock the keyring (log in to your desktop session, or unlock it in your keyring's tool), then run this again", name)
 	}
 	return s.file.read(name)
 }
