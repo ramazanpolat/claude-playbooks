@@ -641,11 +641,23 @@ values in the operating system's store:
   found" (its exit 44) is one, and the line names the fix (unlock the
   Keychain, `security unlock-keychain`, or configure a helper of your own).
   A **Keychain locked where it cannot show its unlock dialog** (an SSH
-  session, say) is found only when the add fails: `security` reports the
-  status `-25308` (errSecInteractionNotAllowed; its text is localised, the
-  number is not), which the helper reads in-process and never prints, and
-  the store exits 5 saying the Keychain is locked and how to unlock it. The
-  value has been typed by then; nothing is stored.
+  session, say) is found before a value is asked for. The search without
+  `-w` answers on a locked Keychain as on an unlocked one, so `--check`
+  follows "not there" with `security show-keychain-info`, which carries no
+  value: there it exits 36 (errSecInteractionNotAllowed, -25308, as an exit
+  status), and `--check` exits 5 saying the Keychain is locked and how to
+  unlock it (`security unlock-keychain`), so the store step asks for
+  nothing. In a session that can show the dialog, that call waits for it,
+  up to the 60-second limit below, before anything is typed. Every later call that meets a locked Keychain says the
+  same with exit 5: reading the value (exit 36, nothing on stderr) and the
+  add (exit 36, and on stderr `add-generic-password: returned -25308` after
+  a line whose text is localised; the number, the exit status, or the
+  English text is enough, read in-process and never printed). Observed
+  over `ssh localhost` with a locked throwaway keychain on GitHub's runner
+  images macos-15-arm64 20261104.0514.1 (macOS 15.8.2) and macos-26-arm64
+  20261102.0473.1 (macOS 26.7.2); in the runner's own session, which has a
+  window server, each of those calls waited until it was stopped at 20
+  seconds.
 - **Time.** Each call to `security` or `secret-tool` is stopped after 60
   seconds (time enough to answer an unlock dialog), and the per-name lock
   is waited on for 30 seconds; either ending is exit 5, and the lock's line
@@ -668,9 +680,12 @@ values in the operating system's store:
 - **Writing.** On macOS the add command goes to `security -i` on its stdin,
   the value hex-encoded (`-X`), so it is in no argument list. On Linux it
   goes to `secret-tool store` on its stdin. Neither tool's output is shown.
-  After every write the value is read back and compared: `security -i`
-  exits 0 even when its add fails, and a store that does not hold the value
-  given reports it as not stored.
+  After every write the value is read back and compared: another program
+  may write the same item at the same moment, so no exit status proves the
+  value stored is the one given, and a store that does not hold it reports
+  it as not stored. (`security -i` does exit with its add's status: 45 for
+  an item that exists, 36 for a locked Keychain, on the images named
+  above.)
 - **Never in place.** `--store` of a name that is stored already is refused
   (no `-U`): rotating a secret is a new name, verified, then the old one
   retired. Default helpers storing one name take a lock on it first (an
@@ -709,16 +724,23 @@ helper's `--check` exits 4):
   Delete, Home, a function key, Alt with a key) or any other control key
   (`^A`, `^W`, `^D` inside a line, …) was pressed, since with echo off what
   it added or dropped is not seen, or when it is longer than the store
-  keeps (the default helper's store's limit, else 64 KiB). Bracketed
-  paste's markers are not such a sequence: they are dropped, and the paste
-  between them is the value;
+  keeps (the default helper's store's limit, else 64 KiB), or when it is a
+  paste of more than one line;
+- **pastes:** the read turns the terminal's bracketed paste on (and off
+  after), so on a terminal that has it a paste arrives between its markers
+  and is read to its end marker, whatever its gaps: one line with its
+  newline is the value, more than one line is refused;
 - **after every read**, while echo is still off, whatever is waiting to be
-  read on the terminal is discarded, again and again, until it has been
-  quiet for three polls 25 ms apart (at most 3 seconds); only then is the
-  terminal's mode put back, and what came in between is discarded too. A
-  long paste keeps arriving after a single discard, so this is what keeps
-  it from being shown once echo is back, from filling the confirmation,
-  and, once cpb exits, from reaching the shell;
+  read on the terminal is discarded, at once whenever any is waiting,
+  until nothing has come for 300 ms; only then is the terminal's mode put
+  back, and what came in between is discarded too. So what was typed or
+  pasted past the line is never shown once echo is back, never fills the
+  confirmation and, once cpb exits, never reaches the shell. Input that
+  keeps arriving for 10 seconds without such a pause stops the step with
+  nothing stored, saying so, and a terminal whose input cannot be
+  discarded stops the read. A terminal without bracketed paste whose paste
+  pauses for longer than 300 ms is the one case left: what comes after
+  the pause is shown, and answers the next prompt;
 - the value goes to `<helper> --store REF` on stdin, and the reference is
   checked again before anything is applied;
 - **an empty answer (to either prompt), ^C, a closed terminal, a signal to
@@ -728,7 +750,14 @@ helper's `--check` exits 4):
   play`, `--keep`, `cpb update`), so the terminal is put back first. A
   signal that arrives while the helper stores the value does not stop the
   helper; the step stops right after it, saying whether the value was
-  stored, and nothing else is written.
+  stored, and nothing else is written. When the helper failed after the
+  signal (a ^C reaches the whole foreground process group, the helper
+  included, perhaps after its write), the step asks the store once and
+  says "stored", "not stored", or "may be stored: run this again to see".
+  A signal after the step's last check stops the run the same way. A
+  helper's `--store` that exits 5 (the store could not answer) may have
+  stored the value: the step says so, and does not send the person to
+  another tool.
 - **A reference used more than once** is one secret: listed, checked and
   asked for once.
 

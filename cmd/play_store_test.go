@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +10,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -38,8 +42,10 @@ key() { printf '%s' "$1" | tr ':/' '__'; }
 case "$1" in
   --check) [ -z "$FORCE_CHECK_FAIL" ] && [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
   --store) if [ -n "$SLOW_STORE" ]; then sleep "${STORE_SLEEP:-5}"; fi
-           if [ -n "$FAIL_STORE" ]; then cat >/dev/null; exit 1; fi
-           f="$STORE_DIR/$(key "$2")"; cat > "$f.part" && mv "$f.part" "$f"; exit 0 ;;
+           if [ -n "$FAIL_STORE" ]; then cat >/dev/null; exit "${STORE_EXIT:-1}"; fi
+           f="$STORE_DIR/$(key "$2")"; cat > "$f.part" && mv "$f.part" "$f"
+           [ -n "$FAIL_AFTER_STORE" ] && exit 1
+           exit 0 ;;
 esac
 exit 2
 `
@@ -54,6 +60,8 @@ exit 2
 	t.Setenv("FORCE_CHECK_FAIL", "")
 	t.Setenv("SLOW_STORE", "")
 	t.Setenv("STORE_SLEEP", "")
+	t.Setenv("STORE_EXIT", "")
+	t.Setenv("FAIL_AFTER_STORE", "")
 	t.Setenv(envset.SecretHelperEnv, path)
 	for _, v := range agentSessionVars {
 		t.Setenv(v, "") // restored after the test
@@ -76,24 +84,72 @@ func onPty(t *testing.T) (typeIt func(input string, closeAfter bool), finish fun
 	}
 	saved := secretIn
 	secretIn = tty
+	// The drain waits for 50 ms of quiet in these tests, well under the
+	// 300 ms between typed inputs, so a typed answer never lands in the
+	// drain of the read before it. The drain's own tests set it back.
+	savedQuiet := drainQuiet
+	drainQuiet = 50 * time.Millisecond
+	t.Cleanup(func() { drainQuiet = savedQuiet })
 	// One writer types each input in the order given, after a pause, so a
 	// second entry is typed while the second read waits for it.
 	type typed struct {
 		input      string
 		closeAfter bool
+		delay      time.Duration
 	}
-	queue := make(chan typed, 16)
+	var hangUp func() // set below, before anything is typed
+	queue := make(chan typed, 64)
 	go func() {
 		for in := range queue {
-			time.Sleep(300 * time.Millisecond) // the read is in raw mode by now
+			time.Sleep(in.delay) // the read is in raw mode by now
 			io.WriteString(ptmx, in.input)
 			if in.closeAfter {
 				time.Sleep(100 * time.Millisecond)
-				ptmx.Close()
+				hangUp()
 			}
 		}
 	}()
-	typeIt = func(input string, closeAfter bool) { queue <- typed{input, closeAfter} }
+	// What the terminal shows is read as it comes, from the start: a ^C
+	// typed in the terminal's own mode discards the output not read yet,
+	// so reading it only at the end would find nothing, echo included.
+	var shownMu sync.Mutex
+	var shown bytes.Buffer
+	readerDone := make(chan struct{})
+	var stopReading atomic.Bool
+	go func() {
+		defer close(readerDone)
+		b := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(b)
+			if n > 0 {
+				shownMu.Lock()
+				shown.Write(b[:n])
+				shownMu.Unlock()
+			}
+			if err != nil || stopReading.Load() {
+				return
+			}
+		}
+	}()
+	// hangUp closes the terminal's other end, as a terminal that goes away:
+	// the reader is stopped first (woken by a byte the terminal shows), so
+	// no read of it holds the close back.
+	hangUp = func() {
+		stopReading.Store(true)
+		tty.Write([]byte{0})
+		select {
+		case <-readerDone:
+		case <-time.After(2 * time.Second):
+		}
+		ptmx.Close()
+	}
+	typeIt = func(input string, closeAfter bool) {
+		d := 300 * time.Millisecond
+		if typeDelay > 0 {
+			d, typeDelay = typeDelay, 0
+		}
+		queue <- typed{input, closeAfter, d}
+	}
 	finish = func() string {
 		secretIn = saved
 		// Free a read still waiting on the terminal, so it can be closed
@@ -103,9 +159,15 @@ func onPty(t *testing.T) (typeIt func(input string, closeAfter bool), finish fun
 		io.WriteString(ptmx, "\x03\r")
 		time.Sleep(300 * time.Millisecond)
 		tty.Close()
-		b, _ := io.ReadAll(ptmx)
+		select {
+		case <-readerDone:
+		case <-time.After(2 * time.Second):
+		}
 		ptmx.Close()
-		return string(b)
+		<-readerDone
+		shownMu.Lock()
+		defer shownMu.Unlock()
+		return shown.String()
 	}
 	return typeIt, finish
 }
@@ -525,6 +587,10 @@ func TestPreparePendingStoreOnlyWhenNotStored(t *testing.T) {
 	}
 }
 
+// typeDelay, when set, is the pause before the next typed input instead of
+// 300 ms (it is used once).
+var typeDelay time.Duration
+
 // testLimit is the hidden reads' limit in tests that do not test it.
 const testLimit = 64
 
@@ -772,7 +838,7 @@ func TestPendingStoreListsEachReferenceOnce(t *testing.T) {
 // it answers the confirmation (only the ^C typed there does), and none is
 // left for the shell.
 func TestStoreStepLongPasteIsNeitherShownNorTaken(t *testing.T) {
-	for _, size := range []int{2 << 10, 8 << 10, 33 << 10} {
+	for _, size := range []int{2 << 10, 8 << 10, 33 << 10, 256 << 10} {
 		t.Run(fmt.Sprintf("%d bytes", size), func(t *testing.T) {
 			store, log := storeHelper(t)
 			typeIt, finish := onPty(t)
@@ -802,33 +868,214 @@ func TestStoreStepLongPasteIsNeitherShownNorTaken(t *testing.T) {
 
 // A signal that arrives while the helper stores the value does not stop
 // the helper; the step checks for it afterwards and stops there, saying
-// the value was stored, instead of going on.
+// whether the value was stored: when the helper failed after its signal
+// (a ^C reaches the whole foreground group), the step asks the store once.
 func TestStoreStepStopsAfterASignalDuringTheStore(t *testing.T) {
-	store, _ := storeHelper(t)
-	t.Setenv("SLOW_STORE", "1")
-	t.Setenv("STORE_SLEEP", "1")
+	for _, tc := range []struct {
+		name, failure, want string
+		stored              bool
+	}{
+		{name: "the store succeeds", want: "was stored", stored: true},
+		{name: "the helper fails after its write", failure: "FAIL_AFTER_STORE", want: "was stored", stored: true},
+		{name: "the helper fails before writing", failure: "FAIL_STORE", want: "was not stored"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, _ := storeHelper(t)
+			t.Setenv("SLOW_STORE", "1")
+			t.Setenv("STORE_SLEEP", "1")
+			if tc.failure != "" {
+				t.Setenv(tc.failure, "1")
+			}
+			keep := make(chan os.Signal, 1)
+			signal.Notify(keep, syscall.SIGTERM)
+			defer signal.Stop(keep)
+			// The signal is sent only while the test is still running, so
+			// one that ends early never takes the test binary with it.
+			sent := make(chan struct{})
+			ended := make(chan struct{})
+			defer close(ended)
+			typeIt, finish := onPty(t)
+			defer finish()
+			typeIt(testValue+"\r", false)
+			typeIt(testValue+"\r", false)
+			go func() {
+				defer close(sent)
+				select {
+				case <-time.After(1200 * time.Millisecond): // the helper sleeps 1 s
+					syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				case <-ended:
+				}
+			}()
+			var err error
+			out := captureStdout(t, func() { err = storeWithin(t, testRef) })
+			<-sent
+			if err == nil || !strings.Contains(err.Error(), "cancelled: "+testRef+" "+tc.want) {
+				t.Fatalf("store step: %v", err)
+			}
+			if strings.Contains(out, "Stored "+testRef) {
+				t.Fatal("the step went on after the signal")
+			}
+			if _, ok := storedValue(store); ok != tc.stored {
+				t.Fatalf("stored: %v, want %v", ok, tc.stored)
+			}
+		})
+	}
+}
+
+// A signal after the step's last check is not dropped: the step stops.
+func TestStoreStepSignalAfterTheLastCheck(t *testing.T) {
+	storeHelper(t)
 	keep := make(chan os.Signal, 1)
 	signal.Notify(keep, syscall.SIGTERM)
 	defer signal.Stop(keep)
+	storeStepChecked = func() {
+		syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		<-keep
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Cleanup(func() { storeStepChecked = nil })
 	typeIt, finish := onPty(t)
 	defer finish()
 	typeIt(testValue+"\r", false)
 	typeIt(testValue+"\r", false)
-	go func() {
-		// the two entries are typed by 600 ms; the helper sleeps 1 s
-		time.Sleep(1200 * time.Millisecond)
-		syscall.Kill(os.Getpid(), syscall.SIGTERM)
-	}()
 	var err error
-	out := captureStdout(t, func() { err = storeWithin(t, testRef) })
+	captureStdout(t, func() { err = storeWithin(t, testRef) })
 	if err == nil || !strings.Contains(err.Error(), "cancelled: "+testRef+" was stored") {
 		t.Fatalf("store step: %v", err)
 	}
-	if strings.Contains(out, "Stored "+testRef) {
-		t.Fatal("the step went on after the signal")
+}
+
+// A store the helper could not answer (exit 5) may hold the value: the
+// step says so, and does not send the person to store it elsewhere.
+func TestStoreStepUnansweredStoreMayBeStored(t *testing.T) {
+	storeHelper(t)
+	t.Setenv("FAIL_STORE", "1")
+	t.Setenv("STORE_EXIT", "5")
+	typeIt, finish := onPty(t)
+	defer finish()
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	captureStdout(t, func() { err = storeWithin(t, testRef) })
+	if err == nil || !strings.Contains(err.Error(), "may be stored") || strings.Contains(err.Error(), "with your own tool") {
+		t.Fatalf("store step: %v", err)
 	}
-	if v, ok := storedValue(store); !ok || v != testValue {
-		t.Fatalf("stored %q (%v)", v, ok)
+}
+
+// Without bracketed paste, a paste that stalls for 150 ms is still
+// discarded: the terminal counts as quiet only after 300 ms.
+func TestStoreStepPasteWithAStall(t *testing.T) {
+	store, log := storeHelper(t)
+	typeIt, finish := onPty(t)
+	drainQuiet = 300 * time.Millisecond // the real window
+	line := strings.Repeat("Zq", 31) + "\r"
+	typeIt("first-line\r"+strings.Repeat(line, 64), false)
+	typeDelay = 150 * time.Millisecond
+	typeIt(strings.Repeat(line, 64), false)
+	typeDelay = 900 * time.Millisecond
+	typeIt("\x03", false) // at the confirmation, after the drain
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, testRef) })
+	nothingPending(t, typeIt)
+	shown := finish()
+	if err == nil || !strings.Contains(err.Error(), "was not stored; nothing was written") || strings.Contains(out, "differ") {
+		t.Fatalf("store step: %v %q", err, out)
+	}
+	if strings.Contains(shown, "ZqZq") || strings.Contains(out, "ZqZq") {
+		t.Fatal("the pasted text was shown")
+	}
+	if _, ok := storedValue(store); ok || strings.Contains(readLog(t, log), "--store") {
+		t.Fatal("something was stored")
+	}
+}
+
+// With bracketed paste, a paste is read to its end marker whatever its
+// gaps: one of several lines is refused, and nothing of it is shown or
+// left; one line with its newline is taken.
+func TestStoreStepBracketedPaste(t *testing.T) {
+	t.Run("several lines, with a long gap", func(t *testing.T) {
+		store, log := storeHelper(t)
+		typeIt, finish := onPty(t)
+		typeIt("\x1b[200~line-one\rZqZqZq-line-two\r", false)
+		typeDelay = 600 * time.Millisecond
+		typeIt("ZqZqZq-line-three\r\x1b[201~", false)
+		typeDelay = 600 * time.Millisecond
+		typeIt("\x03", false)
+		var err error
+		out := captureStdout(t, func() { err = storeWithin(t, testRef) })
+		nothingPending(t, typeIt)
+		shown := finish()
+		if err == nil || !strings.Contains(out, "more than one line") || !strings.Contains(err.Error(), "was not stored") {
+			t.Fatalf("store step: %v %q", err, out)
+		}
+		if strings.Contains(shown, "ZqZq") || strings.Contains(out, "ZqZq") || strings.Contains(out, "line-one") {
+			t.Fatal("the pasted text was shown")
+		}
+		if _, ok := storedValue(store); ok || strings.Contains(readLog(t, log), "--store") {
+			t.Fatal("something was stored")
+		}
+	})
+	t.Run("one line with its newline", func(t *testing.T) {
+		store, _ := storeHelper(t)
+		typeIt, finish := onPty(t)
+		defer finish()
+		typeIt("\x1b[200~"+testValue+"\r\x1b[201~", false)
+		typeIt("\x1b[200~"+testValue+"\n\x1b[201~", false)
+		var err error
+		captureStdout(t, func() { err = storeWithin(t, testRef) })
+		if v, _ := storedValue(store); err != nil || v != testValue {
+			t.Fatalf("store step: %v, stored %q", err, v)
+		}
+	})
+}
+
+// Input that keeps arriving longer than the drain waits ends the step,
+// saying so, with nothing stored.
+func TestStoreStepEndsWhenInputKeepsArriving(t *testing.T) {
+	store, log := storeHelper(t)
+	typeIt, finish := onPty(t)
+	defer finish()
+	savedMax := drainMax
+	drainMax = 400 * time.Millisecond
+	t.Cleanup(func() { drainMax = savedMax })
+	drainQuiet = 150 * time.Millisecond
+	typeIt("abc\r", false)
+	for i := 0; i < 60; i++ {
+		typeDelay = 20 * time.Millisecond
+		typeIt("x", false)
+	}
+	var err error
+	captureStdout(t, func() { err = storeWithin(t, testRef) })
+	if err == nil || !strings.Contains(err.Error(), "input kept arriving") {
+		t.Fatalf("store step: %v", err)
+	}
+	if _, ok := storedValue(store); ok || strings.Contains(readLog(t, log), "--store") {
+		t.Fatal("something was stored")
+	}
+}
+
+// A terminal whose input cannot be discarded stops the read.
+func TestReadHiddenStopsWhenInputCannotBeDiscarded(t *testing.T) {
+	typeIt, finish := onPty(t)
+	defer finish()
+	saved := flushTerminal
+	flushTerminal = func(int) error { return errors.New("not supported") }
+	t.Cleanup(func() { flushTerminal = saved })
+	typeIt("abc\r", false)
+	if v, res := readWithin(t, nil, testLimit); res != hiddenStopped || v != nil {
+		t.Fatalf("read %q %v", v, res)
+	}
+}
+
+// The pty's transcript does capture what the terminal shows: in its own
+// mode, typed text is echoed and found there (a control for the tests
+// that look for a value in it).
+func TestPtyTranscriptShowsEcho(t *testing.T) {
+	typeIt, finish := onPty(t)
+	typeIt("visible-echo\r", false)
+	time.Sleep(600 * time.Millisecond)
+	if shown := finish(); !strings.Contains(shown, "visible-echo") {
+		t.Fatalf("the transcript holds no echo: %q", shown)
 	}
 }
 
@@ -905,6 +1152,9 @@ func TestStepGuardStopGivesSignalsBack(t *testing.T) {
 	defer signal.Stop(keep)
 	g := newPlayGuard()
 	g.stop()
+	// Let the guard's goroutine end first, so it cannot take the signal off
+	// its channel and hide that the channel was still registered.
+	time.Sleep(100 * time.Millisecond)
 	syscall.Kill(os.Getpid(), syscall.SIGHUP)
 	<-keep
 	time.Sleep(100 * time.Millisecond)

@@ -273,9 +273,9 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 			}
 			return err
 		}
-		// The value is read back: macOS's security -i exits 0 even when its
-		// add failed, and another program may have written the same item at
-		// the same moment, so neither exit status proves the value is ours.
+		// The value is read back: another program may have written the
+		// same item at the same moment, so no exit status proves the value
+		// stored is the one given.
 		got, err := st.read(name)
 		defer clear(got)
 		var ue *unavailableError

@@ -17,7 +17,14 @@ import (
 )
 
 // A stub /usr/bin/security: items are files, its argv goes to a log, and
-// -i takes the add command on stdin as security does.
+// -i takes the add command on stdin as security does. STUB_LOCKED makes it
+// answer as the real one does for a Keychain locked where it cannot show
+// its unlock dialog (recorded over ssh localhost on GitHub's macos-15-arm64
+// and macos-26-arm64 images): the search without -w answers as usual;
+// find -w exits 36 with nothing on stderr; show-keychain-info and the add
+// exit 36 with the lines below. STUB_LOCKED=text prints the add's lines in
+// another language with exit 0, and STUB_LOCKED=exit prints nothing and
+// exits 36, so each sign is tried alone.
 func stubSecurity(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -32,12 +39,24 @@ case "$1" in
     [ -n "$STUB_EXIT" ] && exit "$STUB_EXIT"
     f="` + items + `/$5"
     [ -f "$f" ] || exit 44
-    if [ "$6" = "-w" ]; then cat "$f"; echo; fi
+    if [ "$6" = "-w" ]; then
+      [ -n "$STUB_LOCKED" ] && exit 36
+      cat "$f"; echo
+    fi
+    exit 0 ;;
+  show-keychain-info)
+    if [ -n "$STUB_LOCKED" ]; then echo "security: SecKeychainCopySettings <keychain>: User interaction is not allowed." >&2; exit 36; fi
+    [ -n "$STUB_INFO_EXIT" ] && exit "$STUB_INFO_EXIT"
     exit 0 ;;
   -i)
     read -r line
     printf '%s\n' "$line" >> "` + log + `.stdin"
-    if [ -n "$STUB_LOCKED" ]; then echo "SecKeychainItemCreateFromContent (<default>): Interaktion nicht erlaubt. (-25308)" >&2; exit 0; fi
+    case "$STUB_LOCKED" in
+      "") ;;
+      text) printf 'security: SecKeychainItemCreateFromContent (<keychain>): Interaktion mit dem Benutzer ist nicht erlaubt.\nadd-generic-password: returned -25308\n' >&2; exit 0 ;;
+      exit) exit 36 ;;
+      *) printf 'security: SecKeychainItemCreateFromContent (<keychain>): User interaction is not allowed.\nadd-generic-password: returned -25308\n' >&2; exit 36 ;;
+    esac
     set -- $line
     [ "$1" = add-generic-password ] && [ "$8" = -X ] || exit 1
     [ -f "` + items + `/$5" ] && exit 1
@@ -52,6 +71,7 @@ exit 2
 	}
 	t.Setenv("STUB_EXIT", "")
 	t.Setenv("STUB_LOCKED", "")
+	t.Setenv("STUB_INFO_EXIT", "")
 	t.Setenv("STUB_SLOW", "")
 	saved := securityPath
 	securityPath = path
@@ -128,20 +148,62 @@ func TestKeychainAddHasNoU(t *testing.T) {
 }
 
 // A Keychain that is locked where it cannot ask for its password: the add
-// fails with security's status -25308 on stderr (here in another language,
-// as macOS localises the text), which is kept in-process; the helper says
-// so plainly and exits 5.
+// fails as recorded (exit 36, the lines with -25308 on stderr), and each
+// sign alone is enough: the text in another language with exit 0, or exit
+// 36 with nothing printed. stderr is kept in-process; the store says the
+// Keychain is locked, that nothing was stored, and how to unlock it.
 func TestKeychainLockedWithoutUIIsExit5(t *testing.T) {
 	stubSecurity(t)
-	t.Setenv("STUB_LOCKED", "1")
 	st, _ := osDefaultSecretStore()
-	err := st.write("tok", []byte("Value-77"))
-	var ue *unavailableError
-	if !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") || strings.Contains(err.Error(), "Value-77") || strings.Contains(err.Error(), hex.EncodeToString([]byte("Value-77"))) {
-		t.Fatalf("a locked Keychain: %v", err)
+	for _, mode := range []string{"1", "text", "exit"} {
+		t.Setenv("STUB_LOCKED", mode)
+		err := st.write("tok", []byte("Value-77"))
+		var ue *unavailableError
+		if !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") || !strings.Contains(err.Error(), "nothing was stored") || !strings.Contains(err.Error(), "security unlock-keychain") || strings.Contains(err.Error(), "Value-77") || strings.Contains(err.Error(), hex.EncodeToString([]byte("Value-77"))) {
+			t.Fatalf("a locked Keychain (%s): %v", mode, err)
+		}
 	}
 	if st.maxValue() != 1536 {
 		t.Fatalf("maxValue %d", st.maxValue())
+	}
+}
+
+// The search answers on a locked Keychain as on an unlocked one, so a name
+// that is not there is followed by a question that carries no value
+// (show-keychain-info): where the Keychain cannot ask for its password,
+// the check says it is locked before anyone types a value. A name that is
+// there is found without that question, and reading it says locked too.
+func TestKeychainLockedIsFoundBeforeTheValue(t *testing.T) {
+	items, log := stubSecurity(t)
+	st, _ := osDefaultSecretStore()
+	if ok, err := st.exists("tok"); ok || err != nil {
+		t.Fatalf("unlocked, absent: %v %v", ok, err)
+	}
+	if !strings.Contains(readLog(t, log), "show-keychain-info") {
+		t.Fatal("an absent name was not followed by show-keychain-info")
+	}
+	t.Setenv("STUB_LOCKED", "1")
+	ok, err := st.exists("tok")
+	var ue *unavailableError
+	if ok || !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") || !strings.Contains(err.Error(), "security unlock-keychain") || strings.Contains(err.Error(), "nothing was stored") {
+		t.Fatalf("locked, absent: %v %v", ok, err)
+	}
+	os.WriteFile(filepath.Join(items, "tok"), []byte("v"), 0o600)
+	os.Remove(log)
+	if ok, err := st.exists("tok"); !ok || err != nil {
+		t.Fatalf("locked, present: %v %v", ok, err)
+	}
+	if strings.Contains(readLog(t, log), "show-keychain-info") {
+		t.Fatal("a present name asked show-keychain-info")
+	}
+	if v, err := st.read("tok"); v != nil || !errors.As(err, &ue) || !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("locked, read: %q %v", v, err)
+	}
+	t.Setenv("STUB_LOCKED", "")
+	t.Setenv("STUB_INFO_EXIT", "51")
+	os.Remove(filepath.Join(items, "tok"))
+	if ok, err := st.exists("tok"); ok || err == nil || !strings.Contains(err.Error(), "security unlock-keychain") {
+		t.Fatalf("show-keychain-info failing otherwise: %v %v", ok, err)
 	}
 }
 
@@ -231,5 +293,20 @@ func TestKeychainToolTimeout(t *testing.T) {
 	var ue *unavailableError
 	if ok || !errors.As(err, &ue) || time.Since(start) > 4*time.Second {
 		t.Fatalf("after %s: %v %v", time.Since(start), ok, err)
+	}
+}
+
+// A read security does not answer in time is a store that cannot answer,
+// to errors.As as well (a launch then exits 5).
+func TestKeychainReadTimeoutIsUnavailable(t *testing.T) {
+	stubSecurity(t)
+	saved := toolTimeout
+	toolTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { toolTimeout = saved })
+	t.Setenv("STUB_SLOW", "1")
+	_, err := keychainStore{}.read("tok")
+	var ue *unavailableError
+	if !errors.As(err, &ue) {
+		t.Fatalf("a read that timed out: %v", err)
 	}
 }

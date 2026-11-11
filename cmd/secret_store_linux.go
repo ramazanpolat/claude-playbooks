@@ -109,7 +109,10 @@ func (s secretServiceStore) exists(name string) (bool, error) {
 // helper), is scanned in place for an item line, with no copy made, and
 // is cleared.
 func (s secretServiceStore) lockedItem(name string) (bool, error) {
+	// One array, grown up front, so no earlier copy of the output is left
+	// behind uncleared as it grows.
 	var out bytes.Buffer
+	out.Grow(64 << 10)
 	err := s.run(name, nil, &out, io.Discard, "search", "service", "cpb", "name", name)
 	defer func() { b := out.Bytes(); clear(b[:cap(b)]) }()
 	if err != nil {

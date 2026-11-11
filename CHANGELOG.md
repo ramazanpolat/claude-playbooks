@@ -15,7 +15,9 @@
   fix, and a store that cannot answer (on Linux, `secret-tool` with no
   keyring daemon or no session bus, or a locked keyring; on macOS, a
   Keychain locked where it cannot show its unlock dialog) exits 5 with the
-  reason, never "not stored". Values are capped at what each store keeps
+  reason, never "not stored"; the locked Keychain is found by `--check`,
+  before any value is asked for, with `security show-keychain-info`, which
+  carries none. Values are capped at what each store keeps
   whole, 1536 bytes in the Keychain and 4096 in the Secret Service, since
   their tools cut a longer value short without saying so. Each tool call is
   bounded to 60 seconds and the per-name lock to 30. `<name>` is a lowercase
@@ -32,12 +34,16 @@
   helper). Entries that differ, or a line typed with a key that sends an
   escape sequence or any other control key, or longer than the store keeps,
   store nothing and are asked for again, three attempts in all; Backspace
-  removes whole characters, and a bracketed paste is taken. After every read
-  the terminal's pending input is discarded while echo is still off, until
-  the terminal is quiet, so a paste of any length is neither shown nor
-  reaches the next prompt or the shell; the step guards itself against
-  signals on every path, and stops after a helper call a signal arrived
-  during. A reference used twice is asked for once. It never
+  removes whole characters. The read turns the terminal's bracketed paste
+  on, so a paste is read to its end marker whatever its gaps, and a paste of
+  more than one line is refused. After every read the terminal's waiting
+  input is discarded while echo is still off, until nothing has come for
+  300 ms, so what was typed or pasted past the line is neither shown nor
+  reaches the next prompt or the shell (on a terminal without bracketed
+  paste, a paste that pauses for longer than that is the case left);
+  input that keeps arriving for 10 seconds stops the step. The step guards
+  itself against signals on every path, stops after a helper call a
+  signal arrived during, and then says whether the value was stored. A reference used twice is asked for once. It never
   runs with `--yes`, with `--trust-secret` for that reference, without a
   terminal, or when an agent's session is in the environment (a courtesy
   check, not a boundary). `^C`, an empty answer, a closed terminal, a signal
