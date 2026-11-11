@@ -17,6 +17,24 @@
   newest, it writes nothing and says so in one stderr line. The copy of a
   playbook's login over the machine store, on the sync and before a token
   launch, follows the same rule. The Keychain is only read.
+- **The shared login store is kept owner-only without a rewrite.** A sync
+  that finds `~/.claude/.credentials.json` open to group or others makes it
+  `0600` in place, on every OS: only the mode changes, never the bytes, the
+  file or its time, and a store already owner-only is not touched. Until
+  the change above, macOS got that mode from the rewrite at every sync, and
+  Linux never had it repaired.
+- **A shared store that does not parse comes with what to do.** It is still
+  left as it is, and the warning now says to remove it: the next sync then
+  writes the Keychain value there, or, with no Keychain login, a login with
+  `claude` outside any playbook writes a new one.
+- **The cmd tests can no longer read a real Keychain item.** They stubbed
+  the Keychain presence probe but not the secret lookup, so on macOS a sync
+  a test ran could call `security find-generic-password -w` and copy the
+  machine's login into the test's temporary HOME. A test-only hook in
+  `internal/auth` now replaces that lookup in the cmd tests' `TestMain`,
+  and a guard test fails when it is not in place. A direct test also covers
+  the link step when two logins of the same account cannot be ordered: both
+  files stay as they are and nothing is linked.
 
 ## [v4.6.0] -- 2026-11-10
 
