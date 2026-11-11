@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,6 +26,18 @@ type memStore struct {
 	other  []byte
 	// unavailable makes exists fail, as a store that cannot be reached.
 	unavailable bool
+	// max is maxValue (0: maxSecretBytes).
+	max int
+	// onExists and onWrite run first in exists and write (a test checks
+	// the lock there).
+	onExists, onWrite func(name string)
+}
+
+func (m *memStore) maxValue() int {
+	if m.max > 0 {
+		return m.max
+	}
+	return maxSecretBytes
 }
 
 func (m *memStore) where(name string) string { return "the test store, as " + name }
@@ -30,6 +45,9 @@ func (m *memStore) target(name string) (string, string) {
 	return storeFile, "/test-store/" + name
 }
 func (m *memStore) exists(name string) (bool, error) {
+	if m.onExists != nil {
+		m.onExists(name)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.unavailable {
@@ -48,6 +66,9 @@ func (m *memStore) read(name string) ([]byte, error) {
 	return append([]byte{}, v...), nil
 }
 func (m *memStore) write(name string, value []byte) error {
+	if m.onWrite != nil {
+		m.onWrite(name)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.writes++
@@ -263,4 +284,119 @@ func TestDefaultHelperUnavailableStoreIsNotNotStored(t *testing.T) {
 	if m.writes != 0 {
 		t.Fatalf("%d writes to an unavailable store", m.writes)
 	}
+}
+
+// A store keeps only so many bytes whole: a longer value is refused before
+// the lock and the write, naming the limit, and a value at the limit is
+// stored.
+func TestDefaultHelperRefusesAValueOverTheStoresLimit(t *testing.T) {
+	m := useMemStore(t)
+	m.max = 8
+	err := runSecretHelper([]string{"--store", "cpb:long"}, strings.NewReader("123456789"))
+	if err == nil || !strings.Contains(err.Error(), "at most 8 bytes") || m.writes != 0 {
+		t.Fatalf("a value over the limit: %v, %d writes", err, m.writes)
+	}
+	if err := runSecretHelper([]string{"--store", "cpb:fits"}, strings.NewReader("12345678")); err != nil || m.writes != 1 {
+		t.Fatalf("a value at the limit: %v, %d writes", err, m.writes)
+	}
+}
+
+// lockFileHeld reports whether the lock file of name is held, by trying to
+// take it without waiting.
+func lockFileHeld(t *testing.T, name string) bool {
+	t.Helper()
+	dir, err := secretLockDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, name+".lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return true
+	}
+	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false
+}
+
+// The existence check and the write both happen under the name's lock.
+func TestDefaultHelperHoldsTheLockAcrossCheckAndWrite(t *testing.T) {
+	m := useMemStore(t)
+	var atCheck, atWrite bool
+	m.onExists = func(name string) { atCheck = lockFileHeld(t, name) }
+	m.onWrite = func(name string) { atWrite = lockFileHeld(t, name) }
+	if err := runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-1")); err != nil {
+		t.Fatal(err)
+	}
+	if !atCheck || !atWrite {
+		t.Fatalf("lock held at the check: %v, at the write: %v", atCheck, atWrite)
+	}
+	if lockFileHeld(t, "tok") {
+		t.Fatal("the lock outlived the store")
+	}
+}
+
+// A lock that stays taken is waited on for lockTimeout, then the store is
+// one that cannot answer (exit 5), and the message names the locked name
+// and nothing else.
+func TestDefaultHelperLockTimeout(t *testing.T) {
+	m := useMemStore(t)
+	saved := lockTimeout
+	lockTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { lockTimeout = saved })
+	dir, _ := secretLockDir()
+	os.MkdirAll(dir, 0o700)
+	f, err := os.OpenFile(filepath.Join(dir, "tok.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	var herr error
+	start := time.Now()
+	out := captureStderr(t, func() {
+		done := make(chan error, 1)
+		go func() { done <- runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("Value-77")) }()
+		select {
+		case herr = <-done:
+		case <-time.After(5 * time.Second):
+			herr = errors.New("still waiting on the lock after 5 s")
+		}
+	})
+	if code, ok := exitCode(herr); !ok || code != unavailableExit || time.Since(start) > 4*time.Second {
+		t.Fatalf("a held lock, after %s: %v", time.Since(start), herr)
+	}
+	if !strings.Contains(out, "cpb:tok") || strings.Contains(out, "Value-77") || strings.Contains(out, dir) || m.writes != 0 {
+		t.Fatalf("the message: %q, %d writes", out, m.writes)
+	}
+}
+
+// A write the store could not answer (a locked store, a tool that did not
+// answer) is exit 5; a write it refused is not.
+func TestDefaultHelperUnavailableWriteIsExit5(t *testing.T) {
+	m := useMemStore(t)
+	m.fail = true
+	err := runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-1"))
+	if code, ok := exitCode(err); err == nil || (ok && code == unavailableExit) {
+		t.Fatalf("a refused write: %v", err)
+	}
+	m.fail = false
+	lw := &lockedWriteStore{memStore: m}
+	defaultSecretStore = func() (osSecretStore, error) { return lw, nil }
+	var herr error
+	out := captureStderr(t, func() { herr = runSecretHelper([]string{"--store", "cpb:tok2"}, strings.NewReader("v-1")) })
+	if code, ok := exitCode(herr); !ok || code != unavailableExit || !strings.Contains(out, "locked") {
+		t.Fatalf("a locked store's write: %v %q", herr, out)
+	}
+}
+
+// lockedWriteStore is a memStore whose writes find the store locked.
+type lockedWriteStore struct{ *memStore }
+
+func (l *lockedWriteStore) write(string, []byte) error {
+	return unavailable("the test store is locked; nothing was stored")
 }

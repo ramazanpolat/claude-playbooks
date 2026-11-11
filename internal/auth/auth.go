@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -36,9 +36,16 @@ func SyncCredentials(targetDir string) error {
 	if isAuthIsolated(targetDir) {
 		return detachSharedCredentials(targetDir)
 	}
-	globalCreds, err := EnsureGlobalCredentials()
+	globalCreds, leave, err := syncMachineStore(targetDir)
 	if err != nil {
 		return err
+	}
+	if leave {
+		// The newest login could not be told (a notice said so). Nothing is
+		// linked and no account metadata is seeded either: seeded, the
+		// machine's account would let a login the playbook holds pass for
+		// the machine's own at the next sync, unjudged.
+		return nil
 	}
 	if globalCreds == "" {
 		return SyncAccountMetadata(targetDir)
@@ -50,45 +57,280 @@ func SyncCredentials(targetDir string) error {
 }
 
 // EnsureGlobalCredentials returns the usable global Claude credentials file.
-// On macOS, it also tries to materialize the file from the default Keychain item
-// when the file is missing.
+// On macOS it also writes the machine's Keychain item into that file when the
+// item holds a newer login than the file, or the file is missing (see
+// syncMachineStore).
 func EnsureGlobalCredentials() (string, error) {
+	path, _, err := syncMachineStore("")
+	return path, err
+}
+
+// syncMachineStore brings the machine store (~/.claude/.credentials.json) to
+// the newest login among its candidates: on macOS the machine's Keychain item,
+// the store itself, and, when targetDir is a shared playbook of the machine's
+// own account, the file a refresh or /login left in its place
+// (sharedOwnLogin). It decides before it writes: the candidate whose grant
+// expires last wins (newestLogin), and is written only when its bytes differ,
+// through a temporary file renamed over the store (replaceFile). The Keychain
+// is only ever read. When no candidate can be told to be the newest, nothing
+// is written and one notice says which sources and why (and, when the
+// machine store does not parse, what to do about it); leave then tells the
+// caller to leave the playbook as it is too, when its own file was among
+// them or the machine store holds no usable value to link. globalCreds is ""
+// when the machine store holds no usable value. Whatever is decided, a
+// machine store open to group or others is made owner-only in place
+// (repairStoreMode).
+func syncMachineStore(targetDir string) (globalCreds string, leave bool, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	globalClaude := filepath.Join(home, ".claude")
-	globalCreds := StorePath(globalClaude)
+	globalCreds = StorePath(globalClaude)
 
-	if runtime.GOOS == "darwin" {
-		out, err := keychainSecret("Claude Code-credentials")
+	var cands []loginValue
+	fromKeychain := false
+	if hostOS == "darwin" {
+		out, kerr := keychainSecret(machineKeychainService)
 		out = bytes.TrimSpace(out)
-		if err == nil && len(out) > 0 {
+		if kerr == nil && len(out) > 0 {
 			if !json.Valid(out) {
-				return "", fmt.Errorf("Keychain item Claude Code-credentials did not contain valid JSON credentials")
+				return "", false, fmt.Errorf("Keychain item %s did not contain valid JSON credentials", machineKeychainService)
 			}
-			if err := os.MkdirAll(globalClaude, 0755); err != nil {
-				return "", err
-			}
-			if err := os.WriteFile(globalCreds, out, 0600); err != nil {
-				return "", err
-			}
-			if err := os.Chmod(globalCreds, 0600); err != nil {
-				return "", err
-			}
-			return globalCreds, nil
+			fromKeychain = true
+			cands = append(cands, loginValue{source: "the Keychain item " + machineKeychainService, data: out})
 		}
 	}
+	current, err := os.ReadFile(globalCreds)
+	if err != nil && !os.IsNotExist(err) {
+		return "", false, err
+	}
+	if err == nil {
+		repairStoreMode(globalCreds)
+	}
+	current = bytes.TrimSpace(current)
+	if len(current) > 0 {
+		cands = append(cands, loginValue{source: globalCreds, data: current})
+	}
+	withOwn := false
+	if len(cands) > 0 && targetDir != "" {
+		if own := sharedOwnLogin(targetDir, globalCreds); own != nil {
+			withOwn = true
+			cands = append(cands, loginValue{source: StorePath(targetDir), data: own})
+		}
+	}
+	if len(cands) == 0 {
+		return "", false, nil
+	}
 
-	usable, err := credentialsFileUsable(globalCreds)
+	win, why := newestLogin(cands)
+	if win < 0 {
+		if len(current) > 0 && !json.Valid(current) {
+			why += "; " + unparsedStoreAdvice(globalCreds, fromKeychain, withOwn)
+		}
+		Notice(why)
+		if !json.Valid(current) {
+			return "", true, nil
+		}
+		return globalCreds, withOwn, nil
+	}
+	value := cands[win].data
+	if !json.Valid(value) {
+		// The machine store is the only value there is, and it does not parse.
+		return "", false, fmt.Errorf("invalid JSON")
+	}
+	if !bytes.Equal(value, current) {
+		if err := os.MkdirAll(globalClaude, 0755); err != nil {
+			return "", false, err
+		}
+		if _, err := replaceFile(globalCreds, value, 0600); err != nil {
+			return "", false, err
+		}
+	}
+	return globalCreds, false, nil
+}
+
+// sharedOwnLogin returns the login a shared playbook holds in a file of its
+// own, trimmed, when it is a candidate for the machine store: a regular file,
+// not the machine store itself, that parses and carries an account grant of
+// the machine's own account. nil otherwise; LinkCredentials then deals with
+// it as before (another account's login is set aside, an unusable file is an
+// error).
+func sharedOwnLogin(targetDir, globalCreds string) []byte {
+	if sameDir(targetDir, filepath.Dir(globalCreds)) {
+		return nil
+	}
+	store := StorePath(targetDir)
+	info, err := os.Lstat(store)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	if gi, err := os.Stat(globalCreds); err == nil && os.SameFile(info, gi) {
+		return nil
+	}
+	if usable, err := credentialsFileUsable(store); err != nil || !usable || !storeHasOAuthGrant(store) {
+		return nil
+	}
+	if !sameAccount(targetDir) {
+		return nil
+	}
+	data, err := os.ReadFile(store)
 	if err != nil {
-		return "", err
+		return nil
 	}
-	if usable {
-		return globalCreds, nil
-	}
+	return bytes.TrimSpace(data)
+}
 
-	return "", nil
+// chmodFile is os.Chmod; tests count its calls.
+var chmodFile = os.Chmod
+
+// repairStoreMode makes the login store at path owner-only (0600) when its
+// mode grants group or others any permission. Only the mode changes: the
+// bytes, the file and its time stay, so a reader holding the file is not
+// disturbed and nothing is written when the value is the same. A store that
+// is already owner-only is not touched at all. When the mode cannot be
+// changed, one notice says so and the sync goes on, since the store reads
+// as it did before.
+func repairStoreMode(path string) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	perm := info.Mode().Perm()
+	if perm&0o077 == 0 {
+		return
+	}
+	if err := chmodFile(path, 0o600); err != nil {
+		Notice(fmt.Sprintf("%s is open to group or others (mode %04o) and could not be made 0600: %v", path, perm, err))
+	}
+}
+
+// unparsedStoreAdvice is what to do about a machine store that does not
+// parse, which sync leaves as it is: remove it, and what writes it again
+// then. It names the file, never a value.
+func unparsedStoreAdvice(store string, fromKeychain, withOwn bool) string {
+	then := "log in with claude outside any playbook to write a new one"
+	switch {
+	case fromKeychain && withOwn:
+		then = "the next sync writes the newest of the Keychain value and this playbook's login there"
+	case fromKeychain:
+		then = "the next sync writes the Keychain value there"
+	}
+	return store + " does not parse: remove it, and " + then
+}
+
+// loginValue is one candidate value for the machine store: where it comes
+// from, and its bytes, trimmed. Nothing but the grant's expiry is ever read
+// out of it, and only the source is ever printed.
+type loginValue struct {
+	source string
+	data   []byte
+}
+
+// newestLogin returns the index of the candidate holding the newest login,
+// or -1 and a one-line reason when that cannot be told. Identical values are
+// one value, and a single value is the newest. Of values that differ, the
+// newest is the one whose grant expires last (claudeAiOauth.expiresAt): a
+// refresh or a /login issues a grant that expires later. A value with no
+// readable expiry, or two differing values with the same expiry, cannot be
+// ordered, and then none is the newest. File times are never consulted: a
+// rewrite of an unchanged or older value moves them too.
+func newestLogin(cands []loginValue) (int, string) {
+	var distinct []int
+	for i, c := range cands {
+		if len(c.data) == 0 {
+			continue
+		}
+		dup := false
+		for _, j := range distinct {
+			if bytes.Equal(cands[j].data, c.data) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			distinct = append(distinct, i)
+		}
+	}
+	switch len(distinct) {
+	case 0:
+		return -1, ""
+	case 1:
+		return distinct[0], ""
+	}
+	names := make([]string, len(distinct))
+	for k, i := range distinct {
+		names[k] = cands[i].source
+	}
+	undecided := func(reason string) (int, string) {
+		return -1, fmt.Sprintf("cannot tell which login is newest (%s): %s; wrote nothing and left them as they are",
+			strings.Join(names, ", "), reason)
+	}
+	best, tie := -1, -1
+	var bestExp int64
+	for _, i := range distinct {
+		exp, ok := grantExpiry(cands[i].data)
+		if !ok {
+			what := " has no grant expiry"
+			if !json.Valid(cands[i].data) {
+				what = " does not parse"
+			}
+			return undecided(cands[i].source + what)
+		}
+		switch {
+		case best < 0 || exp > bestExp:
+			best, bestExp, tie = i, exp, -1
+		case exp == bestExp:
+			tie = i
+		}
+	}
+	if tie >= 0 {
+		return undecided(cands[best].source + " and " + cands[tie].source + " differ but their grants expire at the same time")
+	}
+	return best, ""
+}
+
+// grantExpiry is claudeAiOauth.expiresAt (epoch milliseconds) in a store's
+// bytes; ok is false when they do not parse, hold no grant, or the grant has
+// no positive integer expiry.
+func grantExpiry(data []byte) (int64, bool) {
+	var store struct {
+		Grant *struct {
+			ExpiresAt json.Number `json:"expiresAt"`
+		} `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal(data, &store) != nil || store.Grant == nil {
+		return 0, false
+	}
+	exp, err := store.Grant.ExpiresAt.Int64()
+	if err != nil || exp <= 0 {
+		return 0, false
+	}
+	return exp, true
+}
+
+// ownLoginNewer orders a playbook's own login at own against the machine
+// store at machine (newestLogin): newer is true when own holds the newer
+// login, decided is false when the two cannot be ordered, and why then says
+// so. An absent or empty machine store holds no login, so own is newer.
+func ownLoginNewer(own, machine string) (newer, decided bool, why string, err error) {
+	ownData, err := os.ReadFile(own)
+	if err != nil {
+		return false, false, "", err
+	}
+	machineData, err := os.ReadFile(machine)
+	if err != nil && !os.IsNotExist(err) {
+		return false, false, "", err
+	}
+	cands := []loginValue{
+		{source: machine, data: bytes.TrimSpace(machineData)},
+		{source: own, data: bytes.TrimSpace(ownData)},
+	}
+	win, why := newestLogin(cands)
+	if win < 0 {
+		return false, false, why, nil
+	}
+	return win == 1, true, "", nil
 }
 
 // LinkCredentials points targetDir/.credentials.json at sourceCreds. Existing
@@ -176,7 +418,7 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 					// machine's store; any other login, or one that cannot be
 					// told apart, is set aside
 					// (CHANGELOG.md, v3.23.1).
-					sourceInfo, err := os.Stat(sourceAbs)
+					_, err := os.Stat(sourceAbs)
 					switch {
 					case os.IsNotExist(err):
 						// No machine login to replace: this one becomes it.
@@ -186,13 +428,24 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 					case err != nil:
 						return err
 					case sameAccount(targetDir):
-						if targetLinfo.ModTime().After(sourceInfo.ModTime()) {
+						// Only a newer login goes over the machine's; an older
+						// one, or the same one, gives way to the link below.
+						// Two that cannot be ordered are both left as they are.
+						newer, decided, why, err := ownLoginNewer(targetCreds, sourceAbs)
+						if err != nil {
+							return err
+						}
+						if !decided {
+							Notice(why)
+							return nil
+						}
+						if newer {
 							if err := copyFile(targetCreds, sourceAbs, 0600); err != nil {
 								return fmt.Errorf("failed to copy newer credentials to global: %w", err)
 							}
 						}
 					default:
-						if err := setAsideOwnLogin(targetDir, "linked the machine's login", false); err != nil {
+						if err := setAsideOwnLogin(targetDir, "linked the machine's login", false, ""); err != nil {
 							return err
 						}
 						return os.Symlink(sourceAbs, targetCreds)
@@ -243,15 +496,61 @@ func isAuthIsolated(targetDir string) bool {
 	return m.IsolatedLogin
 }
 
+// copyFile copies src over dst with replaceFile: never in place, and not at
+// all when dst already holds the same bytes.
 func copyFile(src, dst string, perm os.FileMode) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(dst, data, perm); err != nil {
-		return err
+	_, err = replaceFile(dst, data, perm)
+	return err
+}
+
+// replaceFile puts data at path unless the file there already holds exactly
+// those bytes (then nothing is written and its times do not move). A write
+// goes through writeFileAtomic, so a reader sees the old file or the new one,
+// never an empty or partial one. Like os.WriteFile it writes through a
+// symlink at path: the file the link resolves to is replaced, and the link
+// stays.
+func replaceFile(path string, data []byte, perm os.FileMode) (bool, error) {
+	dest, err := linkDestination(path)
+	if err != nil {
+		return false, err
 	}
-	return os.Chmod(dst, perm)
+	if cur, err := os.ReadFile(dest); err == nil && bytes.Equal(cur, data) {
+		return false, nil
+	}
+	if err := writeFileAtomic(dest, data, perm); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// linkDestination follows the symlinks at path, as a write through it would,
+// to the file it names, which need not exist yet.
+func linkDestination(path string) (string, error) {
+	cur := path
+	for hops := 0; hops < 40; hops++ {
+		info, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return cur, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return cur, nil
+		}
+		target, err := os.Readlink(cur)
+		if err != nil {
+			return "", err
+		}
+		if cur, err = resolveLinkTarget(cur, target); err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("too many levels of symbolic links at %s", path)
 }
 
 // SyncAccountMetadata copies Claude Code's non-token account metadata into the

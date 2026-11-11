@@ -76,7 +76,7 @@ func playRefs(res *play.Result) []string {
 			refs = append(refs, r.Confirm)
 		}
 	}
-	return refs
+	return uniqueRefs(refs)
 }
 
 func keepSandboxNote(sandboxed bool, res *play.Result) string {

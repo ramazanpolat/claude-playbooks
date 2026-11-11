@@ -23,6 +23,11 @@ import (
 // copy, reset, drop) reaches this directory, which is outside every
 // playbooks root.
 
+// fileStoreMaxValue is the longest value the file store keeps: the Secret
+// Service's limit, so a value fits whichever Linux store takes it, and the
+// store step reads no longer a line for either.
+const fileStoreMaxValue = 4096
+
 // secretsDir is the file store's directory. A relative XDG_DATA_HOME is
 // ignored, as the XDG rules say.
 func secretsDir() (string, error) {
@@ -131,8 +136,8 @@ func (f fileStore) read(name string) ([]byte, error) {
 	if err := ownedPrivate(p, info, false); err != nil {
 		return nil, err
 	}
-	v, err := io.ReadAll(io.LimitReader(fh, maxSecretBytes+1))
-	if err != nil || len(v) > maxSecretBytes {
+	v, err := io.ReadAll(io.LimitReader(fh, fileStoreMaxValue+1))
+	if err != nil || len(v) > fileStoreMaxValue {
 		clear(v)
 		return nil, fmt.Errorf("cpb:%s could not be read from the file store", name)
 	}
@@ -145,6 +150,9 @@ func (f fileStore) read(name string) ([]byte, error) {
 func (f fileStore) write(name string, value []byte) error {
 	if err := safeSecretFileName(name); err != nil {
 		return err
+	}
+	if len(value) > fileStoreMaxValue {
+		return fmt.Errorf("the value is %d bytes, and the file store keeps at most %d; nothing was stored", len(value), fileStoreMaxValue)
 	}
 	if err := os.MkdirAll(f.dir, 0o700); err != nil {
 		return fmt.Errorf("the file store %s could not be made (%v); nothing was stored", f.dir, err)

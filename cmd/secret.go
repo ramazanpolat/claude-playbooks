@@ -188,10 +188,7 @@ func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 		if refsPendingStore[v.Ref] {
 			continue
 		}
-		c := x.command("--check", v.Key+"="+v.Ref)
-		c.Env = env
-		c.Stdout, c.Stderr = os.Stderr, os.Stderr
-		if err := c.Run(); err != nil {
+		if err := runHelper(x, nil, os.Stderr, os.Stderr, env, "--check", v.Key+"="+v.Ref); err != nil {
 			return fmt.Errorf("secret helper %s could not resolve the reference for %s (%v); nothing was written", x.name, v.Key, err)
 		}
 	}

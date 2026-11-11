@@ -4,11 +4,14 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 )
 
 // The Linux store: the Secret Service (GNOME Keyring, KWallet and others)
@@ -21,6 +24,11 @@ import (
 
 // lookSecretTool finds secret-tool (a test replaces it with a stub).
 var lookSecretTool = func() (string, error) { return exec.LookPath("secret-tool") }
+
+// secretServiceMaxValue is the longest value kept whole: secret-tool store
+// keeps the first 8192 bytes of its stdin and drops the rest, exiting 0
+// (libsecret 0.21, measured), so the helper refuses longer values first.
+const secretServiceMaxValue = 4096
 
 type secretServiceStore struct{ tool string }
 
@@ -43,26 +51,62 @@ func osDefaultSecretStore() (osSecretStore, error) {
 	return st, nil
 }
 
-// keyring reports whether the Secret Service can answer about name, and
-// whether it holds it. Its lookup's output goes to the null device, so no
-// value passes through this process.
-func (s linuxStore) keyring(name string) (reachable, found bool) {
+// keyringState is what the Secret Service says about a name.
+type keyringState int
+
+const (
+	keyringUnreachable keyringState = iota // no secret-tool, or no Secret Service answers
+	keyringAbsent                          // it answers, and holds no such item
+	keyringFound                           // it holds the item, unlocked
+	keyringLocked                          // it holds the item in a locked collection
+)
+
+// keyring asks the Secret Service about name. With deep, a missing answer
+// is checked with search, which tells a locked item from a missing one but
+// prints the values of unlocked matches: only the helper's own process
+// asks deep. Without it (target and where, which cpb's own process calls)
+// only lookup runs, its output going to the null device, so no value
+// passes through that process; a locked item then reads as absent.
+//
+// Only a definite "no Secret Service" (lookup's own error) is
+// keyringUnreachable with no error, and lets the file store answer. A
+// tool that did not answer in time (an unlock prompt nobody answered,
+// say) is an error: the store cannot answer, and the value goes nowhere.
+func (s linuxStore) keyring(name string, deep bool) (keyringState, error) {
 	if s.ss == nil {
-		return false, false
+		return keyringUnreachable, nil
 	}
-	found, err := s.ss.exists(name)
-	return err == nil, found
+	found, err := s.ss.lookup(name)
+	var ue *unavailableError
+	switch {
+	case errors.As(err, &ue):
+		return keyringUnreachable, err
+	case err != nil:
+		return keyringUnreachable, nil
+	case found:
+		return keyringFound, nil
+	case !deep:
+		return keyringAbsent, nil
+	}
+	locked, err := s.ss.lockedItem(name)
+	switch {
+	case err != nil:
+		return keyringUnreachable, err
+	case locked:
+		return keyringLocked, nil
+	}
+	return keyringAbsent, nil
 }
 
 // target is where name's value is kept, or would be kept when it is not
 // stored yet: the keyring when it holds it, the file when that does, else
 // the keyring when it can answer, else the file store and the file's path.
 func (s linuxStore) target(name string) (string, string) {
-	reachable, found := s.keyring(name)
-	if found {
+	k, _ := s.keyring(name, false)
+	if k == keyringFound {
 		return storeSecretService, ""
 	}
-	if inFile, err := s.file.exists(name); (err == nil && inFile) || !reachable {
+	if inFile, err := s.file.exists(name); (err == nil && inFile) || k == keyringUnreachable {
 		return storeFile, s.file.path(name)
 	}
 	return storeSecretService, ""
@@ -70,27 +114,44 @@ func (s linuxStore) target(name string) (string, string) {
 
 func (s linuxStore) where(name string) string {
 	kind, path := s.target(name)
-	reachable, _ := s.keyring(name)
 	switch {
 	case kind == storeSecretService:
 		return "your Secret Service keyring, as the item \"cpb " + name + "\" (service cpb, name " + name + ")"
 	case s.ss == nil:
 		return "the file " + path + ", readable by you (and root), since this machine has no keyring: secret-tool is not installed (installing it and a keyring such as GNOME Keyring or KWallet would keep it there instead)"
-	case !reachable:
+	case s.unreachable(name):
 		return "the file " + path + ", readable by you (and root), since no keyring can be reached on this machine (a keyring such as GNOME Keyring or KWallet running in your session would keep it there instead)"
 	default:
 		return "the file " + path + ", readable by you (and root)"
 	}
 }
 
+// unreachable reports a definite "no Secret Service" for where's wording.
+func (s linuxStore) unreachable(name string) bool {
+	k, err := s.keyring(name, false)
+	return k == keyringUnreachable && err == nil
+}
+
+// maxValue is the Secret Service's limit, which the file store keeps too,
+// so a value fits whichever store takes it.
+func (s linuxStore) maxValue() int { return min(secretServiceMaxValue, fileStoreMaxValue) }
+
 // exists looks in the Secret Service when it can answer, then in the file.
 // A name in both is the keyring's, and one stderr line says where the file
-// copy is. An error means the file store could not be trusted (its mode,
-// owner or a link) while the keyring did not hold the name.
+// copy is. A name in a locked keyring is a store that cannot answer, never
+// "not stored", so --store never writes over it, in the keyring or beside
+// it in the file. Another error means the file store could not be trusted
+// (its mode, owner or a link) while the keyring did not hold the name.
 func (s linuxStore) exists(name string) (bool, error) {
-	_, inKeyring := s.keyring(name)
+	k, err := s.keyring(name, true)
+	if err != nil {
+		return false, err
+	}
+	if k == keyringLocked {
+		return false, fmt.Errorf("cpb:%s is in your Secret Service keyring, which is locked: unlock the keyring (log in to your desktop session, or unlock it in your keyring's tool), then run this again", name)
+	}
 	inFile, ferr := s.file.exists(name)
-	if inKeyring {
+	if k == keyringFound {
 		if ferr == nil && inFile {
 			fmt.Fprintf(os.Stderr, "cpb:%s is also kept in the file %s; the keyring's value is the one used\n", name, s.file.path(name))
 		}
@@ -103,19 +164,50 @@ func (s linuxStore) exists(name string) (bool, error) {
 }
 
 func (s linuxStore) read(name string) ([]byte, error) {
-	if _, found := s.keyring(name); found {
+	k, err := s.keyring(name, false)
+	if err != nil {
+		return nil, err
+	}
+	if k == keyringFound {
 		return s.ss.read(name)
 	}
 	return s.file.read(name)
 }
 
 // write goes to the Secret Service when it can answer, else to the file
-// store; neither replaces a stored value.
+// store; neither replaces a stored value, and a locked keyring item is
+// never written over or beside.
 func (s linuxStore) write(name string, value []byte) error {
-	if reachable, _ := s.keyring(name); reachable {
-		return s.ss.write(name, value)
+	k, err := s.keyring(name, true)
+	if err != nil {
+		return err
 	}
-	return s.file.write(name, value)
+	switch k {
+	case keyringAbsent:
+		return s.ss.write(name, value)
+	case keyringUnreachable:
+		return s.file.write(name, value)
+	}
+	return fmt.Errorf("cpb:%s is in your Secret Service keyring already; nothing was stored", name)
+}
+
+func (s secretServiceStore) maxValue() int { return secretServiceMaxValue }
+
+// run runs secret-tool with args, bounded by toolTimeout; a run that does
+// not end in time is killed and reported as a store that cannot answer.
+func (s secretServiceStore) run(name string, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), toolTimeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, s.tool, args...)
+	c.Stdin, c.Stdout, c.Stderr = stdin, stdout, stderr
+	// A child the tool left behind may hold its output open: Run returns
+	// a second after the kill all the same.
+	c.WaitDelay = time.Second
+	err := c.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return unavailable("secret-tool did not answer within %s about cpb %s", toolTimeout, name)
+	}
+	return err
 }
 
 // exists asks lookup, whose exit status is 1 both when the item is not
@@ -126,26 +218,73 @@ func (s linuxStore) write(name string, value []byte) error {
 // not provided by any .service files", "Cannot autolaunch D-Bus without
 // X11 $DISPLAY"). A store that cannot be reached is an error (the helper
 // then exits unavailableExit), never "not stored".
+//
+// A locked collection answers lookup the same way as a missing item, also
+// when its unlock prompt was dismissed; secret-tool store would then
+// replace the item once the collection is unlocked. So a missing answer is
+// checked with search, which lists a locked item's path without unlocking
+// it, and a locked item is a store that cannot answer, never "not stored".
 func (s secretServiceStore) exists(name string) (bool, error) {
-	// lookup prints the value on stdout: it goes to the null device (a nil
-	// Stdout), never through this process. Its stderr holds only its own
-	// errors, never a value.
+	found, err := s.lookup(name)
+	if err != nil || found {
+		return found, err
+	}
+	locked, err := s.lockedItem(name)
+	if err != nil {
+		return false, err
+	}
+	if locked {
+		return false, fmt.Errorf("cpb:%s is in your Secret Service keyring, which is locked: unlock the keyring (log in to your desktop session, or unlock it in your keyring's tool), then run this again", name)
+	}
+	return false, nil
+}
+
+// lookup is exists without the locked check: found, missing (or locked),
+// or an error when no Secret Service answers. lookup prints the value on
+// stdout: it goes to the null device (a nil Stdout), never through this
+// process. Its stderr holds only its own errors, never a value.
+func (s secretServiceStore) lookup(name string) (bool, error) {
 	var errb bytes.Buffer
-	c := exec.Command(s.tool, "lookup", "service", "cpb", "name", name)
-	c.Stdout, c.Stderr = nil, &errb
-	err := c.Run()
+	err := s.run(name, nil, nil, &errb, "lookup", "service", "cpb", "name", name)
 	if err == nil {
 		return true, nil
 	}
+	var ue *unavailableError
+	if errors.As(err, &ue) {
+		return false, err
+	}
 	why := toolError(errb.Bytes())
 	var ee *exec.ExitError
-	if errors.As(err, &ee) && ee.ExitCode() == 1 && why == "" {
-		return false, nil
+	if !errors.As(err, &ee) || ee.ExitCode() != 1 || why != "" {
+		if why == "" {
+			why = err.Error()
+		}
+		return false, fmt.Errorf("no Secret Service can be reached on this machine (secret-tool: %s), so cpb:%s cannot be checked or stored here; run a keyring such as GNOME Keyring or KWallet in this session, or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", why, name)
 	}
-	if why == "" {
-		why = err.Error()
+	return false, nil
+}
+
+// lockedItem reports whether search lists an item for name: it lists a
+// locked item's path and attributes without unlocking it, and for an
+// unlocked one also its value. The output stays in this process (the
+// helper), is scanned for an item line, and is cleared.
+func (s secretServiceStore) lockedItem(name string) (bool, error) {
+	var out bytes.Buffer
+	err := s.run(name, nil, &out, io.Discard, "search", "service", "cpb", "name", name)
+	defer clear(out.Bytes())
+	if err != nil {
+		var ue *unavailableError
+		if errors.As(err, &ue) {
+			return false, err
+		}
+		return false, fmt.Errorf("secret-tool could not search the keyring for cpb %s (%v); nothing was stored", name, err)
 	}
-	return false, fmt.Errorf("no Secret Service can be reached on this machine (secret-tool: %s), so cpb:%s cannot be checked or stored here; run a keyring such as GNOME Keyring or KWallet in this session, or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", why, name)
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(line, "[/") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // toolError is the first line of a tool's stderr, without its "<tool>: "
@@ -163,9 +302,8 @@ func toolError(stderr []byte) string {
 
 func (s secretServiceStore) read(name string) ([]byte, error) {
 	var out bytes.Buffer
-	c := exec.Command(s.tool, "lookup", "service", "cpb", "name", name)
-	c.Stdout = &out
-	if err := c.Run(); err != nil {
+	if err := s.run(name, nil, &out, nil, "lookup", "service", "cpb", "name", name); err != nil {
+		clear(out.Bytes())
 		return nil, fmt.Errorf("the Secret Service did not return cpb %s (%v)", name, err)
 	}
 	return out.Bytes(), nil
@@ -174,10 +312,12 @@ func (s secretServiceStore) read(name string) ([]byte, error) {
 // write stores the value from secret-tool's stdin, never an argument;
 // secret-tool's own output is discarded.
 func (s secretServiceStore) write(name string, value []byte) error {
-	c := exec.Command(s.tool, "store", "--label", "cpb "+name, "service", "cpb", "name", name)
-	c.Stdin = bytes.NewReader(value)
-	c.Stdout, c.Stderr = io.Discard, io.Discard
-	if err := c.Run(); err != nil {
+	err := s.run(name, bytes.NewReader(value), io.Discard, io.Discard, "store", "--label", "cpb "+name, "service", "cpb", "name", name)
+	var ue *unavailableError
+	if errors.As(err, &ue) {
+		return err
+	}
+	if err != nil {
 		return fmt.Errorf("the Secret Service did not take cpb %s (secret-tool exited: %v); nothing was stored", name, err)
 	}
 	return nil

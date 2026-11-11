@@ -580,7 +580,8 @@ cpb checks one thing about its shape, a scheme followed by a colon
 belongs is refused, and never echoed. Everything else about a reference is
 the helper's business, except `cpb:<name>`, whose `<name>` is a lowercase
 letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`
-(refused otherwise, at every layer, without quoting it).
+(refused otherwise, without quoting it, in every statement that takes a
+reference and in the playbook, env-set and account files that hold one).
 
 **The helper interface** (cpb's own contract):
 
@@ -599,6 +600,9 @@ letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`
   its stdin, never an argument. Exit 0 means it is stored. A helper without
   it exits non-zero (cpb then says to store the value with your own tool and
   run again). Only the store step below calls it.
+- **Time.** cpb waits at most 90 seconds for each `--check` and `--store`
+  it runs; a helper that has not answered by then is stopped, and the
+  statement or the step fails with nothing written.
 
 **Without a configured helper**, cpb stays fully usable. A `cpb:<name>`
 reference is resolved by cpb's default helper (below). Any other `SET … FROM`
@@ -616,9 +620,9 @@ values in the operating system's store:
 
 | System | Store | Item |
 |---|---|---|
-| macOS | the default Keychain (normally the login one), through `/usr/bin/security` | a generic password, service `cpb`, account `<name>`, label `cpb/<name>` |
-| Linux, a keyring answers | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>` |
-| Linux, no keyring (since v4.7.0): no `secret-tool`, or no keyring daemon or session bus | the file store, `$XDG_DATA_HOME/cpb/secrets/` (default `~/.local/share/cpb/secrets/`) | the file `<name>`, mode `0600`, in a `0700` directory: **plaintext at rest** |
+| macOS | the default Keychain (normally the login one), through `/usr/bin/security` | a generic password, service `cpb`, account `<name>`, label `cpb/<name>`; at most 1536 bytes |
+| Linux, a keyring answers | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>`; at most 4096 bytes |
+| Linux, no keyring (since v4.7.0): no `secret-tool`, or no keyring daemon or session bus | the file store, `$XDG_DATA_HOME/cpb/secrets/` (default `~/.local/share/cpb/secrets/`) | the file `<name>`, mode `0600`, in a `0700` directory: **plaintext at rest**; at most 4096 bytes |
 | other | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
 
 - **A store that cannot answer** is never "not stored": `--check` and
@@ -629,20 +633,41 @@ values in the operating system's store:
   keyring daemon, or no session bus); the default helper tells them apart
   by its stderr, which is empty only for a missing item (libsecret 0.21).
   Any message there means no keyring can be reached, and the file store
-  answers instead. A file store that cannot be trusted (below), with no
-  keyring holding the name, is a store that cannot answer. On macOS any
-  `security` failure other than "item not found" is one.
+  answers instead. A **locked keyring** answers `lookup` as a missing item
+  does, also when its unlock prompt was dismissed, and `secret-tool store`
+  would then replace the item once it is unlocked; so the helper checks a
+  missing answer with `secret-tool search`, which lists a locked item
+  without unlocking it, and a locked item is a store that cannot answer
+  ("unlock the keyring, then run this again"): `--store` writes it neither
+  in the keyring nor beside it in the file. A `secret-tool` that does not
+  answer in time is one too, never a reason to use the file. A file store
+  that cannot be trusted (below), with no keyring holding the name, is one.
+  On macOS any `security` failure other than "item not found" (its exit 44)
+  is one, and the line names the fix (unlock the Keychain, `security
+  unlock-keychain`, or configure a helper of your own). A **Keychain locked
+  where it cannot show its unlock dialog** (an SSH session, say) is found
+  only when the add fails: `security` reports that interaction is not
+  allowed, which the helper reads in-process and never prints, and the
+  store exits 5 saying the Keychain is locked and how to unlock it. The
+  value has been typed by then; nothing is stored.
+- **Time.** Each call to `security` or `secret-tool` is stopped after 60
+  seconds (time enough to answer an unlock dialog), and the per-name lock
+  is waited on for 30 seconds; either ending is exit 5, and the lock's line
+  names the locked name and nothing else. The file store calls no tool.
 - **The file store** (Linux, since v4.7.0) is for a server, a container or
   a VM with no keyring, where the alternative would be no store at all.
   - It is used when `secret-tool` is not installed, or when no Secret
     Service can be reached. A relative `XDG_DATA_HOME` is ignored, as the
-    XDG rules say.
+    XDG rules say. It keeps values up to 4096 bytes, as the Secret Service
+    does, so a value fits whichever store takes it.
   - **Two stores on one machine** (a keyring that starts later, or stops):
     reads and `--check` look in the keyring when it answers, then in the
     file; `--store` writes to the keyring when it answers, else to the
     file. A name found in either refuses `--store`. A name in both is the
     keyring's, and `--check` says in one stderr line where the file copy
-    is.
+    is. Where cpb itself shows where a value would go (the store step's
+    prompt, `cpb play --check --json`), it asks the keyring with `lookup`
+    alone, whose output goes nowhere, so no value passes through cpb.
   - **Trust.** The directory and the file are never followed through a
     symbolic link, must be owned by the user, and must grant group and
     others nothing (`0700`, `0600`); otherwise nothing is read or written,
@@ -661,10 +686,17 @@ values in the operating system's store:
     statement copies, resets or drops the directory.
 
 - **Values.** Printable ASCII only (space to `~`: no tab, newline or
-  non-ASCII character), at most 64 KiB; any other value is refused, and
-  nothing is stored. macOS's `security` prints any other value as hex when
-  it is read, so it would not reach the launch as given. A helper of your
-  own takes any value.
+  non-ASCII character), and no longer than the store keeps whole: 1536
+  bytes in the Keychain, 4096 in the Secret Service. Any other value is
+  refused before anything is written. macOS's `security` prints any other
+  value as hex when it is read, so it would not reach the launch as given.
+  Both tools cut a longer value short without saying so: `security -i`
+  reads its commands in lines of 4096 bytes, and the add carries the value
+  as hex after up to 172 bytes of its own, so about 1960 bytes fit;
+  `secret-tool store` keeps the first 8192 bytes of its stdin (measured,
+  libsecret 0.21). A cut value would be stored, found by `--check`, and
+  launched as given. A helper of your own takes any value, up to 64 KiB
+  through the store step.
 - **Writing.** On macOS the add command goes to `security -i` on its stdin,
   the value hex-encoded (`-X`), so it is in no argument list. On Linux it
   goes to `secret-tool store` on its stdin. Neither tool's output is shown.
@@ -698,20 +730,32 @@ helper's `--check` exits 4):
 - **after the person typed the reference** (its typed confirmation), cpb
   names where the value will be written (for the default helper the store
   and the item, for another helper the helper) and asks for it **twice**,
-  with echo off, from the controlling terminal only. A stored value is never
-  replaced, so a typo nobody saw would be permanent;
-- **entries that differ, or one typed with a key that sends an escape
-  sequence** (an arrow, Delete, Home, a function key, Alt with a key: with
-  echo off its printable bytes would stay in the value unseen) store
-  nothing, say why, and are asked for again, three attempts in all; after
-  the third the run stops, saying to store the value with your own tool and
-  run again. Bracketed paste's markers are not such a sequence: they are
-  dropped, and the paste between them is the value;
+  with echo off, from standard input, which must be a terminal (below). A
+  stored value is never replaced, so a typo nobody saw would be permanent;
+- **editing:** Backspace removes the last character, all of its bytes, and
+  `^U` the whole line;
+- **entries that differ, or a line that is refused** store nothing, say
+  why, and are asked for again, three attempts in all; after the third the
+  run stops, saying to store the value with your own tool and run again. A
+  line is refused when a key that sends an escape sequence (an arrow,
+  Delete, Home, a function key, Alt with a key) or any other control key
+  (`^A`, `^W`, `^D` inside a line, …) was pressed, since with echo off what
+  it added or dropped is not seen, or when it is longer than the store
+  keeps (the default helper's store's limit, else 64 KiB). Bracketed
+  paste's markers are not such a sequence: they are dropped, and the paste
+  between them is the value;
+- **after every read** the terminal's mode is put back and whatever is
+  waiting to be read on it is discarded, so a multi-line paste fills
+  neither the confirmation nor, once cpb exits, the shell;
 - the value goes to `<helper> --store REF` on stdin, and the reference is
   checked again before anything is applied;
 - **an empty answer (to either prompt), ^C, a closed terminal, a signal to
   cpb (`SIGINT`, `SIGTERM`, `SIGHUP`) while it waits, or a helper that
-  fails** stops the run with nothing stored and nothing written.
+  fails or does not answer** stops the run with nothing stored and nothing
+  written. The step catches those signals itself wherever it runs (`cpb
+  play`, `--keep`, `cpb update`), so the terminal is put back first.
+- **A reference used more than once** is one secret: listed, checked and
+  asked for once.
 
 The step runs only when **all** of these hold, and otherwise a reference that
 does not resolve is refused as before, naming why and asking the person to
@@ -720,7 +764,8 @@ run the command from their own terminal:
 - standard input and output are both a terminal;
 - the run has no `--yes`, and no `--trust-secret` confirmed this reference;
 - the environment shows no agent session (`CLAUDECODE` or
-  `CLAUDE_CODE_ENTRYPOINT` set, even to an empty value).
+  `CLAUDE_CODE_ENTRYPOINT` set, even to an empty value). This is a
+  courtesy check, not a boundary: a program that clears both passes it.
 
 No flag, environment variable or file ever supplies a value, and none may be
 added.
@@ -1268,7 +1313,7 @@ manifest's `isolated_login = true` (see the authentication guide).
   - The playbook holds a login of its own: a `.credentials.json` file
     carrying an account grant. A shared launch would take it out of use.
     A shared launch sets another account's login aside. The same account's
-    login is copied over the machine's, since it is newer. Run `/logout` in
+    login is copied over the machine's when it is newer. Run `/logout` in
     it first.
 - **Not "own login".** A playbook that blocks the machine's token and uses
   the shared stored login is `shared-login` with `token_blocked: true` in
@@ -2923,8 +2968,8 @@ Every launch (`run`, `start`, launcher dispatch) prepares the config directory's
 
 1. **Isolation wins.** If the nearest manifest walking up from the config directory has `isolated_login = true`, or `CPB_ISOLATED_LOGIN=true` is set: detach a symlinked `.credentials.json` (the target file survives), sync no account metadata, strip `CLAUDE_CODE_OAUTH_TOKEN` and the plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) from the child environment. A Claude token the launch's account supplies (`claude_token`, a value or a reference) is honoured as the playbook's own token: injected, with the playbook's own login kept out of the run; so is an account that uses no Claude login at all, without a token. **On macOS** (the login lives in the Keychain) a launch whose isolated playbook holds a login of its own -- a grant in its store file (a link to the shared store is not its own; isolation detaches it), a grant set aside, or its Keychain item; a store or Keychain that cannot be read counts as holding one -- stays in place with Claude Code 2.1.225 or newer (since v4.3.2): the token outranks any stored login, and that claude keeps it on a 401 instead of adopting the login, so nothing is set aside. With an older claude, or one whose version cannot be told, the launch is refused before anything changes, and again after the credential sync, so a login that arrives in between is refused too, never stripped, naming where the login is, the version, and the fixes (`claude update`, `cpb run --account <account> <name>` with an account it lists that uses its login, or `/logout` in it). **Elsewhere** the `claudeAiOauth` grant is moved from the store into `.credentials.json.cpb-aside` (mode `0600`) for the run, other keys staying. The launch is refused, never warned about, when the grant cannot be set aside, when the store cannot be read (it may hold one), or when a login is still reachable once it is (a store that is a link to another login, or the machine's own store, which is never moved). Every token run holds `.credentials.json.cpb-run.lock` shared until it returns and records its session's pid in `.credentials.json.cpb-run.pids`, so a session whose cpb was killed alone keeps its run live. The grant goes back into the store when the last such run ends (no lock held, no recorded session alive), merged with whatever the store holds then; each launch of the isolated playbook first puts back a grant no live run holds (one a killed run left). A store holding a grant again by then keeps it, and the one aside is kept as `.credentials.json.cpb-aside-<YYYY-MM-DD-HH_MM_SS>` (with `-<n>` when that name is taken; an archive is never replaced), with one stderr line. Moves are serialised by `.credentials.json.cpb-aside.lock`. A grant set aside counts as the playbook's own login (`SET login = 'shared'` stays refused), and its account state is not purged while it is aside. When the isolated playbook holds no login of its own (no grant in its store) and its block sets no token, the Anthropic account state in its `.claude.json` is removed as well: `oauthAccount`, `cachedGrowthBookFeatures`, `cachedGrowthBookFeaturesAt`, `cachedExperimentFeatures`, `cachedExperimentData`, `passesEligibilityCache`, `cachedExtraUsageDisabledReason`. Rationale: Claude Code enables its claude.ai-hosted tools (Artifact and friends) from those cached flags regardless of `ANTHROPIC_BASE_URL`, so a playbook routed to another backend that once ran as the global account keeps sending them; since Claude Code 2.1.265 the Artifact tool's schema is rejected by at least one such backend (GLM, `400` code `1210`) and every interactive turn fails. A playbook that logs in on its own regenerates the state, so nothing of value is lost; an unreadable `.claude.json` leaves it in place and is reported as an advisory warning. `auth status` shows the pending removal as `no login; stale account state, purged at launch`, judged as the launch will see it: a grant reached only through a symlinked shared store does not count, since isolation detaches that link first (`stale account state, purged at launch (the shared login is detached at launch)`). A store that cannot be read or parsed leaves the state in place with an advisory warning, since it may hold a login. The rewrite keeps the file's owner permissions masked to `0600`, never widening a read-only state file.
 2. **Token active?** True when the flattened layers (the launch's account included, last) set `CLAUDE_CODE_OAUTH_TOKEN` to a non-empty value or a reference, else when `~/.config/claude-code/oauth-token` (overridable via `CPB_OAUTH_TOKEN_FILE`) is non-empty; false when the flattened layers block it, regardless of the rest. A token the process environment carries never counts (since v4.2.0): every launch removes it, as it does every variable an account owns.
-3. **Token path.** The plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) are appended from the global account's store only when the token IS the machine-global one, read from the token file by this launch, and only for the descriptors the shell did not already export: an explicit export is the pilot's deliberate act and outranks what is inferred from disk (a Team seat needs exactly that, its real `subscriptionType` is not a value the picker accepts). A token the launch's account supplies (`claude_token`, reported as `playbook-token`) belongs to some other account, so the global descriptors are neither appended nor inherited. A token exported in the shell is removed before any of this (step 2) and never decides anything. Then: keep a regular-file store's grant before the quarantine strips it: the machine's own account's grant goes over the machine store when it is newer (as on the no-token path), and any other login, one not confirmed as the machine's account, or one with no machine store to compare with is copied to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>` with one stderr line (its account state backed up and removed, as on the no-token path); then quarantine the playbook's stored `claudeAiOauth` grant (other keys such as `mcpOAuth` survive; a symlinked store is detached, never written through; the global store is never quarantined — identity is decided with symlinks resolved and `os.SameFile` for the directory and for the credentials file itself, so `start <symlink-to-~/.claude>`, a linked registration of it, or a config directory whose store is the target of a symlinked `~/.claude/.credentials.json` are all recognised as the global store), sync non-secret account metadata into `.claude.json` so an interactive start presents as logged in, and inject the token (replacing any inherited entry); the descriptor rule above then applies. Rationale: under token auth Claude Code never refreshes a stored grant, and its 401-recovery path adopts a differing stored `accessToken` over the environment token; an expired stored grant would replace a working token with a dead one.
-4. **No-token path.** `SyncCredentials`: the playbook's `.credentials.json` becomes a symlink to the global `~/.claude/.credentials.json`, so `/login` in any playbook is visible to all, and Claude Code refreshes the shared grant itself. A target that is the global directory by identity, or whose store is the global file itself, is left untouched. A regular file there (Claude Code writes its store by rename, so a refresh or `/login` in a shared playbook leaves one) is judged before the link replaces it. A file with no account grant never overwrites the global store. A grant-bearing file becomes the machine's login when there is none, and is copied over it when it is the machine's own account and newer. The machine's account is the one its state names: `~/.claude.json` (what a raw `claude` keeps) whenever it exists, `~/.claude/.claude.json` (what a launch with `CLAUDE_CONFIG_DIR=~/.claude` keeps) only when it does not; an unreadable `~/.claude.json` is an error, never a fallback, and when both files name an account and the accounts differ, the machine's account is unconfirmed, since either may be stale. Any other login, or one that cannot be confirmed as the machine's account, is set aside: renamed to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>`, its account state backed up to `.claude.json.cpb-backup-<…>` and removed, with one stderr line naming the kept file and `ALTER PLAYBOOK <name> SET login = 'isolated'` as the way to keep that account there. Nothing is deleted.
+3. **Token path.** The plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) are appended from the global account's store only when the token IS the machine-global one, read from the token file by this launch, and only for the descriptors the shell did not already export: an explicit export is the pilot's deliberate act and outranks what is inferred from disk (a Team seat needs exactly that, its real `subscriptionType` is not a value the picker accepts). A token the launch's account supplies (`claude_token`, reported as `playbook-token`) belongs to some other account, so the global descriptors are neither appended nor inherited. A token exported in the shell is removed before any of this (step 2) and never decides anything. Then: keep a regular-file store's grant before the quarantine strips it: the machine's own account's grant goes over the machine store when it is newer (as on the no-token path), and any other login, one not confirmed as the machine's account, one with no machine store to compare with, or one that cannot be ordered against the machine store's is copied to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>` with one stderr line (its account state backed up and removed, as on the no-token path); then quarantine the playbook's stored `claudeAiOauth` grant (other keys such as `mcpOAuth` survive; a symlinked store is detached, never written through; the global store is never quarantined — identity is decided with symlinks resolved and `os.SameFile` for the directory and for the credentials file itself, so `start <symlink-to-~/.claude>`, a linked registration of it, or a config directory whose store is the target of a symlinked `~/.claude/.credentials.json` are all recognised as the global store), sync non-secret account metadata into `.claude.json` so an interactive start presents as logged in, and inject the token (replacing any inherited entry); the descriptor rule above then applies. Rationale: under token auth Claude Code never refreshes a stored grant, and its 401-recovery path adopts a differing stored `accessToken` over the environment token; an expired stored grant would replace a working token with a dead one.
+4. **No-token path.** `SyncCredentials`: the playbook's `.credentials.json` becomes a symlink to the global `~/.claude/.credentials.json`. Where the login lives in that plaintext file (Linux), `/login` in any playbook is visible to all, and Claude Code refreshes the shared grant itself; it writes its store by rename, so a refresh or `/login` in a shared playbook leaves a regular file in place of the link. **On macOS it is different**; each statement below names its source. *Documented* (Claude Code docs, *Credential management*): with `CLAUDE_CONFIG_DIR` set, the macOS Keychain entry is keyed to that directory, and the directory's `.credentials.json` is a fallback used when the Keychain rejects a write. *Issue-level* (public issue [anthropics/claude-code#93051](https://github.com/anthropics/claude-code/issues/93051), Claude Code 2.1.261-2.1.263): the Keychain is read first, and the file only when that read returns nothing; so a shared playbook reads its own item first, and the linked file only seeds a playbook that has no item yet. *Implied, not stated* (the Claude Code docs' troubleshooting page and the 2.1.136 changelog): OAuth refresh tokens rotate, and parallel sessions coordinate renewal only within one config directory. *Observed* (macOS, Claude Code 2.1.322, 2026-11-10): a shared playbook's refresh lands in its own Keychain item, named `Claude Code-credentials-` plus 8 hex digits derived from its config directory, and leaves no file; its `.credentials.json` stays the link. Sync never reads that item. *Not established*: whether rotation invalidates a copy in another directory in every case. A target that is the global directory by identity, or whose store is the global file itself, is left untouched. A regular file in place of the link is judged before the link replaces it. A file with no account grant never overwrites the global store. A grant-bearing file becomes the machine's login when there is none, and is copied over it when it is the machine's own account and newer. Before anything is written, sync compares every candidate for the shared store (on macOS the machine's Keychain item `Claude Code-credentials`, the shared store itself, and such a file of the machine's own account) and writes the one whose grant expires last (`claudeAiOauth.expiresAt`), only when its bytes differ from the store's, through a temporary file in the same directory that is renamed over the store. When it cannot tell which is newest (a value with no expiry, one that does not parse, or two different values with the same expiry), it writes nothing, leaves the playbook's file and account state as they are, and prints one stderr line naming the sources and the reason; when the shared store itself does not parse, the line also says to remove it and what writes it again (the next sync, from the machine's Keychain item when it holds a login). Whatever it decides, a shared store whose mode grants group or others any permission is made `0600` in place: only the mode changes, never the bytes, the file or its time (a store already owner-only is not touched), and a mode that cannot be changed is reported in one stderr line. Sync never writes the Keychain, never truncates the shared store in place, and never replaces a newer login with an older one. The machine's account is the one its state names: `~/.claude.json` (what a raw `claude` keeps) whenever it exists, `~/.claude/.claude.json` (what a launch with `CLAUDE_CONFIG_DIR=~/.claude` keeps) only when it does not; an unreadable `~/.claude.json` is an error, never a fallback, and when both files name an account and the accounts differ, the machine's account is unconfirmed, since either may be stale. Any other login, or one that cannot be confirmed as the machine's account, is set aside: renamed to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>`, its account state backed up to `.claude.json.cpb-backup-<…>` and removed, with one stderr line naming the kept file and `ALTER PLAYBOOK <name> SET login = 'isolated'` as the way to keep that account there. Nothing is deleted.
 
 **The account** (since v4.2.0) is decided before all of this, so a refused launch changes nothing: which account the launch runs on, that no other layer or settings file sets one of its variables, and that a login it does not use can be kept out (see *CREATE / ALTER / DROP ACCOUNT*). Its variables are the launch's last layer, so the steps above see them as they see any layer: a `claude_token` account is the playbook's own token, and an account that uses no Claude login runs the isolated path with the playbook's own login kept out.
 
@@ -3279,7 +3324,7 @@ those names, sorted, one per line.
 3. It asks for each typed confirmation in turn:
    - `Type the proxy …`, or `Type TLS …` (a recipe never moves the model
      endpoint: that is an account's, `--account`);
-   - `Type the secret this playbook may read, on this machine, as you (<ref>):`.
+   - `Type the reference of the secret this playbook may read, on this machine, as you (<ref>):`.
 
    An exact match goes on; anything else stops with nothing written. A
    reference that is not stored yet is then asked for: the store step

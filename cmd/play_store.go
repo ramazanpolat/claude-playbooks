@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -18,13 +22,15 @@ import (
 // The store step (SPEC.md, "cpb play", "Secrets"): when a played recipe's
 // secret reference is not stored yet, `cpb play` (and --keep, and cpb update)
 // asks the person for its value right after they typed the reference, reads
-// it with echo off from their own terminal, and hands it to the helper's
-// `--store REF` on stdin. The value never reaches an argument list, cpb's
-// output, or a file of cpb's, and no flag, variable or file supplies it.
+// it twice with echo off from standard input, which must be a terminal, and
+// hands it to the helper's `--store REF` on stdin. The value never reaches an
+// argument list, cpb's output, or a file of cpb's, and no flag, variable or
+// file supplies it.
 //
 // What the step does not do: hide the value from the person's own
 // processes. A program that drives a terminal can pass the terminal test,
-// and any process of the same user can ask the OS store for the value.
+// the agent markers are a courtesy check, not a boundary, and any process
+// of the same user can ask the OS store for the value.
 
 // refsPendingStore are the references the preview treats as not stored yet:
 // checkRefsWith passes them, so the plan can be shown, and the real apply
@@ -35,12 +41,20 @@ var refsPendingStore map[string]bool
 // after the person typed it (playConfirmAsk); empty in a plan-only run.
 var storeAfterConfirm map[string]bool
 
-// secretIn is the terminal the value is read from (a test gives a pty).
+// secretIn is the terminal the value is read from: standard input, which
+// the step requires to be a terminal (a test gives a pty).
 var secretIn = os.Stdin
 
 // agentSessionVars mark a session an agent runs: a value typed there would
 // go through that agent's own terminal. Set at all, even empty, counts.
+// This is a courtesy check, not a boundary: a program that clears them
+// passes it.
 var agentSessionVars = []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"}
+
+// helperTimeout bounds each call cpb makes to a secret helper (--check,
+// --store); a helper that does not answer in time fails the step with
+// nothing written (a test shortens it).
+var helperTimeout = 90 * time.Second
 
 // storeStepRefusal says why the store step cannot run here for ref, or ""
 // when it can: both ends are a terminal, no --yes answered for the person,
@@ -63,6 +77,40 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 	return ""
 }
 
+// runHelper runs one helper call bounded by helperTimeout. A call that
+// does not end in time is killed, and the error says so.
+func runHelper(x helperExe, stdin io.Reader, stdout, stderr io.Writer, env []string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, x.path, append(append([]string{}, x.pre...), args...)...)
+	c.Stdin, c.Stdout, c.Stderr, c.Env = stdin, stdout, stderr, env
+	c.WaitDelay = 2 * time.Second
+	err := c.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("it did not answer within %s", helperTimeout)
+	}
+	return err
+}
+
+// helperCheck is `<helper> --check KEY=REF`, quiet unless out is given.
+func helperCheck(x helperExe, key, ref string, out io.Writer) error {
+	return runHelper(x, nil, out, out, withoutKeys(os.Environ(), []string{key}), "--check", key+"="+ref)
+}
+
+// uniqueRefs is refs in order, each once: a reference used twice is one
+// secret, stored and asked for once.
+func uniqueRefs(refs []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range refs {
+		if !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // Only --check's notStoredExit (secret_default.go; cpb's default helper's,
 // and the usual one of helpers that tell "missing" from "cannot answer")
 // arms the store step. Any other failure, such as a locked or unreachable
@@ -73,6 +121,7 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 // notStoredExit), quietly; it returns nil and the helper's error when no
 // helper can answer, so the plan reports that as it always has.
 func refsNotStored(refs []string) ([]string, error) {
+	refs = uniqueRefs(refs)
 	if len(refs) == 0 {
 		return nil, nil
 	}
@@ -85,10 +134,8 @@ func refsNotStored(refs []string) ([]string, error) {
 		if manifest.ValidateCPBRef(r) != nil {
 			continue // the plan refuses it with its own message
 		}
-		c := x.command("--check", "CPB_SECRET="+r)
-		c.Env = withoutKeys(os.Environ(), []string{"CPB_SECRET"})
 		var ee *exec.ExitError
-		if err := c.Run(); errors.As(err, &ee) && ee.ExitCode() == notStoredExit {
+		if err := helperCheck(x, "CPB_SECRET", r, nil); errors.As(err, &ee) && ee.ExitCode() == notStoredExit {
 			missing = append(missing, r)
 		}
 	}
@@ -240,47 +287,70 @@ func printSecretReport(report []playSecretJSON) {
 	}
 }
 
-// storeAttempts is how many times the store step asks for a value whose
-// two entries differ (or that held an escape sequence) before it stops.
+// storeAttempts is how many times the store step asks for a value that it
+// could not take (entries that differ, or a line it refused) before it stops.
 const storeAttempts = 3
+
+// storeLimit is the longest value the step reads for x: the default
+// helper's store's own limit (each store keeps only so many bytes whole),
+// else the bound every helper's --store reads.
+func storeLimit(x helperExe) int {
+	if x.def {
+		if st, err := defaultSecretStore(); err == nil {
+			return st.maxValue()
+		}
+	}
+	return maxSecretBytes
+}
 
 // storeSecret is the store step for one reference: it names where the
 // value goes, reads it twice with echo off from the terminal (a stored
 // value is never replaced, so a typo nobody saw would be permanent), hands
 // it to the helper's --store on stdin, and checks the reference again.
-// Entries that differ, or one with an escape sequence, are asked for again,
-// storeAttempts times in all. An empty answer, ^C, a closed terminal, a
-// signal the play guard caught (promptCancel) or a helper that fails stops
-// the run with nothing stored.
+// Entries that differ, or a line the read refused (hiddenResult), are
+// asked for again, storeAttempts times in all. An empty answer, ^C, a
+// closed terminal, a signal, or a helper that fails or does not answer
+// stops the run with nothing stored.
+//
+// When no guard is in place (cpb play installs one; --keep and cpb update
+// do not), the step installs its own for the reads, so a signal ends the
+// read with the terminal restored instead of leaving it raw.
 func storeSecret(ref string) error {
 	x, err := resolveHelperFor([]string{ref})
 	if err != nil {
 		return err
 	}
+	if promptCancel == nil {
+		g := newPlayGuard()
+		promptCancel = g.cancelled
+		defer func() {
+			promptCancel = nil
+			g.stop()
+		}()
+	}
+	limit := storeLimit(x)
 	stopped := fmt.Errorf("%s was not stored; nothing was written", ref)
 	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
 	var value []byte
 	defer func() { clear(value) }()
 	for attempt := 1; ; attempt++ {
 		fmt.Print("Type the value now (it is not shown), or press Enter to stop: ")
-		first, ok, escaped := readHidden(secretIn, promptCancel)
-		if isCancelled(promptCancel) || (!ok && !escaped) || (ok && len(first) == 0) {
+		first, res := readHidden(secretIn, promptCancel, limit)
+		if isCancelled(promptCancel) || res == hiddenStopped || (res == hiddenOK && len(first) == 0) {
 			clear(first)
 			return stopped
 		}
-		why := ""
-		if escaped {
-			why = "a key that sends an escape sequence (an arrow, Delete, Home, a function key or Alt) was pressed, so the value may not be the one you meant"
-		} else {
+		why := res.why(limit)
+		if res == hiddenOK {
 			fmt.Print("Type it again to confirm, or press Enter to stop: ")
-			second, ok2, escaped2 := readHidden(secretIn, promptCancel)
+			second, res2 := readHidden(secretIn, promptCancel, limit)
 			switch {
-			case isCancelled(promptCancel) || (!ok2 && !escaped2) || (ok2 && len(second) == 0):
+			case isCancelled(promptCancel) || res2 == hiddenStopped || (res2 == hiddenOK && len(second) == 0):
 				clear(first)
 				clear(second)
 				return stopped
-			case escaped2:
-				why = "a key that sends an escape sequence (an arrow, Delete, Home, a function key or Alt) was pressed, so the value may not be the one you meant"
+			case res2 != hiddenOK:
+				why = res2.why(limit)
 			case !bytes.Equal(first, second):
 				why = "the two entries differ"
 			}
@@ -296,16 +366,10 @@ func storeSecret(ref string) error {
 		}
 		fmt.Printf("Not stored: %s. Try again (%d of %d).\n", why, attempt+1, storeAttempts)
 	}
-	c := x.command("--store", ref)
-	c.Stdin = bytes.NewReader(value)
-	c.Stdout, c.Stderr = os.Stderr, os.Stderr
-	c.Env = os.Environ()
-	if err := c.Run(); err != nil {
+	if err := runHelper(x, bytes.NewReader(value), os.Stderr, os.Stderr, os.Environ(), "--store", ref); err != nil {
 		return fmt.Errorf("%s could not be stored (secret helper %s: %v); nothing was written. Store the value with your own tool, then run this again", ref, x.name, err)
 	}
-	chk := x.command("--check", "CPB_SECRET="+ref)
-	chk.Env = withoutKeys(os.Environ(), []string{"CPB_SECRET"})
-	if err := chk.Run(); err != nil {
+	if err := helperCheck(x, "CPB_SECRET", ref, nil); err != nil {
 		return fmt.Errorf("%s was stored but does not resolve (secret helper %s: %v); nothing was written", ref, x.name, err)
 	}
 	fmt.Printf("Stored %s.\n", ref)
@@ -322,29 +386,65 @@ func isCancelled(cancel <-chan struct{}) bool {
 	}
 }
 
+// hiddenResult is how a hidden read ended.
+type hiddenResult int
+
+const (
+	// hiddenOK: Enter, with the line.
+	hiddenOK hiddenResult = iota
+	// hiddenStopped: ^C, ^D on an empty line, end of input, an error, or a
+	// cancel.
+	hiddenStopped
+	// hiddenEscaped: a key that sends an escape sequence was pressed.
+	hiddenEscaped
+	// hiddenControl: a control key the read does not edit with was pressed.
+	hiddenControl
+	// hiddenTooLong: the line was longer than the limit.
+	hiddenTooLong
+)
+
+// why is the reason a refused line was not taken, for the person; "" for
+// hiddenOK and hiddenStopped.
+func (r hiddenResult) why(limit int) string {
+	switch r {
+	case hiddenEscaped:
+		return "a key that sends an escape sequence (an arrow, Delete, Home, a function key or Alt) was pressed, so the value may not be the one you meant"
+	case hiddenControl:
+		return "a control key (Ctrl with a letter) was pressed, so the value may not be the one you meant"
+	case hiddenTooLong:
+		return fmt.Sprintf("the value is longer than the %d bytes this store keeps", limit)
+	}
+	return ""
+}
+
 // readHidden reads one line from the terminal f in raw mode, echoing
-// nothing: Enter ends it; ^C, ^D on an empty line, an error, end of input
-// or cancel closing cancel it; and the terminal's mode is restored on every
-// way out. In raw mode a typed ^C arrives as a byte, so cancelling is the
-// read's own decision; a signal sent to cpb is the play guard's, which
-// closes cancel. Each byte is read in a goroutine, and only when asked
-// for, so a cancel never waits for a key and nothing is read ahead of the
-// next prompt; a read pending at a cancel ends with the run.
+// nothing, keeping at most limit bytes: Enter ends it; ^C, ^D on an empty
+// line, an error, end of input or cancel closing stop it. On every way out
+// the terminal's mode is restored and its pending input is discarded
+// (flushInput), so a multi-line paste never feeds the next prompt or, once
+// cpb exits, the shell. In raw mode a typed ^C arrives as a byte, so
+// stopping is the read's own decision; a signal sent to cpb is the guard's,
+// which closes cancel. Each byte is read in a goroutine, and only when
+// asked for, so a cancel never waits for a key; a read pending at a cancel
+// ends with the run.
 //
-// A key that sends an escape sequence (an arrow, Delete, Home, a function
-// key, Alt with a key) would otherwise leave the sequence's printable bytes
-// in the value, which echo-off hides: such a line ends as not ok, with
-// escaped true, and nothing of it is kept. Bracketed paste's markers
-// (ESC [200~ and ESC [201~) are the one exception: they are dropped and
-// the paste between them is kept, so a terminal that has the mode on
-// still takes a pasted value.
-func readHidden(f *os.File, cancel <-chan struct{}) (value []byte, ok, escaped bool) {
+// Editing: Backspace removes the last character (all of its bytes), ^U
+// the whole line. A line is refused, and nothing of it kept, when a key
+// that sends an escape sequence (an arrow, Delete, Home, a function key,
+// Alt with a key) or any other control key was pressed, since echo-off
+// would hide what it added or dropped, or when it is longer than limit.
+// Bracketed paste's markers (ESC [200~ and ESC [201~) are not refused:
+// they are dropped, and the paste between them is kept.
+func readHidden(f *os.File, cancel <-chan struct{}, limit int) ([]byte, hiddenResult) {
 	fd := int(f.Fd())
 	old, err := term.MakeRaw(fd)
 	if err != nil {
-		return nil, false, false
+		return nil, hiddenStopped
 	}
-	defer term.Restore(fd, old)
+	defer func() {
+		term.Restore(fd, old)
+		flushInput(fd)
+	}()
 	type key struct {
 		c   byte
 		err error
@@ -378,7 +478,14 @@ func readHidden(f *os.File, cancel <-chan struct{}) (value []byte, ok, escaped b
 			}
 		}
 	}()
-	var buf []byte
+	// One backing array of the limit's size, so no copy of the value is
+	// left behind by a growing slice.
+	buf := make([]byte, 0, min(limit, maxSecretBytes))
+	stop := func() ([]byte, hiddenResult) {
+		clear(buf[:cap(buf)])
+		return nil, hiddenStopped
+	}
+	var escaped, control, tooLong bool
 	// The escape-sequence state: escNone, or inside one after ESC, after
 	// ESC [ (a CSI sequence, its parameter bytes in seq), or after ESC O.
 	const (
@@ -392,8 +499,7 @@ func readHidden(f *os.File, cancel <-chan struct{}) (value []byte, ok, escaped b
 	for {
 		if isCancelled(cancel) {
 			fmt.Print("\r\n")
-			clear(buf)
-			return nil, false, false
+			return stop()
 		}
 		var k key
 		select {
@@ -407,8 +513,7 @@ func readHidden(f *os.File, cancel <-chan struct{}) (value []byte, ok, escaped b
 			continue
 		}
 		if k.err != nil {
-			clear(buf)
-			return nil, false, false
+			return stop()
 		}
 		c := k.c
 		if c == 0x1b {
@@ -454,31 +559,49 @@ func readHidden(f *os.File, cancel <-chan struct{}) (value []byte, ok, escaped b
 		switch c {
 		case '\r', '\n':
 			fmt.Print("\r\n")
-			if escaped {
-				clear(buf)
-				return nil, false, true
+			switch {
+			case escaped:
+				stop()
+				return nil, hiddenEscaped
+			case control:
+				stop()
+				return nil, hiddenControl
+			case tooLong:
+				stop()
+				return nil, hiddenTooLong
 			}
-			return buf, true, false
+			return buf, hiddenOK
 		case 3: // ^C
 			fmt.Print("^C\r\n")
-			clear(buf)
-			return nil, false, false
-		case 4: // ^D
-			if len(buf) == 0 {
+			return stop()
+		case 4: // ^D: on an empty line it stops; inside a line it is refused
+			if len(buf) == 0 && !escaped && !control && !tooLong {
 				fmt.Print("\r\n")
-				return nil, false, false
+				return stop()
 			}
-		case 0x7f, 8: // backspace
-			if len(buf) > 0 {
-				buf[len(buf)-1] = 0
-				buf = buf[:len(buf)-1]
+			control = true
+		case 0x7f, 8: // Backspace: the last character, all of its bytes
+			if _, size := utf8.DecodeLastRune(buf); size > 0 {
+				clear(buf[len(buf)-size:])
+				buf = buf[:len(buf)-size]
 			}
 		case 0x15: // ^U
 			clear(buf)
 			buf = buf[:0]
-		default:
-			if c >= 0x20 || c == '\t' {
+		case '\t':
+			if len(buf) < limit {
 				buf = append(buf, c)
+			} else {
+				tooLong = true
+			}
+		default:
+			switch {
+			case c < 0x20:
+				control = true
+			case len(buf) < limit:
+				buf = append(buf, c)
+			default:
+				tooLong = true
 			}
 		}
 	}

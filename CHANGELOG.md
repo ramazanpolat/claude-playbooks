@@ -12,19 +12,26 @@
   each value back after writing it, and stores one name at a time. A
   configured helper always wins; any other scheme with no helper is refused as
   before. A machine with no store refuses a `cpb:` reference and names the
-  fix, and a store that cannot answer exits 5 with the reason, never "not
-  stored". `<name>` is a lowercase letter or digit, then up to 63 of `a-z`,
-  `0-9`, `.`, `_` and `-`.
+  fix, and a store that cannot answer (on Linux, a locked keyring or a
+  `secret-tool` that does not answer in time; on macOS, a
+  Keychain locked where it cannot show its unlock dialog) exits 5 with the
+  reason, never "not stored". Values are capped at what each store keeps
+  whole, 1536 bytes in the Keychain and 4096 in the Secret Service, since
+  their tools cut a longer value short without saying so. Each tool call is
+  bounded to 60 seconds and the per-name lock to 30. `<name>` is a lowercase
+  letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`, checked
+  in statements and in playbook, env-set and account files.
 - **A file store on Linux machines with no keyring.** On a server, a
   container or a VM with no `secret-tool`, or with no keyring daemon or
   session bus, cpb's default helper keeps a `cpb:<name>` value in
   `$XDG_DATA_HOME/cpb/secrets/<name>` (default `~/.local/share/cpb/secrets/`),
-  mode `0600` in a `0700` directory, written through a temporary file and a
-  link, so it never replaces one. The value is plaintext at rest, readable by
+  mode `0600` in a `0700` directory, up to 4096 bytes, written through a
+  temporary file and a link, so it never replaces one. The value is plaintext at rest, readable by
   the user and root, and the store step's prompt says so. Links, other
   owners and open modes are refused. When a keyring starts later, a value in
   the file is still found and new values go to the keyring; a name in both is
-  the keyring's. `cpb play --check --json` and `--dry-run --json` list each
+  the keyring's, and a locked keyring item is never written over or beside.
+  `cpb play --check --json` and `--dry-run --json` list each
   secret (`secrets`): whether it is stored, and where it is or would be kept,
   with the file's path for the file store.
 - **The store step in `cpb play`.** When a played recipe's secret reference is
@@ -32,17 +39,95 @@
   interface now names; a store that cannot answer is refused as before),
   `cpb play`, `--keep` and `cpb update` show it in the plan
   (`"not_stored"` in `--json`), and after you type the reference they ask for
-  its value twice with echo off, from your own terminal only, and hand it to
-  the helper on stdin (`<helper> --store REF`, a new optional verb of the
-  helper interface). Entries that differ, or one typed with a key that sends
-  an escape sequence (an arrow, Delete; a bracketed paste is taken), store
-  nothing and are asked for again, three attempts in all. It never runs with
-  `--yes`, with `--trust-secret` for that reference, without a terminal, or
-  inside an agent's session. `^C`, an empty answer, a closed terminal, a
-  signal or a failing helper store nothing, and cpb never replaces a stored
-  value. It keeps the value out of command lines and cpb's output; it does
+  its value twice with echo off, from standard input, which must be a
+  terminal, and hand it to the helper on stdin (`<helper> --store REF`, a new
+  optional verb of the helper interface; cpb waits 90 seconds at most for a
+  helper). Entries that differ, or a line typed with a key that sends an
+  escape sequence or any other control key, or longer than the store keeps,
+  store nothing and are asked for again, three attempts in all; Backspace
+  removes whole characters, and a bracketed paste is taken. After every read
+  the terminal's pending input is discarded, so a multi-line paste reaches
+  neither the next prompt nor the shell, and the step guards itself against
+  signals on every path. A reference used twice is asked for once. It never
+  runs with `--yes`, with `--trust-secret` for that reference, without a
+  terminal, or when an agent's session is in the environment (a courtesy
+  check, not a boundary). `^C`, an empty answer, a closed terminal, a signal
+  or a failing helper store nothing, and cpb never replaces a stored value. It keeps the value out of command lines and cpb's output; it does
   not hide it from programs that run as you. See *Secrets* in SPEC.md and
   [the play guide](docs/guides/play.md).
+
+## [v4.6.1] -- 2026-11-11
+
+v4.6.1 fixes how cpb writes the shared login store,
+`~/.claude/.credentials.json`. Before it, every shared launch on macOS
+rewrote that file from the Keychain in place, so a reader at the same moment
+could find it empty or partial, and a newer login a playbook held in a file
+of its own could be replaced by an older one. Now the store is written only
+when its value changes, atomically, and never with an older login. A store
+open to group or others is made owner-only in place, and a store that does
+not parse comes with what to do about it.
+
+SPEC and the authentication guide now describe how a shared login behaves
+on macOS, each statement marked by its source.
+
+It does not change when a login expires or how Claude Code refreshes one,
+and it does not bring back a login that has already expired: where Claude
+Code asks for `/login`, it still needs one.
+
+### Fixed
+
+- **The shared login store is written only when it changes, atomically, and
+  never with an older login.** On macOS every shared launch rewrote
+  `~/.claude/.credentials.json` from the Keychain in place, even when nothing
+  had changed, so a reader at that moment could see an empty or partial file.
+  The rewrite also gave the store a new file time, so a newer login a shared
+  playbook had left in a file of its own looked older and was replaced by the
+  link. Sync now compares the Keychain value, the store and the playbook's
+  file first and writes the one whose grant expires last
+  (`claudeAiOauth.expiresAt`), only when its bytes differ, through a
+  temporary file renamed over the store. When it cannot tell which is
+  newest, it writes nothing and says so in one stderr line. The copy of a
+  playbook's login over the machine store, on the sync and before a token
+  launch, follows the same rule. The Keychain is only read.
+- **The shared login store is kept owner-only without a rewrite.** A sync
+  that finds `~/.claude/.credentials.json` open to group or others makes it
+  `0600` in place, on every OS: only the mode changes, never the bytes, the
+  file or its time, and a store already owner-only is not touched. Until
+  the change above, macOS got that mode from the rewrite at every sync, and
+  Linux never had it repaired.
+- **A shared store that does not parse comes with what to do.** It is still
+  left as it is, and the warning now says to remove it: the next sync then
+  writes the Keychain value there, or, with no Keychain login, a login with
+  `claude` outside any playbook writes a new one.
+- **The cmd tests can no longer read a real Keychain item.** They stubbed
+  the Keychain presence probe but not the secret lookup, so on macOS a sync
+  a test ran could call `security find-generic-password -w` and copy the
+  machine's login into the test's temporary HOME. A test-only hook in
+  `internal/auth` now replaces that lookup in the cmd tests' `TestMain`,
+  and a guard test fails when it is not in place. A direct test also covers
+  the link step when two logins of the same account cannot be ordered: both
+  files stay as they are and nothing is linked.
+
+### Docs
+
+- **SPEC's no-token path marks the macOS difference, each statement by its
+  source.** That a refresh in a shared playbook refreshes the shared login,
+  or leaves a regular file in place of the link, holds where the login is a
+  plaintext file (Linux). On macOS: *documented*, the Keychain entry is
+  keyed to `CLAUDE_CONFIG_DIR`, and `.credentials.json` is the fallback
+  when the Keychain rejects a write; *issue-level*
+  ([anthropics/claude-code#93051](https://github.com/anthropics/claude-code/issues/93051)),
+  the Keychain is read first and the file only when that read returns
+  nothing, so the linked file only seeds a playbook that has no item yet;
+  *implied, not stated*, refresh tokens rotate, and parallel sessions
+  coordinate renewal only within one config directory; *observed* with
+  Claude Code 2.1.322, a shared playbook's refresh lands in its own
+  Keychain item and its link stays, and sync never reads that item. *Not
+  established*: whether rotation invalidates a copy in another directory in
+  every case.
+- **The authentication guide no longer says a shared `/login` or refresh
+  reaches every playbook on macOS.** Its summary and its modes table say
+  that holds on Linux, and point to the guide's existing macOS paragraph.
 
 ## [v4.6.0] -- 2026-11-10
 

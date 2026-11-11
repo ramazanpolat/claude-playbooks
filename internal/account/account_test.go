@@ -163,3 +163,19 @@ func TestDefaultMarker(t *testing.T) {
 		t.Fatalf("List: %v %v", got, err)
 	}
 }
+
+// The cpb:<name> rule holds in an account file too, for its credential and
+// its headers, beside the grammar.
+func TestAccountFileAppliesTheCPBRefRule(t *testing.T) {
+	bad := Account{Provider: Anthropic, Auth: Auth{Kind: ClaudeToken, Ref: "cpb:Bad.Name"}}
+	if err := bad.Validate(); err == nil || strings.Contains(err.Error(), "Bad.Name") {
+		t.Fatalf("a bad cpb: name in the credential: %v", err)
+	}
+	if err := (&Account{Provider: Anthropic, Auth: Auth{Kind: ClaudeToken, Ref: "cpb:good-name"}}).Validate(); err != nil {
+		t.Fatalf("a good cpb: name in the credential: %v", err)
+	}
+	h := Account{Provider: Gateway, BaseURL: "https://router.example.com/v1", Auth: Auth{Kind: None}, Headers: map[string]string{"X-Id": "cpb:Bad.Name"}}
+	if err := h.Validate(); err == nil || strings.Contains(err.Error(), "Bad.Name") {
+		t.Fatalf("a bad cpb: name in a header: %v", err)
+	}
+}
