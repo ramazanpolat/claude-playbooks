@@ -53,6 +53,9 @@
   Keychain item and its link stays, and sync never reads that item. *Not
   established*: whether rotation invalidates a copy in another directory in
   every case.
+- **The authentication guide no longer says a shared `/login` or refresh
+  reaches every playbook on macOS.** Its summary and its modes table say
+  that holds on Linux, and point to the guide's existing macOS paragraph.
 
 ## [v4.6.0] -- 2026-11-10
 
