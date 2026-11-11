@@ -165,7 +165,7 @@ func askOtherCommand(ctx context.Context, a *account.Account, claudePath string,
 		if err != nil {
 			return nil, fmt.Errorf("account %s's credential or headers are secret references, and %w: nothing was sent", a.Name, err)
 		}
-		lp.helper, lp.helperPre, lp.refs = x.path, x.pre, r.Layer.Refs
+		lp.helper, lp.helperPre, lp.def, lp.refs = x.path, x.pre, x.def, r.Layer.Refs
 		if err := lp.withHeaders(r.Headers); err != nil {
 			return nil, fmt.Errorf("account %s: %w: nothing was sent", a.Name, err)
 		}

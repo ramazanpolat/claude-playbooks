@@ -6,6 +6,11 @@ dir=$1 home=$2 ci=$3
 entry=playbook.cpb
 [ -f "$dir/.entry" ] && entry=$(cat "$dir/.entry")
 export HOME="$home" PATH="$ci:$ci/../secret-helper:$home/bin:$PATH" CPB_SECRET_HELPER= FAKE_MARKETS=""
+# Nothing of the machine's own stores is reached: data and cache under the
+# throwaway home, and no session bus, so no keyring answers and cpb's file
+# store is the throwaway home's.
+export XDG_DATA_HOME="$home/.local/share" XDG_CACHE_HOME="$home/.cache"
+unset DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR DISPLAY
 cd "$dir"
 if [ -f .setup ]; then sh -e .setup; fi
 cpb APPLY "$entry" --dry-run > "$home/dry.out"

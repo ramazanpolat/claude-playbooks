@@ -1,0 +1,32 @@
+# Each cpb's output is captured first, so a failing cpb stops the check.
+# The recipe's secret is not stored: --check says so, and where it would be
+# kept, without reading or asking for anything.
+out=$(cpb play --check ./recipe.cpb)
+printf '%s\n' "$out" | grep -q "Secret:  cpb:service-token: not stored here yet; kept in "
+cpb play --dry-run --json ./recipe.cpb > "$HOME/plan.json"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["play"]["secrets"]; assert len(s)==1 and s[0]["ref"]=="cpb:service-token" and s[0]["stored"] is False and s[0]["store"] in ("file","secret-service","keychain"), s' "$HOME/plan.json"
+# The store step asks only a person at a terminal: --yes never stores.
+if cpb play --yes --no-sandbox ./recipe.cpb > "$HOME/yes.out" 2>&1; then echo "--yes ran without the secret"; exit 1; fi
+grep -q "cpb asks for a value only from your own terminal" "$HOME/yes.out"
+# A reference that is not stored is refused when a statement writes it.
+if cpb APPLY uses-secret.cpb --yes > "$HOME/early.out" 2>&1; then echo "an unstored reference was written"; exit 1; fi
+# The rest is Linux's file store: check-one.sh runs with no session bus and
+# the data home under the throwaway home, so no keyring answers and the
+# file store is that home's. A placeholder is put there as the store step
+# would, in a 0700 directory as a 0600 file. In CI this half must run.
+if [ "$(uname)" != Linux ]; then
+  [ -z "${CI:-}" ] || { echo "the file store half of this example must run in CI (Linux)"; exit 1; }
+  exit 0
+fi
+d="$XDG_DATA_HOME/cpb/secrets"
+case "$d" in "$HOME"/*) ;; *) echo "the file store is not under the throwaway home: $d"; exit 1 ;; esac
+mkdir -p "$d" && chmod 700 "$d"
+(umask 077 && printf '%s' 'placeholder-service-token' > "$d/service-token")
+out=$(cpb play --check ./recipe.cpb)
+printf '%s\n' "$out" | grep -q "Secret:  cpb:service-token: stored here; kept in the file $d/service-token"
+cpb APPLY uses-secret.cpb --yes > "$HOME/uses.out"
+# The reference is written, never the value; the launch gets the value.
+cpb SHOW CREATE PLAYBOOK client | grep -q "FROM 'cpb:service-token'"
+if grep -rq 'placeholder-service-token' "$HOME/.claude-playbooks"; then echo "the value reached a file"; exit 1; fi
+cpb run client
+grep -qx 'SERVICE_TOKEN=placeholder-service-token' "$HOME/.claude-playbooks/client/.fake-claude/launch-env"

@@ -65,7 +65,7 @@ cpb CREATE PLAYBOOK glm SET login=isolated USE ACCOUNT glm
 cpb EXPLAIN PLAYBOOK glm      # Account: glm (gateway http://localhost:8080/v1, …)
 ```
 
-A router that takes a key holds it by reference, `auth_token FROM '<ref>'`, resolved by your [secret helper](SPEC.md#secrets-optional). `login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two logins side by side →](docs/guides/authentication.md)
+A router that takes a key holds it by reference, `auth_token FROM '<ref>'`, resolved by your [secret helper](SPEC.md#secrets-optional), or by cpb itself for `cpb:<name>`. `login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two logins side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
 
@@ -109,7 +109,7 @@ cpb SHOW CREATE ALL > machine.cpb                  # this whole machine, as stat
 cpb APPLY machine.cpb                              # on the next machine
 ```
 
-Secrets are references, resolved at launch by your helper; `SHOW CREATE` never
+Secrets are references, resolved at launch by your helper, or for `cpb:<name>` by cpb itself in your Keychain or keyring ([example](examples/26-cpb-secrets/)); `SHOW CREATE` never
 prints a value. A recipe covers the whole agent (plugins, MCP servers, tools,
 status line, model and `/model` picker, skills) and applies to any
 playbook or to `~/.claude`. A playbook can also be installed from a source, a git repository or a folder (`FROM <url-or-dir> BRANCH <ref>`), or run in place from a folder (`LINK <dir>`).

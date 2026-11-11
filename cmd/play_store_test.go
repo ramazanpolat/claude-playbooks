@@ -42,8 +42,11 @@ key() { printf '%s' "$1" | tr ':/' '__'; }
 # As cpb's default helper, the stub is run with its own argument first.
 [ "$1" = __secret-helper ] && shift
 case "$1" in
-  --ready) [ -n "$READY_EXIT" ] && { echo "the test store is locked and cannot ask for its password here" >&2; exit "$READY_EXIT"; }; exit 0 ;;
-  --check) [ -z "$FORCE_CHECK_FAIL" ] && [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
+  --ready) [ -n "$READY_SLEEP" ] && sleep "$READY_SLEEP"
+           [ -n "$READY_EXIT" ] && { echo "the test store is locked and cannot ask for its password here" >&2; exit "$READY_EXIT"; }; exit 0 ;;
+  --check) [ -n "$CHECK_SLEEP" ] && sleep "$CHECK_SLEEP"
+           [ -n "$CHECK_SAYS" ] && echo "$CHECK_SAYS" >&2
+           [ -z "$FORCE_CHECK_FAIL" ] && [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
   --store) if [ -n "$SLOW_STORE" ]; then sleep "${STORE_SLEEP:-5}"; fi
            if [ -n "$FAIL_STORE" ]; then cat >/dev/null; exit "${STORE_EXIT:-1}"; fi
            f="$STORE_DIR/$(key "$2")"; cat > "$f.part" && mv "$f.part" "$f"
@@ -66,6 +69,9 @@ exit 2
 	t.Setenv("STORE_EXIT", "")
 	t.Setenv("FAIL_AFTER_STORE", "")
 	t.Setenv("READY_EXIT", "")
+	t.Setenv("READY_SLEEP", "")
+	t.Setenv("CHECK_SLEEP", "")
+	t.Setenv("CHECK_SAYS", "")
 	t.Setenv(envset.SecretHelperEnv, path)
 	for _, v := range agentSessionVars {
 		t.Setenv(v, "") // restored after the test
@@ -1188,26 +1194,56 @@ func TestStoreStepWhenInputKeepsArriving(t *testing.T) {
 			t.Fatal("something was stored")
 		}
 	})
-	t.Run("a signal ends the drain at once", func(t *testing.T) {
+	t.Run("a signal ends the drain at once, with the caveat", func(t *testing.T) {
 		typeIt, finish := onPty(t)
 		defer finish()
+		drainQuiet = 150 * time.Millisecond
 		typeIt("abc\r", false)
 		stream(typeIt, 60) // the typing queue holds 64
 		cancel := make(chan struct{})
 		go func() { time.Sleep(700 * time.Millisecond); close(cancel) }()
 		start := time.Now()
-		if v, res := readWithin(t, cancel, testLimit); res != hiddenStopped || v != nil || time.Since(start) > 2*time.Second {
+		if v, res := readWithin(t, cancel, testLimit); res != hiddenNotQuiet || v != nil || time.Since(start) > 2*time.Second {
 			t.Fatalf("read %q %v after %s", v, res, time.Since(start))
 		}
 	})
+	// A ^C in the drain before the notice: with other input among it, the
+	// caveat; alone, a plain stop.
+	for _, tc := range []struct {
+		name, input string
+		res         hiddenResult
+	}{
+		{name: "a ^C among other input", input: "abc\rxyz\x03", res: hiddenNotQuiet},
+		{name: "a ^C alone after Enter", input: "abc\r\x03", res: hiddenStopped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			typeIt, finish := onPty(t)
+			defer finish()
+			typeIt(tc.input, false)
+			if v, res := readWithin(t, nil, testLimit); res != tc.res || v != nil {
+				t.Fatalf("read %q %v, want %v", v, res, tc.res)
+			}
+		})
+	}
 }
 
-// A terminal whose input cannot be discarded ends the read at once, and
-// the step says why.
+// Input is read, not discarded unseen, wherever the waiting count can be
+// read: a failing discard alone changes nothing. A terminal whose input
+// can be neither counted nor discarded ends the read at once, and the step
+// says why.
 func TestReadHiddenStopsWhenInputCannotBeDiscarded(t *testing.T) {
-	saved := flushTerminal
+	saved, savedCount := flushTerminal, pendingCount
 	flushTerminal = func(int) error { return errors.New("not supported") }
-	t.Cleanup(func() { flushTerminal = saved })
+	t.Cleanup(func() { flushTerminal, pendingCount = saved, savedCount })
+	t.Run("the count still works", func(t *testing.T) {
+		typeIt, finish := onPty(t)
+		defer finish()
+		typeIt("abc\r", false)
+		if v, res := readWithin(t, nil, testLimit); res != hiddenOK || string(v) != "abc" {
+			t.Fatalf("read %q %v", v, res)
+		}
+	})
+	pendingCount = func(int) (int, error) { return 0, errors.New("not supported") }
 	t.Run("the read", func(t *testing.T) {
 		typeIt, finish := onPty(t)
 		defer finish()
@@ -1274,6 +1310,8 @@ func TestStoreStepAsksTheStoreBeforeTheValue(t *testing.T) {
 		_, log := storeHelper(t)
 		m := asDefaultHelper(t, log)
 		t.Setenv("READY_EXIT", "5")
+		_, finish := onPty(t)
+		defer finish()
 		var err error
 		var out string
 		stderr := captureStderr(t, func() { out = captureStdout(t, func() { err = storeWithin(t, "cpb:tok") }) })
@@ -1299,6 +1337,50 @@ func TestStoreStepAsksTheStoreBeforeTheValue(t *testing.T) {
 			t.Fatal("the default helper was not asked --ready")
 		}
 	})
+}
+
+// While --ready runs (an unlock dialog may wait for its answer), the
+// person is told, the terminal's echo is off, and what is typed meanwhile
+// is neither shown nor read as the value: it is discarded before the
+// first prompt, saying so.
+func TestStoreStepReadyKeepsTypingOut(t *testing.T) {
+	store, log := storeHelper(t)
+	asDefaultHelper(t, log)
+	t.Setenv("READY_SLEEP", "1")
+	typeIt, finish := onPty(t)
+	typeIt("typed-during-the-question\r", false)
+	typeDelay = 1200 * time.Millisecond // after --ready has answered
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+	shown := finish()
+	if err != nil || !strings.Contains(out, "Asking the store whether it can take a value") || !strings.Contains(out, "discarded, unseen") {
+		t.Fatalf("store step: %v %q", err, out)
+	}
+	if strings.Contains(shown, "typed-during-the-question") {
+		t.Fatal("what was typed during --ready was shown")
+	}
+	b, rerr := os.ReadFile(filepath.Join(store, "cpb_tok"))
+	if rerr != nil || string(b) != testValue {
+		t.Fatalf("stored %q (%v): what was typed during --ready was taken?", b, rerr)
+	}
+}
+
+// The secret report (cpb play --check, --dry-run --json) waits for a helper
+// no longer than every other check does: one that does not answer leaves
+// "stored" unknown, with a note, and the report ends.
+func TestSecretReportDoesNotWaitForeverOnAHelper(t *testing.T) {
+	storeHelper(t)
+	saved := helperTimeout
+	helperTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { helperTimeout = saved })
+	t.Setenv("CHECK_SLEEP", "5")
+	start := time.Now()
+	r := secretReport([]string{testRef})
+	if len(r) != 1 || r[0].Stored != nil || !strings.Contains(r[0].Note, "did not answer within") || time.Since(start) > 4*time.Second {
+		t.Fatalf("after %s: %+v", time.Since(start), r)
+	}
 }
 
 // A line with a control key in it is not taken: the step says why and asks
@@ -1391,5 +1473,125 @@ func TestConfirmationAsksForTheReference(t *testing.T) {
 	}
 	if !strings.Contains(out, "Type the reference of the secret this playbook may read") {
 		t.Fatalf("the prompt: %q", out)
+	}
+}
+
+// The report keeps what a helper said when it could not answer (one line,
+// never a value), names a default store that cannot answer as such, and
+// says why the file store keeps a value only when no keyring does.
+func TestSecretReportSaysWhy(t *testing.T) {
+	storeHelper(t)
+	t.Setenv("FORCE_CHECK_FAIL", "1")
+	t.Setenv("CHECK_EXIT", "3")
+	t.Setenv("CHECK_SAYS", "vault is sealed")
+	r := secretReport([]string{testRef})
+	if len(r) != 1 || r[0].Stored != nil || !strings.Contains(r[0].Note, "vault is sealed") {
+		t.Fatalf("a helper's reason: %+v", r)
+	}
+	_, log := storeHelper(t)
+	m := asDefaultHelper(t, log)
+	m.targetErr = unavailable("secret-tool could not answer about cpb:tok (crashed)")
+	r = secretReport([]string{"cpb:tok"})
+	if r[0].Store != storeUnknown || !strings.Contains(r[0].Note, "crashed") || r[0].Stored != nil {
+		t.Fatalf("a store that cannot answer: %+v", r)
+	}
+	out := captureStdout(t, func() { printSecretReport(r) })
+	if !strings.Contains(out, "its store cannot answer now") || strings.Contains(out, "kept in the file") {
+		t.Fatalf("the text report: %q", out)
+	}
+	m.targetErr, m.targetWhy = nil, ""
+	out = captureStdout(t, func() { printSecretReport(secretReport([]string{"cpb:tok"})) })
+	if !strings.Contains(out, "kept in the file /test-store/tok (readable by you and root)") || strings.Contains(out, "no keyring") {
+		t.Fatalf("a file the keyring does not hold: %q", out)
+	}
+	m.targetWhy = "no keyring can be reached"
+	out = captureStdout(t, func() { printSecretReport(secretReport([]string{"cpb:tok"})) })
+	if !strings.Contains(out, "(readable by you and root; no keyring: no keyring can be reached)") {
+		t.Fatalf("no keyring: %q", out)
+	}
+}
+
+// The store step holds the write to the store it named (--into), and a
+// default store that cannot say where the value would go stops the step
+// before anything is asked for.
+func TestStoreStepHoldsTheWriteToTheNamedStore(t *testing.T) {
+	t.Run("named", func(t *testing.T) {
+		_, log := storeHelper(t)
+		asDefaultHelper(t, log)
+		typeIt, finish := onPty(t)
+		defer finish()
+		typeIt(testValue+"\r", false)
+		typeIt(testValue+"\r", false)
+		var err error
+		captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+		if err != nil || !strings.Contains(readLog(t, log), "--store cpb:tok --into "+storeFile) {
+			t.Fatalf("%v; the helper's log: %q", err, readLog(t, log))
+		}
+	})
+	t.Run("cannot answer", func(t *testing.T) {
+		_, log := storeHelper(t)
+		m := asDefaultHelper(t, log)
+		m.targetErr = unavailable("secret-tool could not answer about cpb:tok (crashed)")
+		_, finish := onPty(t)
+		defer finish()
+		var err error
+		out := captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+		if err == nil || !strings.Contains(err.Error(), "crashed") || !strings.Contains(err.Error(), "nothing was asked for") || strings.Contains(out, "Type the value") || strings.Contains(readLog(t, log), "--store") {
+			t.Fatalf("%v %q", err, out)
+		}
+	})
+}
+
+// What is typed while --ready runs, without Enter too, is discarded and
+// said to be.
+func TestStoreStepReadyDiscardsTypingWithoutEnter(t *testing.T) {
+	store, log := storeHelper(t)
+	asDefaultHelper(t, log)
+	t.Setenv("READY_SLEEP", "1")
+	typeIt, finish := onPty(t)
+	typeIt("typed-without-enter", false)
+	typeDelay = 1200 * time.Millisecond
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+	shown := finish()
+	if err != nil || !strings.Contains(out, "discarded, unseen") || strings.Contains(shown, "typed-without-enter") {
+		t.Fatalf("%v %q", err, out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(store, "cpb_tok")); string(b) != testValue {
+		t.Fatalf("stored %q", b)
+	}
+}
+
+// The prompt and the store the write is held to come from one answer: a
+// store that would answer differently on a second question (a keyring
+// that flaps) cannot print one store and bind the other.
+func TestStoreStepPromptAndBindingAgree(t *testing.T) {
+	_, log := storeHelper(t)
+	m := asDefaultHelper(t, log)
+	m.targetSeq = []string{storeSecretService, storeFile}
+	typeIt, finish := onPty(t)
+	defer finish()
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+	if err != nil || !strings.Contains(out, "the test store ("+storeSecretService+")") || !strings.Contains(readLog(t, log), "--into "+storeSecretService) || m.targetCalls != 1 {
+		t.Fatalf("%v; asked %d times; %q; log %q", err, m.targetCalls, out, readLog(t, log))
+	}
+}
+
+// When cpb's default helper cannot answer --check (exit 5: a locked
+// keyring item, say), the report does not claim where the value is.
+func TestSecretReportUnknownWhenTheHelperCannotAnswer(t *testing.T) {
+	_, log := storeHelper(t)
+	asDefaultHelper(t, log)
+	t.Setenv("FORCE_CHECK_FAIL", "1")
+	t.Setenv("CHECK_EXIT", "5")
+	t.Setenv("CHECK_SAYS", "cpb:tok is in your Secret Service keyring, which is locked")
+	r := secretReport([]string{"cpb:tok"})
+	if r[0].Store != storeUnknown || r[0].Path != "" || !strings.Contains(r[0].Note, "locked") {
+		t.Fatalf("%+v", r)
 	}
 }

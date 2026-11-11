@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"golang.org/x/term"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/play"
 )
 
 // The store step (SPEC.md, "cpb play", "Secrets"): when a played recipe's
@@ -78,10 +80,14 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 }
 
 // runHelper runs one helper call bounded by helperTimeout. A call that
-// does not end in time is killed, and the error says so.
+// does not end in time is killed, and the error says so. cpb's default
+// helper gets cpb's own store environment (defaultHelperEnv).
 func runHelper(x helperExe, stdin io.Reader, stdout, stderr io.Writer, env []string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
 	defer cancel()
+	if x.def {
+		env = defaultHelperEnv(env)
+	}
 	c := exec.CommandContext(ctx, x.path, append(append([]string{}, x.pre...), args...)...)
 	c.Stdin, c.Stdout, c.Stderr, c.Env = stdin, stdout, stderr, env
 	c.WaitDelay = 2 * time.Second
@@ -176,14 +182,157 @@ func preparePendingStore(refs []string, planOnly, interactive, yes bool, trusted
 // every reference.
 func donePendingStore() { refsPendingStore = nil }
 
-// printPendingNote names the references the run will ask to store.
+// printPendingNote names the references the run will ask to store, and
+// where each value would be kept.
 func printPendingNote(pending []string, planOnly bool) {
 	for _, r := range pending {
-		if planOnly {
-			fmt.Printf("Not stored on this machine yet: %s. Run without --dry-run, from your own terminal, and cpb asks for its value.\n", r)
-		} else {
-			fmt.Printf("Not stored on this machine yet: %s. You will be asked for its value after you confirm it.\n", r)
+		where := ""
+		if x, err := resolveHelperFor([]string{r}); err == nil {
+			where = " It would be kept in " + storeWhere(x, r) + "."
 		}
+		if planOnly {
+			fmt.Printf("Not stored on this machine yet: %s. Run without --dry-run, from your own terminal, and cpb asks for its value.%s\n", r, where)
+		} else {
+			fmt.Printf("Not stored on this machine yet: %s. You will be asked for its value after you confirm it.%s\n", r, where)
+		}
+	}
+}
+
+// playSecretJSON is one secret reference in `cpb play`'s --check and
+// --dry-run JSON (SPEC.md, "cpb play"): whether it is stored on this
+// machine (null when the helper could not answer), and where its value is,
+// or would be kept: for cpb's default helper the store (keychain,
+// secret-service or file) and, for the file store, the file; for a
+// configured helper, the helper; "none" when no helper can take it.
+type playSecretJSON struct {
+	Ref    string `json:"ref"`
+	Stored *bool  `json:"stored"`
+	Store  string `json:"store"`
+	Path   string `json:"path,omitempty"`
+	Helper string `json:"helper,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// blockRefs are the secret references a play block's risks name.
+func blockRefs(block *playJSON) []string {
+	var refs []string
+	for _, r := range block.Risks {
+		if r.Code == play.RiskUsesSecret {
+			refs = append(refs, r.Confirm)
+		}
+	}
+	return refs
+}
+
+// secretReport answers, for each reference, presence through the helper's
+// --check and the store from cpb's default store (target), which reads no
+// value. Nothing here can print or hold a value.
+func secretReport(refs []string) []playSecretJSON {
+	var out []playSecretJSON
+	for _, r := range refs {
+		e := playSecretJSON{Ref: r, Store: "none"}
+		if err := manifest.ValidateCPBRef(r); err != nil {
+			e.Note = err.Error()
+			out = append(out, e)
+			continue
+		}
+		x, err := resolveHelperFor([]string{r})
+		if err != nil {
+			e.Note = err.Error()
+			out = append(out, e)
+			continue
+		}
+		if x.def {
+			if st, err := defaultSecretStore(); err == nil {
+				t, terr := st.target(strings.TrimPrefix(r, manifest.CPBRefPrefix))
+				switch {
+				case terr != nil:
+					e.Store, e.Note = storeUnknown, terr.Error()
+					out = append(out, e)
+					continue
+				case t.kind == storeFile && t.why != "":
+					e.Note = "no keyring: " + t.why
+				}
+				e.Store, e.Path = t.kind, t.path
+			}
+		} else {
+			e.Store, e.Helper = "helper", x.name
+		}
+		// Bounded like every other check (helperCheck): a helper that does
+		// not answer leaves "stored" unknown, never the report waiting. Its
+		// own reason, one line of what it printed (never a value), is kept.
+		var ee *exec.ExitError
+		var said limitedBuffer
+		switch err := helperCheck(x, "CPB_SECRET", r, &said); {
+		case err == nil:
+			e.Stored = new(bool)
+			*e.Stored = true
+		case errors.As(err, &ee) && ee.ExitCode() == notStoredExit:
+			e.Stored = new(bool)
+		default:
+			why := err.Error()
+			if line := firstLine(said.String()); line != "" {
+				why += ": " + line
+			}
+			e.Note = "the helper could not say whether it is stored (" + why + ")"
+			// cpb's default helper asks deeper than cpb's own process (a
+			// locked keyring item is seen only there): when it cannot
+			// answer, where the value is cannot be said either.
+			if x.def && errors.As(err, &ee) && ee.ExitCode() == unavailableExit {
+				e.Store, e.Path = storeUnknown, ""
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// storeUnknown is the report's store when the default helper's store cannot
+// answer now (a keyring that failed): the note says why.
+const storeUnknown = "unknown"
+
+// limitedBuffer keeps the first 1 KiB written to it.
+type limitedBuffer struct{ b []byte }
+
+func (l *limitedBuffer) Write(p []byte) (int, error) {
+	if room := 1024 - len(l.b); room > 0 {
+		l.b = append(l.b, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func (l *limitedBuffer) String() string { return string(l.b) }
+
+// printSecretReport is secretReport for a person, in --check's text report.
+func printSecretReport(report []playSecretJSON) {
+	for _, e := range report {
+		state := "not known whether stored here: " + e.Note
+		switch {
+		case e.Store == "none":
+			state = "no secret helper can take it here: " + e.Note
+		case e.Store == storeUnknown:
+			state = "its store cannot answer now: " + e.Note
+		case e.Stored != nil && *e.Stored:
+			state = "stored here"
+		case e.Stored != nil:
+			state = "not stored here yet"
+		}
+		where := ""
+		switch e.Store {
+		case storeFile:
+			where = "; kept in the file " + e.Path + " (readable by you and root"
+			if strings.HasPrefix(e.Note, "no keyring: ") {
+				where += "; " + e.Note
+			}
+			where += ")"
+		case storeSecretService:
+			where = "; kept in your Secret Service keyring"
+		case storeKeychain:
+			where = "; kept in your macOS Keychain"
+		case "helper":
+			where = "; kept by your secret helper " + e.Helper
+		}
+		fmt.Printf("Secret:  %s: %s%s\n", e.Ref, state, where)
 	}
 }
 
@@ -239,15 +388,43 @@ func storeSecret(ref string) (err error) {
 	}
 	limit := storeLimit(x)
 	stopped := fmt.Errorf("%s was not stored; nothing was written", ref)
-	notQuiet := fmt.Errorf("%s was not stored: you stopped it while input was still arriving on the terminal (a paste still running?), and what arrives from now on may be shown and reach your shell; nothing was written. Run this again once it has stopped", ref)
+	notQuiet := fmt.Errorf("%s was not stored: the step was stopped while input was still arriving on the terminal (a paste still running?), and what arrives from now on may be shown and reach your shell; nothing was written. Run this again once it has stopped", ref)
 	undiscarded := fmt.Errorf("%s was not stored: this terminal's waiting input could not be discarded, so what was typed or pasted past the value could be shown or reach your shell; nothing was written. Use another terminal, or store the value with your own tool", ref)
-	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
+	// The default helper's store is asked where the value would go, and the
+	// write is held to that answer (--into): a store that cannot say stops
+	// the step before anything is asked for.
+	into := ""
+	where := "the store of your secret helper " + x.name
+	if x.def {
+		if st, err := defaultSecretStore(); err == nil {
+			name := strings.TrimPrefix(ref, manifest.CPBRefPrefix)
+			t, terr := st.target(name)
+			if terr != nil {
+				return fmt.Errorf("%s was not stored: %v; nothing was asked for or written", ref, terr)
+			}
+			into, where = t.kind, st.describe(name, t)
+		}
+	}
+	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, where)
 	if x.def {
 		// Before anyone types a value, the store is asked whether it can
 		// take one, with nothing that carries a value: a Keychain locked
 		// where it cannot ask for its password stops the step here, and
 		// one that can ask brings up its unlock dialog now.
+		// It may take a while (an unlock dialog waits for its answer), so
+		// the person is told, and the terminal's echo is off meanwhile:
+		// what is typed then is not shown, and is discarded before the
+		// first prompt rather than read as the value.
+		fmt.Println("Asking the store whether it can take a value (it may ask for its own password first). Type nothing here until you are asked.")
+		fd := int(secretIn.Fd())
+		restoreEcho := echoOff(fd)
 		rerr := runHelper(x, nil, os.Stderr, os.Stderr, os.Environ(), "--ready", ref)
+		typed, perr := pendingCount(fd)
+		flushTerminal(fd)
+		restoreEcho()
+		if perr == nil && typed > 0 {
+			fmt.Println("What was typed meanwhile was discarded, unseen.")
+		}
 		var re *exec.ExitError
 		switch {
 		case isCancelled(promptCancel):
@@ -308,7 +485,11 @@ func storeSecret(ref string) (err error) {
 	// A signal that arrives while a helper runs is caught by the guard and
 	// does not stop the helper; the step checks for it after each call, so
 	// the run stops there and says how far it got.
-	err = runHelper(x, bytes.NewReader(value), os.Stderr, os.Stderr, os.Environ(), "--store", ref)
+	storeArgs := []string{"--store", ref}
+	if into != "" {
+		storeArgs = append(storeArgs, "--into", into)
+	}
+	err = runHelper(x, bytes.NewReader(value), os.Stderr, os.Stderr, os.Environ(), storeArgs...)
 	var ee *exec.ExitError
 	switch {
 	case isCancelled(promptCancel) && err == nil:
@@ -399,8 +580,12 @@ var (
 	drainMax   = 10 * time.Second
 )
 
-// flushTerminal is flushInput (a test makes it fail).
-var flushTerminal = flushInput
+// flushTerminal is flushInput, and pendingCount pendingInput (a test makes
+// them fail).
+var (
+	flushTerminal = flushInput
+	pendingCount  = pendingInput
+)
 
 // drainEnd is how drainInput ended.
 type drainEnd int
@@ -414,17 +599,21 @@ const (
 
 // drainInput runs after every hidden read, echo still off: it takes the
 // input waiting on the terminal f, keeping none of it, until nothing has
-// come for drainQuiet. It looks before it discards: where the waiting
-// count can be read, it reads those bytes (so the read never blocks) and
-// more reports anything in them but line ends, so a paste of several
-// lines, or keys typed right after Enter, are seen even on a terminal
-// without bracketed paste; a ^C among them ends the drain. Where the count
-// cannot be read, it discards once per poll until drainQuiet has passed.
-// After drainMax it says once that input is still arriving, and goes on
-// until it stops, a ^C or a signal. A signal (cancel) ends it at once
-// after one discard, before any read: a read of the key reader may still
-// be pending then, and the drain must not take a byte from under it. err
-// is a terminal whose input cannot be discarded.
+// come for drainQuiet. It always looks before it discards: where the
+// waiting count can be read, it reads those bytes (so the read never
+// blocks) and more reports anything in them but line ends, so a paste of
+// several lines, or keys typed right after Enter, are seen even on a
+// terminal without bracketed paste; a ^C among them ends the drain. Only
+// where the count cannot be read does it discard unseen, once per poll,
+// until drainQuiet has passed. After drainMax it says once that input is
+// still arriving, and goes on until it stops, a ^C or a signal. A signal
+// (cancel) ends it at once, with one discard and no read: a read of the
+// key reader may still be pending then, and the drain must not take a byte
+// from under it. A ^C or a signal while other input was arriving (after
+// the notice, among taken input, or waiting at a signal) ends it as
+// drainStoppedArriving, whose wording warns that what comes after may be
+// shown. err is a terminal whose input cannot be discarded where its
+// waiting count cannot be read either.
 func drainInput(f *os.File, cancel <-chan struct{}) (end drainEnd, more bool, err error) {
 	fd := int(f.Fd())
 	start := time.Now()
@@ -438,32 +627,39 @@ func drainInput(f *os.File, cancel <-chan struct{}) (end drainEnd, more bool, er
 		}
 		return intr, nil
 	}
+	// cancelled ends the drain on a signal: the warning wording when input
+	// was arriving (taken already, or waiting, which is counted, not read).
+	cancelled := func() (drainEnd, bool, error) {
+		n, perr := pendingCount(fd)
+		ferr := flushTerminal(fd)
+		if told || more || (perr == nil && n > 0) {
+			return drainStoppedArriving, more, ferr
+		}
+		return drainCancelled, more, ferr
+	}
+	// stopped ends it on a ^C, with the warning wording when other input
+	// came too.
+	stopped := func() (drainEnd, bool, error) {
+		if told || more {
+			return drainStoppedArriving, more, flushTerminal(fd)
+		}
+		return drainStopped, more, flushTerminal(fd)
+	}
 	if isCancelled(cancel) {
-		return drainCancelled, false, flushTerminal(fd)
-	}
-	// What already waits behind the line is looked at before the first
-	// discard.
-	if n, perr := pendingInput(fd); perr == nil && n > 0 {
-		intr, err := look(n)
-		if err != nil {
-			return drainWentQuiet, more, err
-		}
-		if intr {
-			return drainStopped, more, flushTerminal(fd)
-		}
-	}
-	if err := flushTerminal(fd); err != nil {
-		return drainWentQuiet, more, err
+		return cancelled()
 	}
 	for {
 		if isCancelled(cancel) {
-			return drainCancelled, more, flushTerminal(fd)
+			return cancelled()
 		}
 		if !told && time.Since(start) >= drainMax {
 			told = true
 			fmt.Print("Input is still arriving on the terminal; cpb takes it, unseen, until it stops. Press Ctrl-C to stop now (what comes after that may be shown).\r\n")
 		}
-		n, perr := pendingInput(fd)
+		// Look before discarding, every time: input is read and looked at
+		// where the waiting count can be read, and discarded unseen only
+		// where it cannot.
+		n, perr := pendingCount(fd)
 		switch {
 		case perr != nil:
 			if err := flushTerminal(fd); err != nil {
@@ -475,10 +671,7 @@ func drainInput(f *os.File, cancel <-chan struct{}) (end drainEnd, more bool, er
 				return drainWentQuiet, more, err
 			}
 			if intr {
-				if told {
-					return drainStoppedArriving, more, flushTerminal(fd)
-				}
-				return drainStopped, more, flushTerminal(fd)
+				return stopped()
 			}
 			since = time.Now()
 			continue
@@ -551,7 +744,7 @@ const (
 	// several lines where the terminal has no bracketed paste, or keys
 	// typed just after Enter).
 	hiddenMoreInput
-	// hiddenNotQuiet: a ^C while input was still arriving after drainMax.
+	// hiddenNotQuiet: a ^C or a signal while input was still arriving.
 	hiddenNotQuiet
 	// hiddenUndiscarded: the terminal's input cannot be discarded.
 	hiddenUndiscarded
