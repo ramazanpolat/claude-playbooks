@@ -33,9 +33,11 @@
   escape sequence or any other control key, or longer than the store keeps,
   store nothing and are asked for again, three attempts in all; Backspace
   removes whole characters, and a bracketed paste is taken. After every read
-  the terminal's pending input is discarded, so a multi-line paste reaches
-  neither the next prompt nor the shell, and the step guards itself against
-  signals on every path. A reference used twice is asked for once. It never
+  the terminal's pending input is discarded while echo is still off, until
+  the terminal is quiet, so a paste of any length is neither shown nor
+  reaches the next prompt or the shell; the step guards itself against
+  signals on every path, and stops after a helper call a signal arrived
+  during. A reference used twice is asked for once. It never
   runs with `--yes`, with `--trust-secret` for that reference, without a
   terminal, or when an agent's session is in the environment (a courtesy
   check, not a boundary). `^C`, an empty answer, a closed terminal, a signal

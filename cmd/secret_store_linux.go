@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -105,12 +104,14 @@ func (s secretServiceStore) exists(name string) (bool, error) {
 
 // lockedItem reports whether search lists an item for name: it lists a
 // locked item's path and attributes without unlocking it, and for an
-// unlocked one also its value. The output stays in this process (the
-// helper), is scanned for an item line, and is cleared.
+// unlocked one also its value. It is run without --unlock (which would
+// prompt) and without --all. The output stays in this process (the
+// helper), is scanned in place for an item line, with no copy made, and
+// is cleared.
 func (s secretServiceStore) lockedItem(name string) (bool, error) {
 	var out bytes.Buffer
 	err := s.run(name, nil, &out, io.Discard, "search", "service", "cpb", "name", name)
-	defer clear(out.Bytes())
+	defer func() { b := out.Bytes(); clear(b[:cap(b)]) }()
 	if err != nil {
 		var ue *unavailableError
 		if errors.As(err, &ue) {
@@ -118,8 +119,8 @@ func (s secretServiceStore) lockedItem(name string) (bool, error) {
 		}
 		return false, fmt.Errorf("secret-tool could not search the keyring for cpb %s (%v); nothing was stored", name, err)
 	}
-	for _, line := range strings.Split(out.String(), "\n") {
-		if strings.HasPrefix(line, "[/") {
+	for _, line := range bytes.Split(out.Bytes(), []byte("\n")) {
+		if bytes.HasPrefix(line, []byte("[/")) {
 			return true, nil
 		}
 	}
@@ -143,7 +144,7 @@ func (s secretServiceStore) read(name string) ([]byte, error) {
 	var out bytes.Buffer
 	if err := s.run(name, nil, &out, nil, "lookup", "service", "cpb", "name", name); err != nil {
 		clear(out.Bytes())
-		return nil, fmt.Errorf("the Secret Service did not return cpb %s (%v)", name, err)
+		return nil, fmt.Errorf("the Secret Service did not return cpb %s (%w)", name, err)
 	}
 	return out.Bytes(), nil
 }

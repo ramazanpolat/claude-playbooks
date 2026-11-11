@@ -105,7 +105,7 @@ func (k keychainStore) read(name string) ([]byte, error) {
 	var out bytes.Buffer
 	if err := k.run(name, nil, &out, nil, k.args("find-generic-password", "-s", "cpb", "-a", name, "-w")...); err != nil {
 		clear(out.Bytes())
-		return nil, fmt.Errorf("the Keychain did not return cpb/%s (%v)", name, err)
+		return nil, fmt.Errorf("the Keychain did not return cpb/%s (%w)", name, err)
 	}
 	v := out.Bytes()
 	if n := len(v); n > 0 && v[n-1] == '\n' {
@@ -114,10 +114,11 @@ func (k keychainStore) read(name string) ([]byte, error) {
 	return v, nil
 }
 
-// keychainLockedMarker is how security reports a Keychain that is locked
-// where it cannot show an unlock dialog (errSecInteractionNotAllowed, as in
-// an SSH session).
-var keychainLockedMarker = []byte("nteraction is not allowed")
+// keychainLockedMarkers are how security reports a Keychain that is locked
+// where it cannot show an unlock dialog, as in an SSH session: the status
+// errSecInteractionNotAllowed, -25308, which does not change with the
+// system's language, and its English text as a second sign.
+var keychainLockedMarkers = [][]byte{[]byte("-25308"), []byte("nteraction is not allowed")}
 
 // write adds the item through security's interactive mode, the command on
 // its stdin: the value never appears in any argument list, and as hex
@@ -140,7 +141,10 @@ func (k keychainStore) write(name string, value []byte) error {
 	defer clear(enc)
 	var errb bytes.Buffer
 	err := k.run(name, bytes.NewReader(in), io.Discard, &errb, "-i")
-	locked := bytes.Contains(errb.Bytes(), keychainLockedMarker)
+	locked := false
+	for _, m := range keychainLockedMarkers {
+		locked = locked || bytes.Contains(errb.Bytes(), m)
+	}
 	clear(errb.Bytes())
 	var ue *unavailableError
 	switch {

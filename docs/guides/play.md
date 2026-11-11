@@ -129,7 +129,7 @@ Type it again to confirm, or press Enter to stop:
 - cpb's own store keeps values up to 1536 bytes in the macOS Keychain and
   4096 bytes in the Secret Service: the tools cut a longer value short
   without saying so, so cpb refuses it first. A helper of your own takes
-  longer ones.
+  longer ones, up to 64 KiB through this step.
 - On Linux the value goes to the Secret Service, so a keyring (GNOME
   Keyring, KWallet) must be running in your session. On a server or in a
   container with none, cpb says so and does not ask for the value; use a

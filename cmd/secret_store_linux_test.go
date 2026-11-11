@@ -27,7 +27,8 @@ case "$1" in
           [ -n "$STUB_LOCKED" ] && exit 1
           f="` + items + `/$5"; [ -f "$f" ] || exit 1; cat "$f"; exit 0 ;;
   store)  f="` + items + `/$7"; cat > "$f.part" && mv "$f.part" "$f"; exit 0 ;;
-  search) if [ -n "$STUB_LOCKED" ]; then echo "[/7]"; echo "label = cpb $5"; echo "secret-tool: Cannot get secret of a locked object" >&2; exit 0; fi
+  search) [ -n "$STUB_SEARCH_FAIL" ] && { echo "secret-tool: search failed" >&2; exit 2; }
+          if [ -n "$STUB_LOCKED" ]; then echo "[/7]"; echo "label = cpb $5"; echo "secret-tool: Cannot get secret of a locked object" >&2; exit 0; fi
           f="` + items + `/$5"; [ -f "$f" ] && { echo "[/8]"; echo "secret = $(cat "$f")"; }; exit 0 ;;
 esac
 exit 2
@@ -39,6 +40,7 @@ exit 2
 	t.Setenv("STUB_NO_SERVICE", "")
 	t.Setenv("STUB_LOCKED", "")
 	t.Setenv("STUB_SLOW", "")
+	t.Setenv("STUB_SEARCH_FAIL", "")
 	saved := lookSecretTool
 	lookSecretTool = func() (string, error) { return path, nil }
 	t.Cleanup(func() { lookSecretTool = saved })
@@ -174,5 +176,24 @@ func TestSecretServiceLimit(t *testing.T) {
 	st, _ := osDefaultSecretStore()
 	if st.maxValue() != 4096 || st.maxValue() >= 8192 {
 		t.Fatalf("maxValue %d", st.maxValue())
+	}
+}
+
+// A search that fails is a store that cannot answer, never "not stored";
+// and search runs without --unlock (which would prompt) or --all.
+func TestSecretServiceSearchIsCheckedAndPlain(t *testing.T) {
+	_, log := stubSecretTool(t)
+	st, _ := osDefaultSecretStore()
+	if ok, err := st.exists("tok"); ok || err != nil {
+		t.Fatalf("a missing item: %v %v", ok, err)
+	}
+	for _, line := range strings.Split(readLog(t, log), "\n") {
+		if strings.HasPrefix(line, "search") && line != "search service cpb name tok" {
+			t.Fatalf("the search: %q", line)
+		}
+	}
+	t.Setenv("STUB_SEARCH_FAIL", "1")
+	if ok, err := st.exists("tok"); ok || err == nil {
+		t.Fatalf("a failed search read as %v %v", ok, err)
 	}
 }

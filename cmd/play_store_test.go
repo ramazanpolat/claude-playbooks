@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -36,7 +37,7 @@ printf '%s\n' "$*" >> "$HELPER_LOG"
 key() { printf '%s' "$1" | tr ':/' '__'; }
 case "$1" in
   --check) [ -z "$FORCE_CHECK_FAIL" ] && [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
-  --store) if [ -n "$SLOW_STORE" ]; then sleep 5; fi
+  --store) if [ -n "$SLOW_STORE" ]; then sleep "${STORE_SLEEP:-5}"; fi
            if [ -n "$FAIL_STORE" ]; then cat >/dev/null; exit 1; fi
            f="$STORE_DIR/$(key "$2")"; cat > "$f.part" && mv "$f.part" "$f"; exit 0 ;;
 esac
@@ -52,6 +53,7 @@ exit 2
 	t.Setenv("CHECK_EXIT", "")
 	t.Setenv("FORCE_CHECK_FAIL", "")
 	t.Setenv("SLOW_STORE", "")
+	t.Setenv("STORE_SLEEP", "")
 	t.Setenv(envset.SecretHelperEnv, path)
 	for _, v := range agentSessionVars {
 		t.Setenv(v, "") // restored after the test
@@ -94,6 +96,12 @@ func onPty(t *testing.T) (typeIt func(input string, closeAfter bool), finish fun
 	typeIt = func(input string, closeAfter bool) { queue <- typed{input, closeAfter} }
 	finish = func() string {
 		secretIn = saved
+		// Free a read still waiting on the terminal, so it can be closed
+		// on every way out of a test, a failing one included: ^C ends a
+		// read in raw mode; a read in the terminal's own mode, where ^C is
+		// a signal, ends at a line.
+		io.WriteString(ptmx, "\x03\r")
+		time.Sleep(300 * time.Millisecond)
 		tty.Close()
 		b, _ := io.ReadAll(ptmx)
 		ptmx.Close()
@@ -754,5 +762,171 @@ func TestPendingStoreListsEachReferenceOnce(t *testing.T) {
 	res := &play.Result{Risks: []play.Risk{{Code: play.RiskUsesSecret, Confirm: testRef}, {Code: play.RiskUsesSecret, Confirm: testRef}}}
 	if refs := playRefs(res); len(refs) != 1 {
 		t.Fatalf("playRefs %v", refs)
+	}
+}
+
+// A multi-line paste longer than the terminal's input queue keeps
+// arriving after its first line ends the read and after a single flush.
+// The read discards input while echo is still off until the terminal is
+// quiet, and only then restores it: nothing of the rest is shown, none of
+// it answers the confirmation (only the ^C typed there does), and none is
+// left for the shell.
+func TestStoreStepLongPasteIsNeitherShownNorTaken(t *testing.T) {
+	for _, size := range []int{2 << 10, 8 << 10, 33 << 10} {
+		t.Run(fmt.Sprintf("%d bytes", size), func(t *testing.T) {
+			store, log := storeHelper(t)
+			typeIt, finish := onPty(t)
+			line := strings.Repeat("Zq", 31) + "\r" // 63 bytes a line
+			paste := "first-line\r" + strings.Repeat(line, size/len(line))
+			typeIt(paste, false)
+			typeIt("\x03", false) // at the confirmation
+			var err error
+			out := captureStdout(t, func() { err = storeWithin(t, testRef) })
+			nothingPending(t, typeIt)
+			shown := finish()
+			if err == nil || !strings.Contains(err.Error(), "was not stored; nothing was written") {
+				t.Fatalf("store step: %v (the paste answered a prompt?)", err)
+			}
+			if strings.Contains(out, "differ") || strings.Contains(out, "Try again") {
+				t.Fatalf("the paste answered the confirmation: %q", out)
+			}
+			if strings.Contains(shown, "ZqZq") || strings.Contains(out, "ZqZq") {
+				t.Fatalf("the pasted value was shown (%d bytes of output)", len(shown))
+			}
+			if _, ok := storedValue(store); ok || strings.Contains(readLog(t, log), "--store") {
+				t.Fatal("something was stored")
+			}
+		})
+	}
+}
+
+// A signal that arrives while the helper stores the value does not stop
+// the helper; the step checks for it afterwards and stops there, saying
+// the value was stored, instead of going on.
+func TestStoreStepStopsAfterASignalDuringTheStore(t *testing.T) {
+	store, _ := storeHelper(t)
+	t.Setenv("SLOW_STORE", "1")
+	t.Setenv("STORE_SLEEP", "1")
+	keep := make(chan os.Signal, 1)
+	signal.Notify(keep, syscall.SIGTERM)
+	defer signal.Stop(keep)
+	typeIt, finish := onPty(t)
+	defer finish()
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	go func() {
+		// the two entries are typed by 600 ms; the helper sleeps 1 s
+		time.Sleep(1200 * time.Millisecond)
+		syscall.Kill(os.Getpid(), syscall.SIGTERM)
+	}()
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, testRef) })
+	if err == nil || !strings.Contains(err.Error(), "cancelled: "+testRef+" was stored") {
+		t.Fatalf("store step: %v", err)
+	}
+	if strings.Contains(out, "Stored "+testRef) {
+		t.Fatal("the step went on after the signal")
+	}
+	if v, ok := storedValue(store); !ok || v != testValue {
+		t.Fatalf("stored %q (%v)", v, ok)
+	}
+}
+
+// The step's read limit is the default helper's store's own, and a line
+// over it is refused, not taken; a configured helper reads up to 64 KiB.
+func TestStoreStepReadLimitFollowsTheStore(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	t.Setenv(envset.SecretHelperEnv, "")
+	for _, v := range agentSessionVars {
+		t.Setenv(v, "")
+		os.Unsetenv(v)
+	}
+	m := useMemStore(t)
+	m.max = 5
+	if got := storeLimit(helperExe{def: true}); got != 5 {
+		t.Fatalf("the default helper's limit: %d", got)
+	}
+	if got := storeLimit(helperExe{name: "mine"}); got != maxSecretBytes {
+		t.Fatalf("a configured helper's limit: %d", got)
+	}
+	typeIt, finish := onPty(t)
+	defer finish()
+	for i := 0; i < 3; i++ {
+		typeIt("abcdef\r", false)
+	}
+	var err error
+	captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+	if err == nil || !strings.Contains(err.Error(), "after 3 attempts") || !strings.Contains(err.Error(), "longer than the 5 bytes") || m.writes != 0 {
+		t.Fatalf("an over-long value: %v, %d writes", err, m.writes)
+	}
+}
+
+// A line with a control key in it is not taken: the step says why and asks
+// again, and stores only the next, clean value.
+func TestStoreStepRefusesAControlKey(t *testing.T) {
+	store, _ := storeHelper(t)
+	typeIt, finish := onPty(t)
+	defer finish()
+	typeIt("ab\x01cd\r", false)
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, testRef) })
+	if err != nil || !strings.Contains(out, "control key") {
+		t.Fatalf("store step: %v %q", err, out)
+	}
+	if v, _ := storedValue(store); v != testValue {
+		t.Fatalf("stored %q", v)
+	}
+}
+
+// The step has its guard in place by the time it reads, wherever it runs
+// (checked directly, not by a signal).
+func TestStoreStepIsGuardedWhenItReads(t *testing.T) {
+	storeHelper(t)
+	var guarded bool
+	storeStepReading = func() { guarded = promptCancel != nil }
+	t.Cleanup(func() { storeStepReading = nil })
+	typeIt, finish := onPty(t)
+	defer finish()
+	typeIt("\x03", false)
+	captureStdout(t, func() { storeWithin(t, testRef) })
+	if !guarded || promptCancel != nil {
+		t.Fatalf("guarded while reading: %v; guard left after: %v", guarded, promptCancel != nil)
+	}
+}
+
+// The guard the step installs for itself gives its signals back when it
+// ends: a signal after stop no longer reaches it.
+func TestStepGuardStopGivesSignalsBack(t *testing.T) {
+	keep := make(chan os.Signal, 1)
+	signal.Notify(keep, syscall.SIGHUP)
+	defer signal.Stop(keep)
+	g := newPlayGuard()
+	g.stop()
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	<-keep
+	time.Sleep(100 * time.Millisecond)
+	if n := len(g.sigs); n != 0 {
+		t.Fatalf("a stopped guard still received %d signal(s)", n)
+	}
+}
+
+// The confirmation asks for the reference by that word, never inviting
+// the value with echo on.
+func TestConfirmationAsksForTheReference(t *testing.T) {
+	storeHelper(t)
+	saved := promptIn
+	promptIn = strings.NewReader("y\n" + testRef + "\n")
+	t.Cleanup(func() { promptIn = saved })
+	res := &play.Result{Risks: []play.Risk{{Code: play.RiskUsesSecret, Confirm: testRef}}}
+	var err error
+	out := captureStdout(t, func() { err = playConfirmAsk(res, true, "Run this playbook? [y/N] ") })
+	if err != nil {
+		t.Fatalf("the confirmation: %v", err)
+	}
+	if !strings.Contains(out, "Type the reference of the secret this playbook may read") {
+		t.Fatalf("the prompt: %q", out)
 	}
 }

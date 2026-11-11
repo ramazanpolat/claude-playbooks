@@ -31,6 +31,8 @@ type memStore struct {
 	// onExists and onWrite run first in exists and write (a test checks
 	// the lock there).
 	onExists, onWrite func(name string)
+	// readErr, when set, is what read answers.
+	readErr error
 }
 
 func (m *memStore) maxValue() int {
@@ -54,6 +56,9 @@ func (m *memStore) exists(name string) (bool, error) {
 	return ok, nil
 }
 func (m *memStore) read(name string) ([]byte, error) {
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	v, ok := m.items[name]
@@ -396,4 +401,66 @@ type lockedWriteStore struct{ *memStore }
 
 func (l *lockedWriteStore) write(string, []byte) error {
 	return unavailable("the test store is locked; nothing was stored")
+}
+
+// A value over the store's limit is refused before the lock is even asked
+// for: with the lock held elsewhere, the answer is the limit, at once.
+func TestDefaultHelperChecksTheCapBeforeTheLock(t *testing.T) {
+	m := useMemStore(t)
+	m.max = 4
+	saved := lockTimeout
+	lockTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { lockTimeout = saved })
+	dir, _ := secretLockDir()
+	os.MkdirAll(dir, 0o700)
+	f, err := os.OpenFile(filepath.Join(dir, "tok.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+	err = runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("12345"))
+	if code, ok := exitCode(err); ok && code == unavailableExit {
+		t.Fatalf("the lock was asked for before the limit: %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "at most 4 bytes") {
+		t.Fatalf("a value over the limit: %v", err)
+	}
+}
+
+// The lock is taken with LOCK_NB, so the wait is the helper's own,
+// bounded by lockTimeout, never flock's.
+func TestDefaultHelperLockNeverBlocksInFlock(t *testing.T) {
+	useMemStore(t)
+	var flags []int
+	saved := flockName
+	flockName = func(fd, how int) error {
+		flags = append(flags, how)
+		return saved(fd, how)
+	}
+	t.Cleanup(func() { flockName = saved })
+	if err := runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-1")); err != nil {
+		t.Fatal(err)
+	}
+	if len(flags) == 0 || flags[0] != syscall.LOCK_EX|syscall.LOCK_NB {
+		t.Fatalf("flock flags %v, want LOCK_EX|LOCK_NB first", flags)
+	}
+}
+
+// A read that the store could not answer is exit 5: the read-back after a
+// store (which may have stored the value: the message says so), and the
+// read before a launch.
+func TestDefaultHelperUnansweredReadIsExit5(t *testing.T) {
+	m := useMemStore(t)
+	m.readErr = unavailable("the test store did not answer within 1ms")
+	var err error
+	out := captureStderr(t, func() { err = runSecretHelper([]string{"--store", "cpb:tok"}, strings.NewReader("v-1")) })
+	if code, ok := exitCode(err); !ok || code != unavailableExit || !strings.Contains(out, "may be stored") {
+		t.Fatalf("the read-back: %v %q", err, out)
+	}
+	m.items["tok2"] = []byte("v-2")
+	out = captureStderr(t, func() { err = runSecretHelper([]string{"T=cpb:tok2", "--", "sh", "-c", "true"}, strings.NewReader("")) })
+	if code, ok := exitCode(err); !ok || code != unavailableExit || strings.Contains(out, "v-2") {
+		t.Fatalf("the launch read: %v %q", err, out)
+	}
 }

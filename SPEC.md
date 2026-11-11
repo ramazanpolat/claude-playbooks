@@ -641,14 +641,17 @@ values in the operating system's store:
   found" (its exit 44) is one, and the line names the fix (unlock the
   Keychain, `security unlock-keychain`, or configure a helper of your own).
   A **Keychain locked where it cannot show its unlock dialog** (an SSH
-  session, say) is found only when the add fails: `security` reports that
-  interaction is not allowed, which the helper reads in-process and never
-  prints, and the store exits 5 saying the Keychain is locked and how to
-  unlock it. The value has been typed by then; nothing is stored.
+  session, say) is found only when the add fails: `security` reports the
+  status `-25308` (errSecInteractionNotAllowed; its text is localised, the
+  number is not), which the helper reads in-process and never prints, and
+  the store exits 5 saying the Keychain is locked and how to unlock it. The
+  value has been typed by then; nothing is stored.
 - **Time.** Each call to `security` or `secret-tool` is stopped after 60
   seconds (time enough to answer an unlock dialog), and the per-name lock
   is waited on for 30 seconds; either ending is exit 5, and the lock's line
-  names the locked name and nothing else.
+  names the locked name and nothing else. This holds for every call: the
+  check, the store, the read-back after a store (whose line then says the
+  value may be stored) and the read before a launch.
 
 - **Values.** Printable ASCII only (space to `~`: no tab, newline or
   non-ASCII character), and no longer than the store keeps whole: 1536
@@ -709,16 +712,23 @@ helper's `--check` exits 4):
   keeps (the default helper's store's limit, else 64 KiB). Bracketed
   paste's markers are not such a sequence: they are dropped, and the paste
   between them is the value;
-- **after every read** the terminal's mode is put back and whatever is
-  waiting to be read on it is discarded, so a multi-line paste fills
-  neither the confirmation nor, once cpb exits, the shell;
+- **after every read**, while echo is still off, whatever is waiting to be
+  read on the terminal is discarded, again and again, until it has been
+  quiet for three polls 25 ms apart (at most 3 seconds); only then is the
+  terminal's mode put back, and what came in between is discarded too. A
+  long paste keeps arriving after a single discard, so this is what keeps
+  it from being shown once echo is back, from filling the confirmation,
+  and, once cpb exits, from reaching the shell;
 - the value goes to `<helper> --store REF` on stdin, and the reference is
   checked again before anything is applied;
 - **an empty answer (to either prompt), ^C, a closed terminal, a signal to
   cpb (`SIGINT`, `SIGTERM`, `SIGHUP`) while it waits, or a helper that
   fails or does not answer** stops the run with nothing stored and nothing
   written. The step catches those signals itself wherever it runs (`cpb
-  play`, `--keep`, `cpb update`), so the terminal is put back first.
+  play`, `--keep`, `cpb update`), so the terminal is put back first. A
+  signal that arrives while the helper stores the value does not stop the
+  helper; the step stops right after it, saying whether the value was
+  stored, and nothing else is written.
 - **A reference used more than once** is one secret: listed, checked and
   asked for once.
 
@@ -726,7 +736,9 @@ The step runs only when **all** of these hold, and otherwise a reference that
 does not resolve is refused as before, naming why and asking the person to
 run the command from their own terminal:
 
-- standard input and output are both a terminal;
+- standard input and output are both a terminal, and cpb can discard
+  terminal input on this system (Linux and macOS; elsewhere the step does
+  not run);
 - the run has no `--yes`, and no `--trust-secret` confirmed this reference;
 - the environment shows no agent session (`CLAUDECODE` or
   `CLAUDE_CODE_ENTRYPOINT` set, even to an empty value). This is a

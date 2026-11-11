@@ -60,6 +60,8 @@ var helperTimeout = 90 * time.Second
 // session is in the environment.
 func storeStepRefusal(ref string, interactive, yes bool, trusted []string) string {
 	switch {
+	case !flushSupported:
+		return "cpb cannot discard terminal input on this system, so a paste could reach the shell"
 	case !interactive:
 		return "not on a terminal"
 	case yes:
@@ -226,6 +228,9 @@ func storeSecret(ref string) error {
 			g.stop()
 		}()
 	}
+	if storeStepReading != nil {
+		storeStepReading()
+	}
 	limit := storeLimit(x)
 	stopped := fmt.Errorf("%s was not stored; nothing was written", ref)
 	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
@@ -264,15 +269,32 @@ func storeSecret(ref string) error {
 		}
 		fmt.Printf("Not stored: %s. Try again (%d of %d).\n", why, attempt+1, storeAttempts)
 	}
-	if err := runHelper(x, bytes.NewReader(value), os.Stderr, os.Stderr, os.Environ(), "--store", ref); err != nil {
+	// A signal that arrives while a helper runs is caught by the guard and
+	// does not stop the helper; the step checks for it after each call, so
+	// the run stops there and says how far it got.
+	err = runHelper(x, bytes.NewReader(value), os.Stderr, os.Stderr, os.Environ(), "--store", ref)
+	switch {
+	case isCancelled(promptCancel) && err == nil:
+		return fmt.Errorf("cancelled: %s was stored before the signal was handled; nothing else was written", ref)
+	case isCancelled(promptCancel):
+		return fmt.Errorf("cancelled: %s was not stored; nothing was written", ref)
+	case err != nil:
 		return fmt.Errorf("%s could not be stored (secret helper %s: %v); nothing was written. Store the value with your own tool, then run this again", ref, x.name, err)
 	}
-	if err := helperCheck(x, "CPB_SECRET", ref, nil); err != nil {
+	err = helperCheck(x, "CPB_SECRET", ref, nil)
+	switch {
+	case isCancelled(promptCancel):
+		return fmt.Errorf("cancelled: %s was stored before the signal was handled; nothing else was written", ref)
+	case err != nil:
 		return fmt.Errorf("%s was stored but does not resolve (secret helper %s: %v); nothing was written", ref, x.name, err)
 	}
 	fmt.Printf("Stored %s.\n", ref)
 	return nil
 }
+
+// storeStepReading, when set, runs as the step is about to read the value
+// (a test checks the guard is in place by then).
+var storeStepReading func()
 
 // isCancelled reports whether cancel (nil: never) is closed.
 func isCancelled(cancel <-chan struct{}) bool {
@@ -282,6 +304,32 @@ func isCancelled(cancel <-chan struct{}) bool {
 	default:
 		return false
 	}
+}
+
+// The drain's pace: input is discarded every drainPoll until drainQuiet
+// polls in a row find nothing waiting, for at most drainMax (a stream that
+// never stops, such as a key held down, ends there).
+var (
+	drainPoll  = 25 * time.Millisecond
+	drainQuiet = 3
+	drainMax   = 3 * time.Second
+)
+
+// drainInput discards the terminal's input until it has been quiet for
+// drainQuiet polls. Where the pending count cannot be read, it discards
+// once per poll for the same number of polls.
+func drainInput(fd int) {
+	deadline := time.Now().Add(drainMax)
+	for quiet := 0; quiet < drainQuiet && time.Now().Before(deadline); {
+		flushInput(fd)
+		time.Sleep(drainPoll)
+		if n, err := pendingInput(fd); err != nil || n == 0 {
+			quiet++
+		} else {
+			quiet = 0
+		}
+	}
+	flushInput(fd)
 }
 
 // hiddenResult is how a hidden read ended.
@@ -340,6 +388,12 @@ func readHidden(f *os.File, cancel <-chan struct{}, limit int) ([]byte, hiddenRe
 		return nil, hiddenStopped
 	}
 	defer func() {
+		// Discard input while echo is still off, until the terminal has
+		// been quiet a while: a long paste keeps arriving after a single
+		// flush, and once echo is back on it would be shown and could
+		// answer the next prompt. Only then is the mode restored, and
+		// anything that came in between is discarded too.
+		drainInput(fd)
 		term.Restore(fd, old)
 		flushInput(fd)
 	}()
