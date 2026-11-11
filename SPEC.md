@@ -617,8 +617,9 @@ values in the operating system's store:
 | System | Store | Item |
 |---|---|---|
 | macOS | the default Keychain (normally the login one), through `/usr/bin/security` | a generic password, service `cpb`, account `<name>`, label `cpb/<name>` |
-| Linux | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>` |
-| other, or no store | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
+| Linux, a keyring answers | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>` |
+| Linux, no keyring (since v4.7.0): no `secret-tool`, or no keyring daemon or session bus | the file store, `$XDG_DATA_HOME/cpb/secrets/` (default `~/.local/share/cpb/secrets/`) | the file `<name>`, mode `0600`, in a `0700` directory: **plaintext at rest** |
+| other | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
 
 - **A store that cannot answer** is never "not stored": `--check` and
   `--store` exit 5, with one line naming the store, the reason and the fix,
@@ -627,9 +628,37 @@ values in the operating system's store:
   Service can be reached (a server or a container with `secret-tool` but no
   keyring daemon, or no session bus); the default helper tells them apart
   by its stderr, which is empty only for a missing item (libsecret 0.21).
-  Any message there is a store that cannot answer, and the line quotes its
-  first line. On macOS any `security` failure other than "item not found"
-  is one.
+  Any message there means no keyring can be reached, and the file store
+  answers instead. A file store that cannot be trusted (below), with no
+  keyring holding the name, is a store that cannot answer. On macOS any
+  `security` failure other than "item not found" is one.
+- **The file store** (Linux, since v4.7.0) is for a server, a container or
+  a VM with no keyring, where the alternative would be no store at all.
+  - It is used when `secret-tool` is not installed, or when no Secret
+    Service can be reached. A relative `XDG_DATA_HOME` is ignored, as the
+    XDG rules say.
+  - **Two stores on one machine** (a keyring that starts later, or stops):
+    reads and `--check` look in the keyring when it answers, then in the
+    file; `--store` writes to the keyring when it answers, else to the
+    file. A name found in either refuses `--store`. A name in both is the
+    keyring's, and `--check` says in one stderr line where the file copy
+    is.
+  - **Trust.** The directory and the file are never followed through a
+    symbolic link, must be owned by the user, and must grant group and
+    others nothing (`0700`, `0600`); otherwise nothing is read or written,
+    and the line names the `chmod` that fixes it. The file layer refuses a
+    name that is not a plain file name, beside the grammar.
+  - **Writing** never replaces: the value goes to a temporary file (`0600`,
+    created exclusively) in the same directory, is synced, and is linked to
+    its name, which fails when the name exists. Under the per-name lock.
+  - **What it does not do.** The value is plaintext at rest: the user and
+    root can read it, and it goes with a home, container or VM that is
+    thrown away. The store step's prompt says so, and so does `cpb play
+    --check --json` (`secrets[].store = "file"` and its `path`) before the
+    step. To remove a value, delete its file.
+  - The directory is outside every playbooks root: an export (`SHOW
+    CREATE`) carries a `cpb:<name>` reference and never its value, and no
+    statement copies, resets or drops the directory.
 
 - **Values.** Printable ASCII only (space to `~`: no tab, newline or
   non-ASCII character), at most 64 KiB; any other value is refused, and
@@ -3210,12 +3239,21 @@ block added. It is a top-level field that `APPLY`'s own report does not have:
          "playbook", "endpoint", "refused": [{"line", "what", "reason"}],
          "risks": [{"code", "line", "clause", "detail", "confirm"}],
          "not_stored": [<ref>, ...],
+         "secrets": [{"ref", "stored", "store", "path", "helper", "note"}],
          "sandbox": {"backend", "note"},
          "keep": true, "update": {"from_sha256", "unchanged", "tag_moved"}}
 ```
 
 `not_stored` is present only when a reference does not resolve yet (the
-store step, *Secrets*). `--check --json` is the same object with no statements, and `sandbox`
+store step, *Secrets*). `secrets` (since v4.7.0; `--check` and `--dry-run`)
+lists each secret reference: `stored` is `true` or `false` from the
+helper's `--check`, or `null` with a `note` when it cannot say; `store` is
+where the value is, or would be kept: `keychain`, `secret-service` or
+`file` for cpb's default helper (with the file's `path` for `file`),
+`helper` for a configured one (named in `helper`), or `none` when no helper
+can take it (with a `note`). No value is read for it, so an agent that runs
+only these checks can tell the person where their secret will be kept
+before the person runs the store step. `--check --json` is the same object with no statements, and `sandbox`
 `null`. `sandbox.backend` is `""` when the play runs on this machine. `keep`
 and `update` are present only for `--keep` and `cpb update`.
 

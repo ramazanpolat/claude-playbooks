@@ -49,10 +49,22 @@ func storeCannotAnswer(err error) error {
 	return &commandExitError{code: unavailableExit}
 }
 
+// The stores cpb's default helper keeps a value in, as `cpb play`'s JSON
+// names them (secrets[].store).
+const (
+	storeKeychain      = "keychain"
+	storeSecretService = "secret-service"
+	storeFile          = "file"
+)
+
 // osSecretStore is the store the default helper keeps cpb:<name> in.
 type osSecretStore interface {
 	// where names the store and the item, for the store step's prompt.
 	where(name string) string
+	// target is where name's value is kept, or would be kept when it is not
+	// stored yet: one of the store kinds above, and the file's path for the
+	// file store. It reads no value.
+	target(name string) (kind, path string)
 	// exists reports whether the item is there; an error means the store
 	// could not answer (storeCannotAnswer), never "not there".
 	exists(name string) (bool, error)

@@ -35,6 +35,8 @@ func osDefaultSecretStore() (osSecretStore, error) {
 	return keychainStore{}, nil
 }
 
+func (keychainStore) target(string) (string, string) { return storeKeychain, "" }
+
 func (keychainStore) where(name string) string {
 	return "your default macOS Keychain, as the item cpb/" + name + " (service cpb, account " + name + ")"
 }

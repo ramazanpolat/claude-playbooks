@@ -26,6 +26,9 @@ type memStore struct {
 }
 
 func (m *memStore) where(name string) string { return "the test store, as " + name }
+func (m *memStore) target(name string) (string, string) {
+	return storeFile, "/test-store/" + name
+}
 func (m *memStore) exists(name string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

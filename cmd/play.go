@@ -120,6 +120,11 @@ type playJSON struct {
 	// NotStored: secret references not stored on this machine yet, which a
 	// run from the person's own terminal asks for (the store step).
 	NotStored []string `json:"not_stored,omitempty"`
+	// Secrets: each secret reference, whether it is stored on this machine,
+	// and where its value is or would be kept (secretReport), so an agent
+	// running only --check or --dry-run can tell the person before the
+	// person runs the store step.
+	Secrets []playSecretJSON `json:"secrets,omitempty"`
 }
 
 type playHeaderJSON struct {
@@ -197,6 +202,7 @@ func runPlay(cmd *cobra.Command, args []string) error {
 			return printPlayCheckJSON(block)
 		}
 		printPlayCheck(os.Stdout, src, rec, res)
+		printSecretReport(secretReport(playRefs(res)))
 		if len(res.Refused) > 0 {
 			return &commandExitError{code: 1}
 		}
@@ -277,6 +283,7 @@ func playLine(n int) string {
 }
 
 func printPlayCheckJSON(block *playJSON) error {
+	block.Secrets = secretReport(blockRefs(block))
 	rep := &applyReport{Files: []string{}, Warnings: []applyWarning{}, Statements: []applyStmtJSON{}, Play: block}
 	code := 0
 	if len(block.Refused) > 0 {
@@ -432,6 +439,7 @@ func randomHex(n int) string {
 
 // runPlayApplyJSON is runApplyJSON with the play block added.
 func runPlayApplyJSON(st *grammar.Stmt, block *playJSON) error {
+	block.Secrets = secretReport(blockRefs(block))
 	rep := &applyReport{Files: []string{}, Warnings: []applyWarning{}, Statements: []applyStmtJSON{}, Play: block}
 	stdout := os.Stdout
 	os.Stdout = os.Stderr

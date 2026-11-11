@@ -31,6 +31,7 @@ exit 2
 		t.Fatal(err)
 	}
 	t.Setenv("STUB_NO_SERVICE", "")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	saved := lookSecretTool
 	lookSecretTool = func() (string, error) { return path, nil }
 	t.Cleanup(func() { lookSecretTool = saved })
@@ -65,12 +66,16 @@ func TestSecretServiceStoreKeepsTheValueOffArgv(t *testing.T) {
 	}
 }
 
-func TestNoSecretToolNamesTheFix(t *testing.T) {
-	saved := lookSecretTool
-	lookSecretTool = func() (string, error) { return "", os.ErrNotExist }
-	t.Cleanup(func() { lookSecretTool = saved })
-	if _, err := osDefaultSecretStore(); err == nil || !strings.Contains(err.Error(), "secret_helper") {
-		t.Fatalf("no store: %v", err)
+// With no secret-tool the store is the file store, never a refusal.
+func TestNoSecretToolUsesTheFileStore(t *testing.T) {
+	dir := fileStoreHome(t)
+	noSecretTool(t)
+	st, err := osDefaultSecretStore()
+	if err != nil {
+		t.Fatalf("no secret-tool: %v", err)
+	}
+	if kind, path := st.target("tok"); kind != storeFile || path != filepath.Join(dir, "tok") {
+		t.Fatalf("target: %s %s", kind, path)
 	}
 }
 
@@ -80,10 +85,8 @@ func TestNoSecretToolNamesTheFix(t *testing.T) {
 // store that cannot answer, named with its reason and the fix.
 func TestSecretServiceUnreachableIsNotNotStored(t *testing.T) {
 	stubSecretTool(t)
-	st, err := osDefaultSecretStore()
-	if err != nil {
-		t.Fatal(err)
-	}
+	tool, _ := lookSecretTool()
+	st := secretServiceStore{tool: tool}
 	if ok, err := st.exists("tok"); ok || err != nil {
 		t.Fatalf("a missing item: %v %v", ok, err)
 	}
@@ -108,5 +111,27 @@ func TestSecretServiceUnreachableIsNotNotStored(t *testing.T) {
 		if strings.Contains(err.Error(), "secret-tool: secret-tool") {
 			t.Fatalf("the tool's prefix is doubled: %v", err)
 		}
+	}
+}
+
+// With the Secret Service out of reach, the default store falls back to
+// the file store instead of failing: not there, and a new value goes to
+// the file, named with the reason.
+func TestUnreachableSecretServiceFallsBackToTheFile(t *testing.T) {
+	stubSecretTool(t) // sets a data home of its own: replaced below
+	dir := fileStoreHome(t)
+	t.Setenv("STUB_NO_SERVICE", "Cannot autolaunch D-Bus without X11 $DISPLAY")
+	st, err := osDefaultSecretStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.exists("tok"); ok || err != nil {
+		t.Fatalf("exists: %v %v", ok, err)
+	}
+	if kind, path := st.target("tok"); kind != storeFile || path != filepath.Join(dir, "tok") {
+		t.Fatalf("target: %s %s", kind, path)
+	}
+	if w := st.where("tok"); !strings.Contains(w, "no keyring can be reached") || !strings.Contains(w, "root") {
+		t.Fatalf("where: %s", w)
 	}
 }

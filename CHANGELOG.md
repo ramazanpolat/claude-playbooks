@@ -12,10 +12,21 @@
   each value back after writing it, and stores one name at a time. A
   configured helper always wins; any other scheme with no helper is refused as
   before. A machine with no store refuses a `cpb:` reference and names the
-  fix, and a store that cannot answer (on Linux, `secret-tool` with no
-  keyring daemon or no session bus) exits 5 with the reason, never "not
+  fix, and a store that cannot answer exits 5 with the reason, never "not
   stored". `<name>` is a lowercase letter or digit, then up to 63 of `a-z`,
   `0-9`, `.`, `_` and `-`.
+- **A file store on Linux machines with no keyring.** On a server, a
+  container or a VM with no `secret-tool`, or with no keyring daemon or
+  session bus, cpb's default helper keeps a `cpb:<name>` value in
+  `$XDG_DATA_HOME/cpb/secrets/<name>` (default `~/.local/share/cpb/secrets/`),
+  mode `0600` in a `0700` directory, written through a temporary file and a
+  link, so it never replaces one. The value is plaintext at rest, readable by
+  the user and root, and the store step's prompt says so. Links, other
+  owners and open modes are refused. When a keyring starts later, a value in
+  the file is still found and new values go to the keyring; a name in both is
+  the keyring's. `cpb play --check --json` and `--dry-run --json` list each
+  secret (`secrets`): whether it is stored, and where it is or would be kept,
+  with the file's path for the file store.
 - **The store step in `cpb play`.** When a played recipe's secret reference is
   not stored yet (the helper's `--check` exits 4, a status the helper
   interface now names; a store that cannot answer is refused as before),

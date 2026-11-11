@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 
 	"golang.org/x/term"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/play"
 )
 
 // The store step (SPEC.md, "cpb play", "Secrets"): when a played recipe's
@@ -127,14 +129,114 @@ func preparePendingStore(refs []string, planOnly, interactive, yes bool, trusted
 // every reference.
 func donePendingStore() { refsPendingStore = nil }
 
-// printPendingNote names the references the run will ask to store.
+// printPendingNote names the references the run will ask to store, and
+// where each value would be kept.
 func printPendingNote(pending []string, planOnly bool) {
 	for _, r := range pending {
-		if planOnly {
-			fmt.Printf("Not stored on this machine yet: %s. Run without --dry-run, from your own terminal, and cpb asks for its value.\n", r)
-		} else {
-			fmt.Printf("Not stored on this machine yet: %s. You will be asked for its value after you confirm it.\n", r)
+		where := ""
+		if x, err := resolveHelperFor([]string{r}); err == nil {
+			where = " It would be kept in " + storeWhere(x, r) + "."
 		}
+		if planOnly {
+			fmt.Printf("Not stored on this machine yet: %s. Run without --dry-run, from your own terminal, and cpb asks for its value.%s\n", r, where)
+		} else {
+			fmt.Printf("Not stored on this machine yet: %s. You will be asked for its value after you confirm it.%s\n", r, where)
+		}
+	}
+}
+
+// playSecretJSON is one secret reference in `cpb play`'s --check and
+// --dry-run JSON (SPEC.md, "cpb play"): whether it is stored on this
+// machine (null when the helper could not answer), and where its value is,
+// or would be kept: for cpb's default helper the store (keychain,
+// secret-service or file) and, for the file store, the file; for a
+// configured helper, the helper; "none" when no helper can take it.
+type playSecretJSON struct {
+	Ref    string `json:"ref"`
+	Stored *bool  `json:"stored"`
+	Store  string `json:"store"`
+	Path   string `json:"path,omitempty"`
+	Helper string `json:"helper,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// blockRefs are the secret references a play block's risks name.
+func blockRefs(block *playJSON) []string {
+	var refs []string
+	for _, r := range block.Risks {
+		if r.Code == play.RiskUsesSecret {
+			refs = append(refs, r.Confirm)
+		}
+	}
+	return refs
+}
+
+// secretReport answers, for each reference, presence through the helper's
+// --check and the store from cpb's default store (target), which reads no
+// value. Nothing here can print or hold a value.
+func secretReport(refs []string) []playSecretJSON {
+	var out []playSecretJSON
+	for _, r := range refs {
+		e := playSecretJSON{Ref: r, Store: "none"}
+		if err := manifest.ValidateCPBRef(r); err != nil {
+			e.Note = err.Error()
+			out = append(out, e)
+			continue
+		}
+		x, err := resolveHelperFor([]string{r})
+		if err != nil {
+			e.Note = err.Error()
+			out = append(out, e)
+			continue
+		}
+		if x.def {
+			if st, err := defaultSecretStore(); err == nil {
+				e.Store, e.Path = st.target(strings.TrimPrefix(r, manifest.CPBRefPrefix))
+			}
+		} else {
+			e.Store, e.Helper = "helper", x.name
+		}
+		c := x.command("--check", "CPB_SECRET="+r)
+		c.Env = withoutKeys(os.Environ(), []string{"CPB_SECRET"})
+		var ee *exec.ExitError
+		switch err := c.Run(); {
+		case err == nil:
+			e.Stored = new(bool)
+			*e.Stored = true
+		case errors.As(err, &ee) && ee.ExitCode() == notStoredExit:
+			e.Stored = new(bool)
+		default:
+			e.Note = "the helper could not say whether it is stored (" + err.Error() + ")"
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// printSecretReport is secretReport for a person, in --check's text report.
+func printSecretReport(report []playSecretJSON) {
+	for _, e := range report {
+		state := "not known whether stored here: " + e.Note
+		switch {
+		case e.Store == "none":
+			state = "no secret helper can take it here: " + e.Note
+		case e.Stored != nil && *e.Stored:
+			state = "stored here"
+		case e.Stored != nil:
+			state = "not stored here yet"
+		}
+		where := ""
+		switch e.Store {
+		case storeFile:
+			where = "; kept in the file " + e.Path + " (readable by you and root: no keyring)"
+		case storeSecretService:
+			where = "; kept in your Secret Service keyring"
+		case storeKeychain:
+			where = "; kept in your macOS Keychain"
+		case "helper":
+			where = "; kept by your secret helper " + e.Helper
+		}
+		fmt.Printf("Secret:  %s: %s%s\n", e.Ref, state, where)
 	}
 }
 
