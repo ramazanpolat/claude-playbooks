@@ -112,8 +112,14 @@ file. Without one it is refused before anything is written.
   source clones it. Both need `claude` or `git` on `PATH` and, for a remote
   source, the network.
 - A `SET … FROM '<ref>'` that fails its check means the secret is not stored:
-  ask the human to store it with their secret helper. Never ask for the
-  value.
+  ask the human to store it with their secret helper. A `cpb:<name>`
+  reference (since v4.7.0) is kept by cpb itself: when a recipe holds it,
+  the human runs `cpb play <recipe>` in their own terminal, which asks them
+  for the value (that step never runs for you, with `--yes`, or without a
+  terminal); otherwise they store the item SPEC.md names ("cpb's default
+  helper") in their Keychain or keyring themselves. `cpb play --check
+  --json <recipe>` lists each secret, whether it is stored and where it
+  would be kept, without reading a value. Never ask for the value.
 
 The statements and file rules:
 [SPEC.md](SPEC.md). Worked
@@ -133,9 +139,11 @@ cpb EXPLAIN PLAYBOOK reviewer --json         # verify: route.account.name is "gl
 cpb run --account glm reviewer -p "…"        # one launch on an account the playbook lists
 ```
 
-- The credential is a reference the human's secret helper resolves. If the
-  `CREATE ACCOUNT` check says it is not stored, ask the human to store it with
-  their helper; never ask for the value, never write it `AS PLAINTEXT`.
+- The credential is a reference the human's secret helper resolves (for
+  `cpb:<name>`, cpb's own store). If the `CREATE ACCOUNT` check says it is not
+  stored, ask the human to store it: with their helper, or for `cpb:<name>`
+  as the item SPEC.md names, in their Keychain or keyring; never ask for the
+  value, never write it `AS PLAINTEXT`.
 - A playbook on an account that uses no Claude login (a router or Console
   key) needs `SET login = 'isolated'`; the launch refuses a shared one.
 - The human's to decide, never yours: storing the secret, `AS PLAINTEXT`,
