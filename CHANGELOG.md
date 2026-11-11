@@ -38,15 +38,21 @@
 
 ### Docs
 
-- **SPEC's no-token path marks the macOS difference.** That a refresh in a
-  shared playbook refreshes the shared login, or leaves a regular file in
-  place of the link, holds where the login is a plaintext file (Linux). On
-  macOS (observed with Claude Code 2.1.322) a shared playbook's refresh
-  lands in that playbook's own Keychain item (`Claude Code-credentials-`
-  plus 8 hex digits derived from its config directory) and leaves no file;
-  its `.credentials.json` stays the link. Sync never reads that item. Not
-  established: which of the two Claude Code reads first, and whether a
-  refresh rotates the refresh token.
+- **SPEC's no-token path marks the macOS difference, each statement by its
+  source.** That a refresh in a shared playbook refreshes the shared login,
+  or leaves a regular file in place of the link, holds where the login is a
+  plaintext file (Linux). On macOS: *documented*, the Keychain entry is
+  keyed to `CLAUDE_CONFIG_DIR`, and `.credentials.json` is the fallback
+  when the Keychain rejects a write; *issue-level*
+  ([anthropics/claude-code#93051](https://github.com/anthropics/claude-code/issues/93051)),
+  the Keychain is read first and the file only when that read returns
+  nothing, so the linked file only seeds a playbook that has no item yet;
+  *implied, not stated*, refresh tokens rotate, and parallel sessions
+  coordinate renewal only within one config directory; *observed* with
+  Claude Code 2.1.322, a shared playbook's refresh lands in its own
+  Keychain item and its link stays, and sync never reads that item. *Not
+  established*: whether rotation invalidates a copy in another directory in
+  every case.
 
 ## [v4.6.0] -- 2026-11-10
 
