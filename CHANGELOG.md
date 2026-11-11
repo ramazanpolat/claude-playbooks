@@ -7,7 +7,12 @@ v4.6.1 fixes how cpb writes the shared login store,
 rewrote that file from the Keychain in place, so a reader at the same moment
 could find it empty or partial, and a newer login a playbook held in a file
 of its own could be replaced by an older one. Now the store is written only
-when its value changes, atomically, and never with an older login.
+when its value changes, atomically, and never with an older login. A store
+open to group or others is made owner-only in place, and a store that does
+not parse comes with what to do about it.
+
+SPEC and the authentication guide now describe how a shared login behaves
+on macOS, each statement marked by its source.
 
 It does not change when a login expires or how Claude Code refreshes one,
 and it does not bring back a login that has already expired: where Claude
