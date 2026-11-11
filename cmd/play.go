@@ -117,6 +117,9 @@ type playJSON struct {
 	Keep bool `json:"keep,omitempty"`
 	// Update: cpb update <name>'s, against the kept playbook (slice 4).
 	Update *playUpdateJSON `json:"update,omitempty"`
+	// NotStored: secret references not stored on this machine yet, which a
+	// run from the person's own terminal asks for (the store step).
+	NotStored []string `json:"not_stored,omitempty"`
 }
 
 type playHeaderJSON struct {
@@ -405,10 +408,14 @@ func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block 
 			return err
 		}
 		st := &grammar.Stmt{Verb: grammar.Apply, Files: []string{setup, recipe}, Target: name, DryRun: true, Yes: true, JSON: playJSONF}
+		pending, _ := preparePendingStore(playRefs(res), true, false, playYes, playTrustSecret)
+		defer donePendingStore()
+		block.NotStored = pending
 		if playJSONF {
 			return runPlayApplyJSON(st, block)
 		}
 		printPlayCheck(os.Stdout, src, rec, res)
+		printPendingNote(pending, true)
 		fmt.Println("\n" + sb.Note)
 		fmt.Println("\nThe plan, against a throwaway playbook (nothing is written):")
 		return applyRun(st, nil)

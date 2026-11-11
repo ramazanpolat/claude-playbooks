@@ -34,7 +34,7 @@
           };
           # Recompute after any go.mod/go.sum change: set pkgs.lib.fakeHash,
           # build, and copy the hash the error reports.
-          vendorHash = "sha256-6oEuEjbUyTMx4wmcpMYv1nZ3Wx5SuZm6v9QFN2Hucn8=";
+          vendorHash = "sha256-W2NcnOu6+V/dTBQwA9kxSi/cXZblnWWGZ0gCtRuUCfg=";
           subPackages = [ "." ];
           # nixpkgs 26.05 builds with go_1_26 (buildGoModule = buildGo126Module),
           # which go.mod's `go 1.26.0` requires.

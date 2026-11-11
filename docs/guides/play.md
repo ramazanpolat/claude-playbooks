@@ -96,6 +96,79 @@ typed: you type the host (`TLS` for a certificate change), and a typo stops
 the run, with nothing written. A secret reference (`SET VAR GH FROM 'keychain:…'`) is
 typed too, and the prompt says the secret is read on this machine, as you.
 
+## A secret that is not stored yet
+
+A recipe can name a secret it needs as `cpb:<name>`, for example
+`SET VAR SERVICE_TOKEN FROM 'cpb:service-token'`. With no secret helper of your
+own, cpb keeps such a secret in your system's store: your default macOS
+Keychain (normally the login one), or the Secret Service on Linux (through
+`secret-tool`).
+
+If it is not stored yet, the preview says so:
+
+```
+Not stored on this machine yet: cpb:service-token. You will be asked for its value after you confirm it.
+```
+
+After you type the reference, cpb names where the value will go and asks for
+it twice, without showing what you type:
+
+```
+cpb:service-token is not stored on this machine yet. Its value will be written to your default macOS Keychain, as the item cpb/service-token (service cpb, account service-token).
+Type the value now (it is not shown), or press Enter to stop:
+Type it again to confirm, or press Enter to stop:
+```
+
+- If the two entries differ, nothing is stored and cpb asks again, three
+  times at most. The same goes for an arrow, Delete, a Ctrl key or another
+  key you cannot see the effect of while you type. Backspace and `^U`
+  work (not inside a paste). Pasting works too: paste the value, one line.
+  A paste of several lines is refused and asked for again, and so is a
+  value followed by anything you type within a moment of Enter. On a
+  terminal without bracketed paste that holds only when the rest of the
+  paste arrives within 300 ms of its first line; a paste that pauses for
+  longer than that is the one case where its rest is shown and answers
+  the next prompt. Nothing else you type or paste past the value is shown
+  or reaches your shell. If a paste keeps sending for more than 10
+  seconds, cpb says so and keeps discarding it until it stops; press
+  `^C` to stop instead, and what arrives after that may be shown.
+- An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
+  nothing is stored.
+- cpb's own store keeps values up to 1536 bytes in the macOS Keychain and
+  4096 bytes in the Secret Service: the tools cut a longer value short
+  without saying so, so cpb refuses it first. A helper of your own takes
+  longer ones, up to 64 KiB through this step.
+- On Linux the value goes to the Secret Service, so a keyring (GNOME
+  Keyring, KWallet) must be running in your session. On a server or in a
+  container with none, cpb says so and does not ask for the value; use a
+  helper of your own there. A locked keyring is the same: unlock it, then
+  run the command again.
+- A macOS Keychain that is locked where it cannot show its unlock window (in
+  an SSH session, say) is found before cpb asks for the value: cpb asks for
+  nothing and tells you to run `security unlock-keychain` first. Where the
+  window can be shown, the Keychain asks for its password before you type
+  the value.
+- cpb never replaces a stored secret: to change one, store it under a new name
+  and point the recipe at that.
+- If the recipe is someone else's and its name is fixed, or you stored the
+  wrong value, remove the item yourself and run the command again:
+  `security delete-generic-password -s cpb -a <name>` on macOS, or
+  `secret-tool clear service cpb name <name>` on Linux.
+- cpb's own store keeps printable ASCII values only (letters, digits,
+  punctuation and spaces); a helper of your own takes any value.
+- cpb waits up to a minute for your Keychain or keyring to answer (an
+  unlock window, say), and then stops with nothing stored.
+- The step runs only from your own terminal: never with `--yes` or
+  `--trust-secret`, never without a terminal, and not when it finds an
+  agent's session in the environment (a courtesy check, not a lock). An
+  agent can show you the plan (`--dry-run`) and the command; you run the
+  command and type the value yourself.
+
+What this protects, and what it does not: the value stays out of command
+lines and out of cpb's output, so no log or transcript of them holds it. It
+does not hide the value from programs that run as you. Any of them can read it
+from the system's store, an agent's included.
+
 ## Sandboxed by default
 
 The session runs in a Docker Sandbox (`sbx`) where one is installed, and the

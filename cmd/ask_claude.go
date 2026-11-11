@@ -437,12 +437,12 @@ func askCommand(ctx context.Context, signIn askSignIn, claudePath string, args, 
 		c.Env = env
 		return c, nil
 	}
-	_, helper, err := resolveHelper()
+	x, err := resolveHelperFor([]string{a.Auth.Ref})
 	if err != nil {
 		return nil, fmt.Errorf("account %s's Claude token is a secret reference, and %w: nothing was sent", a.Name, err)
 	}
-	argv := append([]string{auth.OAuthTokenEnv + "=" + a.Auth.Ref, "--", claudePath}, args...)
-	c := exec.CommandContext(ctx, helper, argv...)
+	argv := append(append(append([]string{}, x.pre...), auth.OAuthTokenEnv+"="+a.Auth.Ref, "--", claudePath), args...)
+	c := exec.CommandContext(ctx, x.path, argv...)
 	c.Env = withoutKeys(env, []string{auth.OAuthTokenEnv})
 	return c, nil
 }

@@ -51,6 +51,49 @@ func resolveHelper() (*envset.Helper, string, error) {
 	return h, path, nil
 }
 
+// helperExe is how a secret helper runs: its executable and the arguments
+// before its own. The default helper is this binary with secretHelperArg
+// (secret_default.go).
+type helperExe struct {
+	path string
+	pre  []string
+	def  bool   // cpb's default helper
+	name string // for messages: the configured command, or the default's name
+}
+
+// command is the helper process for args (its own arguments).
+func (x helperExe) command(args ...string) *exec.Cmd {
+	return exec.Command(x.path, append(append([]string{}, x.pre...), args...)...)
+}
+
+// allCPBRefs reports references that are all cpb:<name>, the only scheme
+// the default helper resolves.
+func allCPBRefs(refs []string) bool {
+	if len(refs) == 0 {
+		return false
+	}
+	for _, r := range refs {
+		if !strings.HasPrefix(r, manifest.CPBRefPrefix) {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveHelperFor is the helper for these references: the configured one,
+// else, when every reference is cpb:<name>, cpb's default helper. Any other
+// reference with no helper configured is refused as before.
+func resolveHelperFor(refs []string) (helperExe, error) {
+	h, path, err := resolveHelper()
+	if err == nil {
+		return helperExe{path: path, name: h.Command}, nil
+	}
+	if !errors.Is(err, errNoHelper) || !allCPBRefs(refs) {
+		return helperExe{}, err
+	}
+	return defaultHelperExe()
+}
+
 // helperState is the secret helper a run will have configured by a given
 // point: a playbook file may set the helper and use it in the same run, so
 // its references are checked against that helper, not the one configured
@@ -73,6 +116,18 @@ func (s helperState) after(c grammar.Clause) helperState {
 		return helperState{set: true}
 	}
 	return s
+}
+
+// resolveFor is resolveHelperFor at this point of the run.
+func (s helperState) resolveFor(refs []string) (helperExe, error) {
+	h, path, err := s.resolve()
+	if err == nil {
+		return helperExe{path: path, name: h.Command}, nil
+	}
+	if !errors.Is(err, errNoHelper) || !allCPBRefs(refs) {
+		return helperExe{}, err
+	}
+	return defaultHelperExe()
 }
 
 func (s helperState) resolve() (*envset.Helper, string, error) {
@@ -105,7 +160,14 @@ func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 	if len(refs) == 0 {
 		return nil
 	}
-	h, path, err := s.resolve()
+	names := make([]string, 0, len(refs))
+	for _, v := range refs {
+		if err := manifest.ValidateCPBRef(v.Ref); err != nil {
+			return fmt.Errorf("%s: %w", v.Key, err)
+		}
+		names = append(names, v.Ref)
+	}
+	x, err := s.resolveFor(names)
 	if err != nil {
 		return err
 	}
@@ -120,11 +182,14 @@ func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 		if err := manifest.ValidateRefKey(v.Key); err != nil {
 			return err
 		}
-		c := exec.Command(path, "--check", v.Key+"="+v.Ref)
-		c.Env = env
-		c.Stdout, c.Stderr = os.Stderr, os.Stderr
-		if err := c.Run(); err != nil {
-			return fmt.Errorf("secret helper %s could not resolve the reference for %s (%v); nothing was written", h.Command, v.Key, err)
+		// A reference play is about to ask the person to store
+		// (play_store.go) is not stored yet, by design: the plan shows it
+		// as such, and the real run checks it again after the store step.
+		if refsPendingStore[v.Ref] {
+			continue
+		}
+		if err := runHelper(x, nil, os.Stderr, os.Stderr, env, "--check", v.Key+"="+v.Ref); err != nil {
+			return fmt.Errorf("secret helper %s could not resolve the reference for %s (%v); nothing was written", x.name, v.Key, err)
 		}
 	}
 	return nil
@@ -133,8 +198,9 @@ func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 // launchPlan is how a launch execs: claude directly, or through the helper
 // when the launch's layers hold references.
 type launchPlan struct {
-	helper string            // executable; "" launches claude directly
-	refs   map[string]string // key -> reference
+	helper    string            // executable; "" launches claude directly
+	helperPre []string          // the helper's arguments before its own (the default helper's)
+	refs      map[string]string // key -> reference
 	// headers are the account's header names (account.Rendered.Headers):
 	// the helper then execs cpb's header step, self, before claude
 	// (account_headers.go).
@@ -149,11 +215,11 @@ func planLaunch(eff *manifest.Env) (*launchPlan, error) {
 	if eff == nil || len(eff.Refs) == 0 {
 		return &launchPlan{}, nil
 	}
-	_, path, err := resolveHelper()
+	x, err := resolveHelperFor(refValues(eff.Refs))
 	if err != nil {
 		return nil, fmt.Errorf("this launch uses secret references (%s): %w", strings.Join(sortedKeys(eff.Refs), ", "), err)
 	}
-	return &launchPlan{helper: path, refs: eff.Refs}, nil
+	return &launchPlan{helper: x.path, helperPre: x.pre, refs: eff.Refs}, nil
 }
 
 // withHeaders makes a launch through the helper pass the account's headers.
@@ -185,7 +251,8 @@ func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec
 		return c
 	}
 	keys := sortedKeys(lp.refs)
-	argv := make([]string, 0, len(keys)+2+len(claudeArgs))
+	argv := make([]string, 0, len(lp.helperPre)+len(keys)+2+len(claudeArgs))
+	argv = append(argv, lp.helperPre...)
 	for _, k := range keys {
 		argv = append(argv, k+"="+lp.refs[k])
 	}
@@ -215,6 +282,15 @@ func refuseRefsInSandbox(eff *manifest.Env, label string, headers []string) erro
 		return fmt.Errorf("%s uses secret references (%s), and a sandboxed launch cannot resolve them yet", label, strings.Join(what, ", "))
 	}
 	return nil
+}
+
+// refValues is a key->reference map's references, in key order.
+func refValues(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, k := range sortedKeys(m) {
+		out = append(out, m[k])
+	}
+	return out
 }
 
 func sortedKeys(m map[string]string) []string {

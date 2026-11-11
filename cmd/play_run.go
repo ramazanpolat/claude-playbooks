@@ -167,7 +167,7 @@ func playConfirmAsk(res *play.Result, interactive bool, question string) error {
 		case play.RiskUsesSecret:
 			// A recipe with references never runs sandboxed: the reader is
 			// this machine, as you, and the prompt says so where it is typed.
-			q = fmt.Sprintf("Type the secret this playbook may read, on this machine, as you (%s): ", r.Confirm)
+			q = fmt.Sprintf("Type the reference of the secret this playbook may read, on this machine, as you (%s): ", r.Confirm)
 		case play.RiskTLSOrProxy:
 			if r.Confirm == "TLS" {
 				q = "Type TLS to let this playbook change which certificates are trusted: "
@@ -183,6 +183,17 @@ func playConfirmAsk(res *play.Result, interactive bool, question string) error {
 		}
 		if a != r.Confirm {
 			return fmt.Errorf("%s was not confirmed; nothing was written", r.Confirm)
+		}
+		// The store step (play_store.go): a reference the plan showed as not
+		// stored yet is asked for now, from this terminal only.
+		if r.Code == play.RiskUsesSecret && storeAfterConfirm[r.Confirm] {
+			if w := storeStepRefusal(r.Confirm, interactive, playYes, playTrustSecret); w != "" {
+				return fmt.Errorf("%s is not stored on this machine, and cpb asks for a value only from your own terminal (%s); nothing was written", r.Confirm, w)
+			}
+			if err := storeSecret(r.Confirm); err != nil {
+				return err
+			}
+			delete(storeAfterConfirm, r.Confirm)
 		}
 	}
 	return nil
@@ -296,9 +307,13 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 		files := []string{setup, recipe}
 
 		// The preview: the recipe, its risks, and the plan of the exact bytes.
+		pending, _ := preparePendingStore(playRefs(res), false, interactive, playYes, playTrustSecret)
 		printPlayCheck(os.Stdout, src, rec, res)
+		printPendingNote(pending, false)
 		fmt.Println("\nWhat it would do, in a throwaway playbook removed when the session ends:")
-		if err := applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, DryRun: true, Yes: true}, nil); err != nil {
+		err = applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, DryRun: true, Yes: true}, nil)
+		donePendingStore()
+		if err != nil {
 			return err
 		}
 		fmt.Println("\n" + sb.Note)
@@ -361,6 +376,7 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 type playGuard struct {
 	sigs      chan os.Signal
 	done      chan struct{}
+	exited    chan struct{}
 	cancelled chan struct{}
 	once      sync.Once
 	mu        sync.Mutex
@@ -368,9 +384,10 @@ type playGuard struct {
 }
 
 func newPlayGuard() *playGuard {
-	g := &playGuard{sigs: make(chan os.Signal, 8), done: make(chan struct{}), cancelled: make(chan struct{})}
+	g := &playGuard{sigs: make(chan os.Signal, 8), done: make(chan struct{}), exited: make(chan struct{}), cancelled: make(chan struct{})}
 	signal.Notify(g.sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
+		defer close(g.exited)
 		for {
 			select {
 			case s := <-g.sigs:
@@ -404,6 +421,24 @@ func (g *playGuard) isCancelled() bool {
 	default:
 		return false
 	}
+}
+
+// stop ends a guard the store step installed for itself (storeSecret):
+// its signals go back to their default handling, so a later ^C or TERM
+// ends cpb as it would have without the step. It waits for the guard's
+// goroutine, then reports whether a signal reached the guard, including
+// one delivered just before signal.Stop that it never handled, so the
+// step cannot miss it.
+func (g *playGuard) stop() bool {
+	signal.Stop(g.sigs)
+	close(g.done)
+	<-g.exited
+	select {
+	case <-g.sigs:
+		return true
+	default:
+	}
+	return g.isCancelled()
 }
 
 // release ends the guard after clean-up. TERM and HUP stay ignored for the

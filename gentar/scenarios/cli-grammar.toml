@@ -573,3 +573,10 @@ printf %s "$J" | grep -qF '"envs":["umine"]' || { echo aundo-env-kept; printf %s
 printf %s "$J" | grep -qF '"workdir":null' && printf %s "$J" | grep -qF '"share_skills":false' || { echo aundo-sandbox-kept; printf %s "$J"; exit 1; }
 echo apply-undo-env-sandbox-ok'''
 contains = "apply-undo-env-sandbox-ok"
+
+[[verify.commands]]
+# A cpb:<name> reference's name is a plain word (v4.7.0): any other is
+# refused when the statement is parsed, with the rule and without echoing
+# the name (it may be a pasted secret), and nothing is written.
+command = '''B=$(cpb SHOW PLAYBOOK gpb --json); if cpb "ALTER PLAYBOOK gpb SET VAR CPBREF FROM 'cpb:Not-Plain'" > "$HOME/cpbref.out" 2>&1; then echo bad-name-accepted; elif ! grep -q "a cpb: reference's name is a lowercase letter or digit" "$HOME/cpbref.out"; then echo "bad-name-wrong: $(head -c 300 "$HOME/cpbref.out")"; elif grep -q "Not-Plain" "$HOME/cpbref.out"; then echo bad-name-echoed; elif [ "$(cpb SHOW PLAYBOOK gpb --json)" != "$B" ]; then echo bad-name-wrote; else echo cpb-ref-name-ok; fi'''
+contains = "cpb-ref-name-ok"

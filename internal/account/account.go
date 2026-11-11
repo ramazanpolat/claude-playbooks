@@ -324,6 +324,8 @@ func (au *Auth) validate() error {
 			return fmt.Errorf("%s needs a reference: %s FROM '<ref>'", au.Kind, au.Kind)
 		case au.Ref != "" && !manifest.LooksLikeRef(au.Ref):
 			return fmt.Errorf("%s: not a secret reference (a scheme form such as 'keychain:<service>')", au.Kind)
+		case au.Ref != "" && manifest.ValidateCPBRef(au.Ref) != nil:
+			return fmt.Errorf("%s: %v", au.Kind, manifest.ValidateCPBRef(au.Ref))
 		case au.Helper != "":
 			return fmt.Errorf("%s takes no helper", au.Kind)
 		}

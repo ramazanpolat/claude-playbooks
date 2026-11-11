@@ -578,23 +578,237 @@ cpb never names or discovers one.
 cpb checks one thing about its shape, a scheme followed by a colon
 (`keychain:…`, `op://…`, `vault:…`), so a value pasted where a reference
 belongs is refused, and never echoed. Everything else about a reference is
-the helper's business.
+the helper's business, except `cpb:<name>`, whose `<name>` is a lowercase
+letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`
+(refused otherwise, without quoting it, in every statement that takes a
+reference and in the playbook, env-set and account files that hold one).
 
 **The helper interface** (cpb's own contract):
 
 - **Check**, at write time: `<helper> --check KEY=REF`. Exit 0 means the
   reference resolves. Anything else fails the statement, showing the
-  helper's own message, which must never contain the value.
+  helper's own message, which must never contain the value. Exit 4 means
+  it is not stored (since v4.7.0): the one failure the store step below
+  acts on. Any other, such as a store that is locked or cannot be reached,
+  is refused as before.
 - **Exec**, at launch: `<helper> K1=REF1 [K2=REF2 …] -- claude <args>`. The
   helper resolves the references, sets them in the environment of that one
   command, and execs it. cpb fetches no values; there is no value-returning
   call, and none may be built. A non-zero exit before `claude` starts means
   cpb did not launch, and the helper's message says why.
+- **Store** (optional, since v4.7.0): `<helper> --store REF`, the value on
+  its stdin, never an argument. Exit 0 means it is stored. A helper without
+  it exits non-zero (cpb then says to store the value with your own tool and
+  run again). Only the store step below calls it.
+- **Time.** cpb waits at most 90 seconds for each `--check` and `--store`
+  it runs; a helper that has not answered by then is stopped, and the
+  statement or the step fails with nothing written.
 
-**Without a configured helper**, cpb stays fully usable. `SET … FROM` is
-refused, and so is launching a playbook whose layers hold a reference, each
-with one line: "no secret helper configured (ALTER DEFAULTS SET secret_helper =
+**Without a configured helper**, cpb stays fully usable. A `cpb:<name>`
+reference is resolved by cpb's default helper (below). Any other `SET … FROM`
+is refused, and so is launching a playbook whose layers hold one, each with
+one line: "no secret helper configured (ALTER DEFAULTS SET secret_helper =
 …)". Literal values work without one.
+
+**cpb's default helper** (since v4.7.0) is used only when no helper is
+configured (neither `secret_helper` nor `CPB_SECRET_HELPER`) and every
+reference involved is `cpb:<name>`; a configured helper always wins, for
+`cpb:` references too. It is cpb's own binary run in a helper mode, as a
+process of its own: it speaks the interface above (`--check`, exec,
+`--store`), so the cpb that launches still never holds a value, and one
+verb of its own, `--ready REF`, which only the store step calls (below). It
+keeps values in the operating system's store:
+
+| System | Store | Item |
+|---|---|---|
+| macOS | the default Keychain (normally the login one), through `/usr/bin/security` | a generic password, service `cpb`, account `<name>`, label `cpb/<name>`; at most 1536 bytes |
+| Linux | the Secret Service (GNOME Keyring, KWallet, …), through libsecret's `secret-tool` | attributes `service=cpb`, `name=<name>`, label `cpb <name>`; at most 4096 bytes |
+| other, or no store | none | a `cpb:` reference is refused, naming the fix: configure a helper of your own |
+
+- **A store that cannot answer** is never "not stored": `--check` and
+  `--store` exit 5, with one line naming the store, the reason and the fix,
+  so the store step below is not offered against it. On Linux,
+  `secret-tool lookup` exits 1 both for a missing item and when no Secret
+  Service can be reached (a server or a container with `secret-tool` but no
+  keyring daemon, or no session bus); the default helper tells them apart
+  by its stderr, which is empty only for a missing item (libsecret 0.21).
+  Any message there is a store that cannot answer, and the line quotes its
+  first line. A **locked keyring** answers `lookup` as a missing item does,
+  also when its unlock prompt was dismissed, and `secret-tool store` would
+  then replace the item once it is unlocked; so a missing answer is checked
+  with `secret-tool search`, which lists a locked item without unlocking it,
+  and a locked item is a store that cannot answer ("unlock the keyring, then
+  run this again"). On macOS any `security` failure other than "item not
+  found" (its exit 44) is one, and the line names the fix (unlock the
+  Keychain, `security unlock-keychain`, or configure a helper of your own).
+  A **presence check brings up no dialog**: `--check` asks
+  `find-generic-password` without `-w`, which answers on a locked Keychain
+  as on an unlocked one (0, or 44), so it reports a missing name as not
+  stored whatever the lock, from any caller (`--dry-run`, `--json`, an
+  agent's session). A **Keychain locked where it cannot show its unlock
+  dialog** (an SSH session, say) is found by `--ready`, which the store
+  step runs right before it asks a person for a value and nowhere else:
+  it asks `security show-keychain-info`, which carries no value. There it
+  exits 36 (errSecInteractionNotAllowed, -25308, as an exit status), and
+  `--ready` exits 5 saying the Keychain is locked and how to unlock it
+  (`security unlock-keychain`), so the step asks for nothing. In a session
+  that can show the dialog, that call waits for it, up to the 60-second
+  limit below, before anything is typed. Every later call that meets a
+  locked Keychain says the same with exit 5: reading the value (exit 36,
+  nothing on stderr) and the add (exit 36, and on stderr
+  `add-generic-password: returned -25308` after a line whose text is
+  localised; the number, the exit status, or the English text is enough,
+  read in-process and never printed). Observed
+  over `ssh localhost` with a locked throwaway keychain on GitHub's runner
+  images macos-15-arm64 20261104.0514.1 (macOS 15.8.2) and macos-26-arm64
+  20261102.0473.1 (macOS 26.7.2); in the runner's own session, which has a
+  window server, each of those calls waited until it was stopped at 20
+  seconds.
+- **Time.** Each call to `security` or `secret-tool` is stopped after 60
+  seconds (time enough to answer an unlock dialog), and the per-name lock
+  is waited on for 30 seconds; either ending is exit 5, and the lock's line
+  names the locked name and nothing else. This holds for every call: the
+  check, the store, the read-back after a store (whose line then says the
+  value may be stored) and the read before a launch.
+
+- **Values.** Printable ASCII only (space to `~`: no tab, newline or
+  non-ASCII character), and no longer than the store keeps whole: 1536
+  bytes in the Keychain, 4096 in the Secret Service. Any other value is
+  refused before anything is written. macOS's `security` prints any other
+  value as hex when it is read, so it would not reach the launch as given.
+  Both tools cut a longer value short without saying so: `security -i`
+  reads its commands in lines of 4096 bytes, and the add carries the value
+  as hex after up to 172 bytes of its own, so about 1960 bytes fit;
+  `secret-tool store` keeps the first 8192 bytes of its stdin (measured,
+  libsecret 0.21). A cut value would be stored, found by `--check`, and
+  launched as given. A helper of your own takes any value, up to 64 KiB
+  through the store step.
+- **Writing.** On macOS the add command goes to `security -i` on its stdin,
+  the value hex-encoded (`-X`), so it is in no argument list. On Linux it
+  goes to `secret-tool store` on its stdin. Neither tool's output is shown.
+  After every write the value is read back and compared: another program
+  may write the same item at the same moment, so no exit status proves the
+  value stored is the one given, and a store that does not hold it reports
+  it as not stored. (`security -i` does exit with its add's status: 45 for
+  an item that exists, 36 for a locked Keychain, on the images named
+  above.)
+- **Never in place.** `--store` of a name that is stored already is refused
+  (no `-U`): rotating a secret is a new name, verified, then the old one
+  retired. Default helpers storing one name take a lock on it first (an
+  empty file, `cpb/secret-locks/<name>.lock` in the user's cache
+  directory), so two of them never both find it absent. The rule binds
+  cpb's helpers only: another program of the same user can write the same
+  item at the same moment, and `secret-tool store` replaces a matching
+  item.
+- **macOS access setting.** The item is created by `/usr/bin/security`
+  without `-A` or `-T`, so its access list trusts the program that created
+  it and nothing else: the decrypt entry lists `/usr/bin/security` alone
+  (checked on a throwaway keychain). The default helper reads it through
+  that same program, so a launch asks for nothing; another application that
+  asks for the value gets the Keychain's own prompt. That list stops other
+  applications, not other processes of the same user: any of them can run
+  `/usr/bin/security` too.
+
+**The store step** (since v4.7.0; `cpb play`, `--keep` and `cpb update` of a
+played playbook). When a recipe's secret reference is not stored yet (the
+helper's `--check` exits 4):
+
+- **the plan** shows it ("Not stored on this machine yet: `<ref>`") instead
+  of refusing, and `--json` lists it as `"not_stored"`. A run that only plans
+  (`--dry-run`, `--check`) never stores anything;
+- **after the person typed the reference** (its typed confirmation), cpb
+  names where the value will be written (for the default helper the store
+  and the item, for another helper the helper) and asks for it **twice**,
+  with echo off, from standard input, which must be a terminal (below). A
+  stored value is never replaced, so a typo nobody saw would be permanent;
+- **editing:** Backspace removes the last character, all of its bytes, and
+  `^U` the whole line;
+- **entries that differ, or a line that is refused** store nothing, say
+  why, and are asked for again, three attempts in all; after the third the
+  run stops, saying to store the value with your own tool and run again. A
+  line is refused when a key that sends an escape sequence (an arrow,
+  Delete, Home, a function key, Alt with a key) or any other control key
+  (`^A`, `^W`, `^D` inside a line, …) was pressed, since with echo off what
+  it added or dropped is not seen, or when it is longer than the store
+  keeps (the default helper's store's limit, else 64 KiB), or when it is a
+  paste of more than one line, or when more than line ends followed it
+  (below);
+- **before the first prompt**, with the default helper only, the step runs
+  its `--ready REF`, which asks the store, with nothing that carries a
+  value, whether it can take one (on macOS `security show-keychain-info`,
+  which brings up the Keychain's unlock dialog now where one can be shown;
+  on Linux nothing is asked). Exit 5 stops the step with the store's
+  reason and nothing asked for. A configured helper is never sent it;
+- **pastes:** the read turns the terminal's bracketed paste on (and off
+  after), so on a terminal that has it a paste arrives between its markers
+  and is read to its end marker, whatever its gaps: one line with its
+  newline is the value, more than one line is refused. Inside a paste,
+  Backspace, `^U` and `^D` are refused as control keys (what they removed
+  is not seen). A paste whose end marker has not come a second after a
+  line end inside it is named, once, with how to stop (`^C`);
+- **after every read**, while echo is still off, the input waiting on the
+  terminal is taken, at once whenever any is waiting, until nothing has
+  come for 300 ms; only then is the terminal's mode put back, and what
+  came in between is discarded too. Where the waiting count can be read
+  (Linux and macOS), that input is read, kept nowhere, and looked at
+  first: a line followed by anything but line ends is refused ("more
+  input followed the line"), so a paste of several lines is refused on a
+  terminal without bracketed paste too, when its rest is waiting or comes
+  within 300 ms, and so are keys typed within 300 ms of Enter. So what was
+  typed or pasted past the line is never shown once echo is back, never
+  fills the confirmation and, once cpb exits, never reaches the shell.
+  Input that keeps arriving for 10 seconds without such a pause is named,
+  once, and the step goes on taking it until it stops; a `^C` among it
+  ends the step with nothing stored, saying that what arrives after may
+  be shown and reach the shell. A signal to cpb ends the drain at once,
+  with the same caveat. A terminal whose input cannot be discarded stops
+  the step, saying why. A terminal without bracketed paste whose paste
+  pauses for longer than 300 ms is the one case left: what comes after
+  the pause is shown, and answers the next prompt;
+- the value goes to `<helper> --store REF` on stdin, and the reference is
+  checked again before anything is applied;
+- **an empty answer (to either prompt), ^C, a closed terminal, a signal to
+  cpb (`SIGINT`, `SIGTERM`, `SIGHUP`) while it waits, or a helper that
+  fails or does not answer** stops the run with nothing stored and nothing
+  written. The step catches those signals itself wherever it runs (`cpb
+  play`, `--keep`, `cpb update`), so the terminal is put back first. A
+  signal that arrives while the helper stores the value does not stop the
+  helper; the step stops right after it, saying whether the value was
+  stored, and nothing else is written. When the helper failed after the
+  signal (a ^C reaches the whole foreground process group, the helper
+  included, perhaps after its write), the step asks the store once
+  (`--check`) and says only what that shows: "an item named `<ref>`
+  exists now", "not stored", or "may be stored: run this again to see".
+  A signal after the step's last check stops the run the same way, also
+  one that reaches the step's own guard just as it ends. A helper's
+  `--store` that exits 5 (the store could not answer) is followed by the
+  same one check, with the same three answers; the step never sends the
+  person to another tool then.
+- **A reference used more than once** is one secret: listed, checked and
+  asked for once.
+
+The step runs only when **all** of these hold, and otherwise a reference that
+does not resolve is refused as before, naming why and asking the person to
+run the command from their own terminal:
+
+- standard input and output are both a terminal, and cpb can discard
+  terminal input on this system (Linux and macOS; elsewhere the step does
+  not run);
+- the run has no `--yes`, and no `--trust-secret` confirmed this reference;
+- the environment shows no agent session (`CLAUDECODE` or
+  `CLAUDE_CODE_ENTRYPOINT` set, even to an empty value). This is a
+  courtesy check, not a boundary: a program that clears both passes it.
+
+No flag, environment variable or file ever supplies a value, and none may be
+added.
+
+**What the step does not cover.** It keeps the value out of argument lists,
+out of cpb's output and files, and so out of any log or transcript of them. It
+does not hide the value from the person's own processes. A program that drives
+a terminal of its own (a pseudo-terminal it started) can pass the terminal
+test. Any process of the same user can ask the operating system's store for
+the value, an agent's included. Keeping a secret from an agent that runs as
+you is a sandbox's job, not this step's.
 
 `FROM` also names a playbook's source in `CREATE PLAYBOOK`; the position
 disambiguates.
@@ -3101,11 +3315,13 @@ block added. It is a top-level field that `APPLY`'s own report does not have:
          "header": {"title", "description", "needs", "create_with", "min_cpb"},
          "playbook", "endpoint", "refused": [{"line", "what", "reason"}],
          "risks": [{"code", "line", "clause", "detail", "confirm"}],
+         "not_stored": [<ref>, ...],
          "sandbox": {"backend", "note"},
          "keep": true, "update": {"from_sha256", "unchanged", "tag_moved"}}
 ```
 
-`--check --json` is the same object with no statements, and `sandbox`
+`not_stored` is present only when a reference does not resolve yet (the
+store step, *Secrets*). `--check --json` is the same object with no statements, and `sandbox`
 `null`. `sandbox.backend` is `""` when the play runs on this machine. `keep`
 and `update` are present only for `--keep` and `cpb update`.
 
@@ -3131,9 +3347,11 @@ those names, sorted, one per line.
 3. It asks for each typed confirmation in turn:
    - `Type the proxy …`, or `Type TLS …` (a recipe never moves the model
      endpoint: that is an account's, `--account`);
-   - `Type the secret this playbook may read, on this machine, as you (<ref>):`.
+   - `Type the reference of the secret this playbook may read, on this machine, as you (<ref>):`.
 
-   An exact match goes on; anything else stops with nothing written.
+   An exact match goes on; anything else stops with nothing written. A
+   reference that is not stored yet is then asked for: the store step
+   (*Secrets*), on your own terminal only.
 4. It applies the same bytes to the throwaway playbook (its report is shown
    only if it fails), runs the session (arguments after `--` go to
    `claude`), and removes everything afterwards.
