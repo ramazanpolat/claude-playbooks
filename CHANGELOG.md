@@ -15,14 +15,17 @@
   fix. `<name>` is a lowercase letter or digit, then up to 63 of `a-z`, `0-9`,
   `.`, `_` and `-`.
 - **The store step in `cpb play`.** When a played recipe's secret reference is
-  not stored yet, `cpb play`, `--keep` and `cpb update` show it in the plan
+  not stored yet (the helper's `--check` exits 4, a status the helper
+  interface now names; a store that cannot answer is refused as before),
+  `cpb play`, `--keep` and `cpb update` show it in the plan
   (`"not_stored"` in `--json`), and after you type the reference they ask for
   its value with echo off, from your own terminal only, and hand it to the
   helper on stdin (`<helper> --store REF`, a new optional verb of the helper
   interface). It never runs with `--yes`, with `--trust-secret` for that
   reference, without a terminal, or inside an agent's session. `^C`, an empty
-  answer, a closed terminal, a signal or a failing helper store nothing, and
-  cpb never replaces a stored value. It keeps the value out of command lines and
+  answer, a closed terminal, a signal, a key that sends an escape sequence
+  (an arrow, Delete; a bracketed paste is taken) or a failing helper store
+  nothing, and cpb never replaces a stored value. It keeps the value out of command lines and
   cpb's output; it does not hide it from programs that run as you. See
   *Secrets* in SPEC.md and [the play guide](docs/guides/play.md).
 

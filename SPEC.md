@@ -586,7 +586,10 @@ letter or digit, then up to 63 of `a-z`, `0-9`, `.`, `_` and `-`
 
 - **Check**, at write time: `<helper> --check KEY=REF`. Exit 0 means the
   reference resolves. Anything else fails the statement, showing the
-  helper's own message, which must never contain the value.
+  helper's own message, which must never contain the value. Exit 4 means
+  it is not stored (since v4.7.0): the one failure the store step below
+  acts on. Any other, such as a store that is locked or cannot be reached,
+  is refused as before.
 - **Exec**, at launch: `<helper> K1=REF1 [K2=REF2 …] -- claude <args>`. The
   helper resolves the references, sets them in the environment of that one
   command, and execs it. cpb fetches no values; there is no value-returning
@@ -646,7 +649,8 @@ values in the operating system's store:
   `/usr/bin/security` too.
 
 **The store step** (since v4.7.0; `cpb play`, `--keep` and `cpb update` of a
-played playbook). When a recipe's secret reference does not resolve yet:
+played playbook). When a recipe's secret reference is not stored yet (the
+helper's `--check` exits 4):
 
 - **the plan** shows it ("Not stored on this machine yet: `<ref>`") instead
   of refusing, and `--json` lists it as `"not_stored"`. A run that only plans
@@ -659,7 +663,13 @@ played playbook). When a recipe's secret reference does not resolve yet:
   checked again before anything is applied;
 - **an empty answer, ^C, a closed terminal, a signal to cpb (`SIGINT`,
   `SIGTERM`, `SIGHUP`) while it waits, or a helper that fails** stops the
-  run with nothing stored and nothing written.
+  run with nothing stored and nothing written;
+- **a key that sends an escape sequence** (an arrow, Delete, Home, a
+  function key, Alt with a key) while the value is typed stops the run the
+  same way, saying why: with echo off, the sequence's printable bytes would
+  otherwise stay in the value unseen, and a stored value is never replaced.
+  Bracketed paste's markers are the exception: they are dropped, and the
+  paste between them is the value.
 
 The step runs only when **all** of these hold, and otherwise a reference that
 does not resolve is refused as before, naming why and asking the person to

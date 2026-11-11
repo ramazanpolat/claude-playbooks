@@ -119,9 +119,15 @@ Type the value now (it is not shown), or press Enter to stop:
 ```
 
 - An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
-  nothing is stored.
+  nothing is stored. So does an arrow, Delete or another key that sends an
+  escape sequence while you type: you cannot see what it added, so cpb asks
+  you to run the command again. Pasting works.
 - cpb never replaces a stored secret: to change one, store it under a new name
   and point the recipe at that.
+- If the recipe is someone else's and its name is fixed, or you stored the
+  wrong value, remove the item yourself and run the command again:
+  `security delete-generic-password -s cpb -a <name>` on macOS, or
+  `secret-tool clear service cpb name <name>` on Linux.
 - cpb's own store keeps printable ASCII values only (letters, digits,
   punctuation and spaces); a helper of your own takes any value.
 - The step runs only from your own terminal: never with `--yes` or

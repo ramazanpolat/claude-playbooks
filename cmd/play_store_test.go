@@ -31,7 +31,7 @@ func storeHelper(t *testing.T) (string, string) {
 printf '%s\n' "$*" >> "$HELPER_LOG"
 key() { printf '%s' "$1" | tr ':/' '__'; }
 case "$1" in
-  --check) [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit 4 ;;
+  --check) [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
   --store) if [ -n "$FAIL_STORE" ]; then cat >/dev/null; exit 1; fi
            f="$STORE_DIR/$(key "$2")"; cat > "$f.part" && mv "$f.part" "$f"; exit 0 ;;
 esac
@@ -44,6 +44,7 @@ exit 2
 	t.Setenv("HELPER_LOG", log)
 	t.Setenv("STORE_DIR", store)
 	t.Setenv("FAIL_STORE", "")
+	t.Setenv("CHECK_EXIT", "")
 	t.Setenv(envset.SecretHelperEnv, path)
 	for _, v := range agentSessionVars {
 		t.Setenv(v, "") // restored after the test
@@ -224,12 +225,12 @@ func TestReadHiddenReadsNothingAhead(t *testing.T) {
 	typeIt, finish := onPty(t)
 	defer finish()
 	typeIt("abc\r", false)
-	first, ok := readHidden(secretIn, nil)
+	first, ok, _ := readHidden(secretIn, nil)
 	if !ok || string(first) != "abc" {
 		t.Fatalf("first read %q %v", first, ok)
 	}
 	typeIt("def\r", false)
-	second, ok := readHidden(secretIn, nil)
+	second, ok, _ := readHidden(secretIn, nil)
 	if !ok || string(second) != "def" {
 		t.Fatalf("second read %q %v: a key went to the first read", second, ok)
 	}
@@ -319,5 +320,100 @@ func TestStoreStepNeverUnderAnAgentUpdate(t *testing.T) {
 	}
 	if _, ok := storedValue(store); ok {
 		t.Fatal("something was stored under an agent")
+	}
+}
+
+// A key that sends an escape sequence would leave printable bytes ("[A",
+// "[3~") in a value no one can see: the line ends as escaped, and nothing
+// of it is kept. Bracketed paste's markers are dropped and the paste kept.
+func TestReadHiddenEscapeSequences(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+		escaped           bool
+	}{
+		{name: "an arrow", input: "ab\x1b[Acd\r", escaped: true},
+		{name: "delete", input: "ab\x1b[3~\r", escaped: true},
+		{name: "a function key", input: "ab\x1bOPcd\r", escaped: true},
+		{name: "alt with a key", input: "ab\x1bxcd\r", escaped: true},
+		{name: "a lone escape", input: "ab\x1b\r", escaped: true},
+		{name: "a bracketed paste", input: "\x1b[200~s3cr3t-Value-42\x1b[201~\r", want: "s3cr3t-Value-42"},
+		{name: "a bracketed paste, then an arrow", input: "\x1b[200~abc\x1b[201~\x1b[D\r", escaped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			typeIt, finish := onPty(t)
+			defer finish()
+			typeIt(tc.input, false)
+			got, ok, escaped := readHidden(secretIn, nil)
+			if escaped != tc.escaped {
+				t.Fatalf("escaped %v, want %v", escaped, tc.escaped)
+			}
+			if tc.escaped {
+				if ok || got != nil {
+					t.Fatalf("an escaped line was kept: %q %v", got, ok)
+				}
+				return
+			}
+			if !ok || string(got) != tc.want {
+				t.Fatalf("read %q %v, want %q", got, ok, tc.want)
+			}
+		})
+	}
+}
+
+// The store step refuses a value typed with an arrow in it, says why, and
+// stores nothing.
+func TestStoreStepRefusesAnEscapedValue(t *testing.T) {
+	store, log := storeHelper(t)
+	typeIt, finish := onPty(t)
+	typeIt("s3cr3t\x1b[D-Value\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeSecret(testRef) })
+	finish()
+	if err == nil || !strings.Contains(err.Error(), "escape sequence") || !strings.Contains(err.Error(), "nothing was written") {
+		t.Fatalf("store step: %v", err)
+	}
+	if _, ok := storedValue(store); ok || strings.Contains(readLog(t, log), "--store") {
+		t.Fatal("an escaped value was stored")
+	}
+	if strings.Contains(out, "s3cr3t") || strings.Contains(err.Error(), "s3cr3t") {
+		t.Fatal("the typed text was shown")
+	}
+}
+
+// A failed --store says to store the value with your own tool (SPEC,
+// "The helper interface").
+func TestStoreStepFailedStoreNamesTheWayOut(t *testing.T) {
+	storeHelper(t)
+	t.Setenv("FAIL_STORE", "1")
+	typeIt, finish := onPty(t)
+	typeIt(testValue+"\r", false)
+	var err error
+	captureStdout(t, func() { err = storeSecret(testRef) })
+	finish()
+	if err == nil || !strings.Contains(err.Error(), "Store the value with your own tool, then run this again") {
+		t.Fatalf("store step: %v", err)
+	}
+}
+
+// Only "not stored" (--check exits 4) asks for a value. A store that
+// cannot answer (locked, unreachable: any other failure) does not: the
+// plan refuses the reference with the helper's message, as before.
+func TestPreparePendingStoreOnlyWhenNotStored(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	storeHelper(t)
+	for _, code := range []string{"1", "5"} {
+		t.Setenv("CHECK_EXIT", code)
+		pending, why := preparePendingStore([]string{testRef}, false, true, false, nil)
+		if pending != nil || why != "" || refsPendingStore != nil || storeAfterConfirm != nil {
+			t.Fatalf("--check exit %s armed the store step: %v %q", code, pending, why)
+		}
+		if err := checkRefsWith(helperState{}, refClauses("TOKEN", testRef)); err == nil {
+			t.Fatalf("--check exit %s: the plan passed a reference that does not resolve", code)
+		}
+	}
+	t.Setenv("CHECK_EXIT", "4")
+	if pending, _ := preparePendingStore([]string{testRef}, false, true, false, nil); len(pending) != 1 {
+		t.Fatalf("--check exit 4 did not arm the store step: %v", pending)
 	}
 }

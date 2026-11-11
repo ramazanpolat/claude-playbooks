@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 
 	"golang.org/x/term"
@@ -59,9 +61,16 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 	return ""
 }
 
-// refsNotStored asks the helper which of refs do not resolve, quietly; it
-// returns nil and the helper's error when no helper can answer, so the
-// plan reports that as it always has.
+// notStoredExit is the --check exit status that says a reference is not
+// stored (cpb's default helper's, and the usual one of helpers that tell
+// "missing" from "cannot answer"). Any other failure, such as a locked or
+// unreachable store, is not a reason to ask for a value: the plan refuses
+// it with the helper's message, as before the store step.
+const notStoredExit = 4
+
+// refsNotStored asks the helper which of refs are not stored (--check exits
+// notStoredExit), quietly; it returns nil and the helper's error when no
+// helper can answer, so the plan reports that as it always has.
 func refsNotStored(refs []string) ([]string, error) {
 	if len(refs) == 0 {
 		return nil, nil
@@ -77,7 +86,8 @@ func refsNotStored(refs []string) ([]string, error) {
 		}
 		c := x.command("--check", "CPB_SECRET="+r)
 		c.Env = withoutKeys(os.Environ(), []string{"CPB_SECRET"})
-		if c.Run() != nil {
+		var ee *exec.ExitError
+		if err := c.Run(); errors.As(err, &ee) && ee.ExitCode() == notStoredExit {
 			missing = append(missing, r)
 		}
 	}
@@ -140,8 +150,11 @@ func storeSecret(ref string) error {
 		return err
 	}
 	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\nType the value now (it is not shown), or press Enter to stop: ", ref, storeWhere(x, ref))
-	value, ok := readHidden(secretIn, promptCancel)
+	value, ok, escaped := readHidden(secretIn, promptCancel)
 	defer clear(value)
+	if escaped {
+		return fmt.Errorf("%s was not stored: a key that sends an escape sequence (an arrow, Delete, Home, a function key or Alt) was pressed while you typed the value, so it may not be the value you meant; nothing was written. Run the command again and type or paste only the value", ref)
+	}
 	if !ok || len(value) == 0 || isCancelled(promptCancel) {
 		return fmt.Errorf("%s was not stored; nothing was written", ref)
 	}
@@ -150,7 +163,7 @@ func storeSecret(ref string) error {
 	c.Stdout, c.Stderr = os.Stderr, os.Stderr
 	c.Env = os.Environ()
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("%s could not be stored (secret helper %s: %v); nothing was written", ref, x.name, err)
+		return fmt.Errorf("%s could not be stored (secret helper %s: %v); nothing was written. Store the value with your own tool, then run this again", ref, x.name, err)
 	}
 	chk := x.command("--check", "CPB_SECRET="+ref)
 	chk.Env = withoutKeys(os.Environ(), []string{"CPB_SECRET"})
@@ -179,11 +192,19 @@ func isCancelled(cancel <-chan struct{}) bool {
 // closes cancel. Each byte is read in a goroutine, and only when asked
 // for, so a cancel never waits for a key and nothing is read ahead of the
 // next prompt; a read pending at a cancel ends with the run.
-func readHidden(f *os.File, cancel <-chan struct{}) ([]byte, bool) {
+//
+// A key that sends an escape sequence (an arrow, Delete, Home, a function
+// key, Alt with a key) would otherwise leave the sequence's printable bytes
+// in the value, which echo-off hides: such a line ends as not ok, with
+// escaped true, and nothing of it is kept. Bracketed paste's markers
+// (ESC [200~ and ESC [201~) are the one exception: they are dropped and
+// the paste between them is kept, so a terminal that has the mode on
+// still takes a pasted value.
+func readHidden(f *os.File, cancel <-chan struct{}) (value []byte, ok, escaped bool) {
 	fd := int(f.Fd())
 	old, err := term.MakeRaw(fd)
 	if err != nil {
-		return nil, false
+		return nil, false, false
 	}
 	defer term.Restore(fd, old)
 	type key struct {
@@ -220,11 +241,21 @@ func readHidden(f *os.File, cancel <-chan struct{}) ([]byte, bool) {
 		}
 	}()
 	var buf []byte
+	// The escape-sequence state: escNone, or inside one after ESC, after
+	// ESC [ (a CSI sequence, its parameter bytes in seq), or after ESC O.
+	const (
+		escNone = iota
+		escStart
+		escCSI
+		escSS3
+	)
+	esc := escNone
+	var seq []byte
 	for {
 		if isCancelled(cancel) {
 			fmt.Print("\r\n")
 			clear(buf)
-			return nil, false
+			return nil, false, false
 		}
 		var k key
 		select {
@@ -239,20 +270,65 @@ func readHidden(f *os.File, cancel <-chan struct{}) ([]byte, bool) {
 		}
 		if k.err != nil {
 			clear(buf)
-			return nil, false
+			return nil, false, false
 		}
-		switch c := k.c; c {
+		c := k.c
+		if c == 0x1b {
+			if esc != escNone {
+				escaped = true
+			}
+			esc = escStart
+			continue
+		}
+		if esc != escNone {
+			if c < 0x20 {
+				// A control key inside a sequence ends it, and is
+				// handled as itself below.
+				escaped, esc = true, escNone
+			} else {
+				switch esc {
+				case escStart:
+					switch c {
+					case '[':
+						esc, seq = escCSI, seq[:0]
+					case 'O':
+						esc = escSS3
+					default: // Alt with a key
+						escaped, esc = true, escNone
+					}
+				case escCSI:
+					if c >= 0x40 && c <= 0x7e { // the final byte
+						if c != '~' || (string(seq) != "200" && string(seq) != "201") {
+							escaped = true
+						}
+						esc = escNone
+					} else if len(seq) < 8 {
+						seq = append(seq, c)
+					} else {
+						escaped = true
+					}
+				case escSS3:
+					escaped, esc = true, escNone
+				}
+				continue
+			}
+		}
+		switch c {
 		case '\r', '\n':
 			fmt.Print("\r\n")
-			return buf, true
+			if escaped {
+				clear(buf)
+				return nil, false, true
+			}
+			return buf, true, false
 		case 3: // ^C
 			fmt.Print("^C\r\n")
 			clear(buf)
-			return nil, false
+			return nil, false, false
 		case 4: // ^D
 			if len(buf) == 0 {
 				fmt.Print("\r\n")
-				return nil, false
+				return nil, false, false
 			}
 		case 0x7f, 8: // backspace
 			if len(buf) > 0 {
