@@ -36,6 +36,18 @@
   the link step when two logins of the same account cannot be ordered: both
   files stay as they are and nothing is linked.
 
+### Docs
+
+- **SPEC's no-token path marks the macOS difference.** That a refresh in a
+  shared playbook refreshes the shared login, or leaves a regular file in
+  place of the link, holds where the login is a plaintext file (Linux). On
+  macOS (observed with Claude Code 2.1.322) a shared playbook's refresh
+  lands in that playbook's own Keychain item (`Claude Code-credentials-`
+  plus 8 hex digits derived from its config directory) and leaves no file;
+  its `.credentials.json` stays the link. Sync never reads that item. Not
+  established: which of the two Claude Code reads first, and whether a
+  refresh rotates the refresh token.
+
 ## [v4.6.0] -- 2026-11-10
 
 v4.6.0 keeps every playbook's `/model` menu current when a new model ships.
