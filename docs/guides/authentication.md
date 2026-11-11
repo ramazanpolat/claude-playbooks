@@ -21,7 +21,8 @@ token active for this playbook?
 yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth only,
          MCP logins survive); sync non-secret account metadata so the dir presents as logged in
 no   ->  link the playbook's .credentials.json to ~/.claude/.credentials.json; remove nothing;
-         Claude Code refreshes the shared login itself
+         on Linux Claude Code refreshes the shared login itself; on macOS a playbook
+         keeps its refreshed login in a Keychain item of its own (see "On macOS" below)
 isolated_login = true  ->  neither: detach from the shared store, strip the global token,
          keep only what this playbook logs in itself; while it has no login of its own,
          drop the account record and cached feature flags left from a non-isolated past
@@ -38,7 +39,7 @@ session.
 
 | You want | Do | At launch |
 |---|---|---|
-| Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; `/login` anywhere logs in everywhere |
+| Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; on Linux `/login` anywhere logs in everywhere. On macOS a playbook's own refresh or `/login` stays in that playbook (see *Only the machine's own account is shared*) |
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; a playbook's stored login is stripped when it is the machine's account (a newer copy goes over the machine's first), and any other login is first copied aside to `.credentials.json.cpb-own-<stamp>` |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | an account, `cpb CREATE ACCOUNT work SET provider = 'anthropic', claude_token FROM 'keychain:…'` (a reference, resolved by your secret helper at launch; `claude_token = '…' AS PLAINTEXT` also works); then `cpb ALTER PLAYBOOK <name> USE ACCOUNT work` | that token wins over the file; its stored login is handled as on the second row |

@@ -309,6 +309,16 @@ func sameDir(a, b string) bool {
 // writeFilePrivate writes data at mode 0600 via a temporary file and a rename,
 // so a concurrent reader never observes a half-written credential store.
 func writeFilePrivate(path string, data []byte) error {
+	return writeFileAtomic(path, data, 0600)
+}
+
+// renameFile is os.Rename; tests replace it to interrupt a write.
+var renameFile = os.Rename
+
+// writeFileAtomic replaces path with data: a temporary file in the same
+// directory gets perm, the data and an fsync, then is renamed over path. On
+// any error the temporary file is removed and path is left as it was.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".credentials-*.tmp")
 	if err != nil {
 		return err
@@ -316,7 +326,7 @@ func writeFilePrivate(path string, data []byte) error {
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op once the rename succeeds
 
-	if err := tmp.Chmod(0600); err != nil {
+	if err := tmp.Chmod(perm); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -324,10 +334,14 @@ func writeFilePrivate(path string, data []byte) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	return renameFile(tmpName, path)
 }
 
 // OwnLoginGrant reports whether configDir holds a login of its own: its

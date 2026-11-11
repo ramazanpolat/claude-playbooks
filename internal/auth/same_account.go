@@ -79,8 +79,10 @@ func sameAccount(targetDir string) bool {
 // machine's. Nothing is deleted, and nothing of either account is printed.
 // then says what the launch does instead, for the notice. With copy, the
 // store stays in place and a copy is kept, for a caller that strips only the
-// grant from it and keeps its other logins (mcpOAuth) where they are.
-func setAsideOwnLogin(targetDir, then string, copy bool) error {
+// grant from it and keeps its other logins (mcpOAuth) where they are. A
+// non-empty why says what the store held, for a caller that knows better
+// than the account records.
+func setAsideOwnLogin(targetDir, then string, copy bool, why string) error {
 	stamp := now().Format("2006-01-02-15_04_05")
 	creds := StorePath(targetDir)
 	kept := creds + ".cpb-own-" + stamp
@@ -96,14 +98,16 @@ func setAsideOwnLogin(targetDir, then string, copy bool) error {
 		return fmt.Errorf("set aside the login in %s, but cannot clear its account state: %w", targetDir, err)
 	}
 	own, machine := accountUUID(state+".cpb-backup-"+stamp), machineAccountUUID(targetDir)
-	why := "another account's login"
-	switch {
-	case own == "" || machine == "":
-		why = "a login that cannot be confirmed as the machine's account"
-	case own == machine:
-		// The machine's account, set aside only because the machine store
-		// holds no grant of it to fall back on.
-		why = "the machine account's login, which the machine store does not hold"
+	if why == "" {
+		why = "another account's login"
+		switch {
+		case own == "" || machine == "":
+			why = "a login that cannot be confirmed as the machine's account"
+		case own == machine:
+			// The machine's account, set aside only because the machine store
+			// holds no grant of it to fall back on.
+			why = "the machine account's login, which the machine store does not hold"
+		}
 	}
 	Notice(fmt.Sprintf("%s held %s; kept it as %s and %s. To keep that account there: ALTER PLAYBOOK <name> SET login = 'isolated', then move the file back",
 		targetDir, why, filepath.Base(kept), then))

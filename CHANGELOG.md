@@ -33,6 +33,79 @@
   not hide it from programs that run as you. See *Secrets* in SPEC.md and
   [the play guide](docs/guides/play.md).
 
+## [v4.6.1] -- 2026-11-11
+
+v4.6.1 fixes how cpb writes the shared login store,
+`~/.claude/.credentials.json`. Before it, every shared launch on macOS
+rewrote that file from the Keychain in place, so a reader at the same moment
+could find it empty or partial, and a newer login a playbook held in a file
+of its own could be replaced by an older one. Now the store is written only
+when its value changes, atomically, and never with an older login. A store
+open to group or others is made owner-only in place, and a store that does
+not parse comes with what to do about it.
+
+SPEC and the authentication guide now describe how a shared login behaves
+on macOS, each statement marked by its source.
+
+It does not change when a login expires or how Claude Code refreshes one,
+and it does not bring back a login that has already expired: where Claude
+Code asks for `/login`, it still needs one.
+
+### Fixed
+
+- **The shared login store is written only when it changes, atomically, and
+  never with an older login.** On macOS every shared launch rewrote
+  `~/.claude/.credentials.json` from the Keychain in place, even when nothing
+  had changed, so a reader at that moment could see an empty or partial file.
+  The rewrite also gave the store a new file time, so a newer login a shared
+  playbook had left in a file of its own looked older and was replaced by the
+  link. Sync now compares the Keychain value, the store and the playbook's
+  file first and writes the one whose grant expires last
+  (`claudeAiOauth.expiresAt`), only when its bytes differ, through a
+  temporary file renamed over the store. When it cannot tell which is
+  newest, it writes nothing and says so in one stderr line. The copy of a
+  playbook's login over the machine store, on the sync and before a token
+  launch, follows the same rule. The Keychain is only read.
+- **The shared login store is kept owner-only without a rewrite.** A sync
+  that finds `~/.claude/.credentials.json` open to group or others makes it
+  `0600` in place, on every OS: only the mode changes, never the bytes, the
+  file or its time, and a store already owner-only is not touched. Until
+  the change above, macOS got that mode from the rewrite at every sync, and
+  Linux never had it repaired.
+- **A shared store that does not parse comes with what to do.** It is still
+  left as it is, and the warning now says to remove it: the next sync then
+  writes the Keychain value there, or, with no Keychain login, a login with
+  `claude` outside any playbook writes a new one.
+- **The cmd tests can no longer read a real Keychain item.** They stubbed
+  the Keychain presence probe but not the secret lookup, so on macOS a sync
+  a test ran could call `security find-generic-password -w` and copy the
+  machine's login into the test's temporary HOME. A test-only hook in
+  `internal/auth` now replaces that lookup in the cmd tests' `TestMain`,
+  and a guard test fails when it is not in place. A direct test also covers
+  the link step when two logins of the same account cannot be ordered: both
+  files stay as they are and nothing is linked.
+
+### Docs
+
+- **SPEC's no-token path marks the macOS difference, each statement by its
+  source.** That a refresh in a shared playbook refreshes the shared login,
+  or leaves a regular file in place of the link, holds where the login is a
+  plaintext file (Linux). On macOS: *documented*, the Keychain entry is
+  keyed to `CLAUDE_CONFIG_DIR`, and `.credentials.json` is the fallback
+  when the Keychain rejects a write; *issue-level*
+  ([anthropics/claude-code#93051](https://github.com/anthropics/claude-code/issues/93051)),
+  the Keychain is read first and the file only when that read returns
+  nothing, so the linked file only seeds a playbook that has no item yet;
+  *implied, not stated*, refresh tokens rotate, and parallel sessions
+  coordinate renewal only within one config directory; *observed* with
+  Claude Code 2.1.322, a shared playbook's refresh lands in its own
+  Keychain item and its link stays, and sync never reads that item. *Not
+  established*: whether rotation invalidates a copy in another directory in
+  every case.
+- **The authentication guide no longer says a shared `/login` or refresh
+  reaches every playbook on macOS.** Its summary and its modes table say
+  that holds on Linux, and point to the guide's existing macOS paragraph.
+
 ## [v4.6.0] -- 2026-11-10
 
 v4.6.0 keeps every playbook's `/model` menu current when a new model ships.

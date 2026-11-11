@@ -30,14 +30,15 @@ type syncFixture struct {
 	notices                     []string
 }
 
+// Made-up grants: the playbook's expires later, so it is the newer login.
 const (
-	machineGrant = `{"claudeAiOauth":{"accessToken":"MACHINE"}}`
-	ownGrant     = `{"claudeAiOauth":{"accessToken":"OWN"}}`
+	machineGrant = `{"claudeAiOauth":{"accessToken":"MACHINE","expiresAt":1700000000000}}`
+	ownGrant     = `{"claudeAiOauth":{"accessToken":"OWN","expiresAt":1800000000000}}`
 )
 
 // newSyncFixture: a machine store an hour old, and a shared playbook whose
-// store is a newer file of its own (what a refresh or /login leaves, since
-// Claude Code writes by rename).
+// store is a newer file of its own, holding a grant that expires later (what
+// a refresh or /login leaves, since Claude Code writes by rename).
 func newSyncFixture(t *testing.T, machineAccount, ownAccount string) *syncFixture {
 	t.Helper()
 	f := &syncFixture{home: t.TempDir()}
