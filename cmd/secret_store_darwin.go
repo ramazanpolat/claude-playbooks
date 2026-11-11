@@ -102,7 +102,11 @@ func (keychainStore) run(name string, stdin io.Reader, stdout, stderr io.Writer,
 	c.WaitDelay = time.Second
 	err := c.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return unavailable("the Keychain did not answer within %s about cpb/%s (an unlock dialog nobody answered?): unlock it (security unlock-keychain), then run this again", toolTimeout, name)
+		about := ""
+		if name != "" {
+			about = " about cpb/" + name
+		}
+		return unavailable("the Keychain did not answer within %s%s (an unlock dialog nobody answered?): unlock it (security unlock-keychain), then run this again", toolTimeout, about)
 	}
 	return err
 }
@@ -120,26 +124,33 @@ func (k keychainStore) exists(name string) (bool, error) {
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() == keychainNotFound {
-		// The search answers on a locked Keychain too, so "not there"
-		// does not say a value could be stored. Before anyone types one,
-		// the Keychain is asked with a command that carries none: where
-		// it is locked and cannot ask for its password, it exits 36, as
-		// the add would; where it can ask, it shows the unlock dialog now.
-		if err := k.run(name, nil, nil, nil, k.args("show-keychain-info")...); err != nil {
-			switch {
-			case errors.As(err, &ue):
-				return false, err
-			case lockedExit(err):
-				return false, keychainLocked("")
-			}
-			return false, fmt.Errorf("the Keychain could not be asked whether it can take cpb/%s (%v); unlock it (security unlock-keychain), or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, err)
-		}
+		// The search answers on a locked Keychain too, and brings up no
+		// dialog: "not there" says nothing about the lock, which
+		// readyToStore asks about when a value is about to be typed.
 		return false, nil
 	}
 	if lockedExit(err) {
 		return false, keychainLocked("")
 	}
 	return false, fmt.Errorf("the Keychain could not be asked about cpb/%s (%v); unlock it (security unlock-keychain), or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, err)
+}
+
+// readyToStore asks the Keychain with show-keychain-info, which carries no
+// value: where it is locked and cannot ask for its password, it exits 36,
+// as the add would; where it can ask, it brings up the unlock dialog now
+// (bounded by toolTimeout), before anything is typed.
+func (k keychainStore) readyToStore() error {
+	err := k.run("", nil, nil, nil, k.args("show-keychain-info")...)
+	var ue *unavailableError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &ue):
+		return err
+	case lockedExit(err):
+		return keychainLocked("; nothing was asked for or stored")
+	}
+	return unavailable("the Keychain could not be asked whether it can take a value (%v); nothing was asked for or stored. Unlock it (security unlock-keychain), or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", err)
 }
 
 func (k keychainStore) read(name string) ([]byte, error) {

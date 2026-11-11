@@ -224,13 +224,14 @@ func storeSecret(ref string) (err error) {
 		g := newPlayGuard()
 		promptCancel = g.cancelled
 		defer func() {
-			// A signal after the step's last check is still the step's:
-			// it stops the run here rather than being dropped.
-			if err == nil && isCancelled(promptCancel) {
+			// A signal after the step's last check is still the step's,
+			// also one that reached the guard just as it stopped: it
+			// stops the run here rather than being dropped.
+			signalled := g.stop()
+			if err == nil && (signalled || isCancelled(promptCancel)) {
 				err = fmt.Errorf("cancelled: %s was stored before the signal was handled; nothing else was written", ref)
 			}
 			promptCancel = nil
-			g.stop()
 		}()
 	}
 	if storeStepReading != nil {
@@ -238,15 +239,35 @@ func storeSecret(ref string) (err error) {
 	}
 	limit := storeLimit(x)
 	stopped := fmt.Errorf("%s was not stored; nothing was written", ref)
-	notQuiet := fmt.Errorf("%s was not stored: input kept arriving on the terminal after the value (a paste still running?), and cpb shows none of it; nothing was written. Run this again once it has stopped", ref)
+	notQuiet := fmt.Errorf("%s was not stored: you stopped it while input was still arriving on the terminal (a paste still running?), and what arrives from now on may be shown and reach your shell; nothing was written. Run this again once it has stopped", ref)
+	undiscarded := fmt.Errorf("%s was not stored: this terminal's waiting input could not be discarded, so what was typed or pasted past the value could be shown or reach your shell; nothing was written. Use another terminal, or store the value with your own tool", ref)
 	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
+	if x.def {
+		// Before anyone types a value, the store is asked whether it can
+		// take one, with nothing that carries a value: a Keychain locked
+		// where it cannot ask for its password stops the step here, and
+		// one that can ask brings up its unlock dialog now.
+		rerr := runHelper(x, nil, os.Stderr, os.Stderr, os.Environ(), "--ready", ref)
+		var re *exec.ExitError
+		switch {
+		case isCancelled(promptCancel):
+			return stopped
+		case errors.As(rerr, &re) && re.ExitCode() == unavailableExit:
+			return fmt.Errorf("%s was not stored: the store cannot take a value now (the reason is above); nothing was asked for or written", ref)
+		case rerr != nil:
+			return fmt.Errorf("%s was not stored: the store could not be asked whether it can take a value (secret helper %s: %v); nothing was asked for or written", ref, x.name, rerr)
+		}
+	}
 	var value []byte
 	defer func() { clear(value) }()
 	for attempt := 1; ; attempt++ {
 		fmt.Print("Type the value now (it is not shown), or press Enter to stop: ")
 		first, res := readHidden(secretIn, promptCancel, limit)
-		if res == hiddenNotQuiet {
+		switch res {
+		case hiddenNotQuiet:
 			return notQuiet
+		case hiddenUndiscarded:
+			return undiscarded
 		}
 		if isCancelled(promptCancel) || res == hiddenStopped || (res == hiddenOK && len(first) == 0) {
 			clear(first)
@@ -260,6 +281,9 @@ func storeSecret(ref string) (err error) {
 			case res2 == hiddenNotQuiet:
 				clear(first)
 				return notQuiet
+			case res2 == hiddenUndiscarded:
+				clear(first)
+				return undiscarded
 			case isCancelled(promptCancel) || res2 == hiddenStopped || (res2 == hiddenOK && len(second) == 0):
 				clear(first)
 				clear(second)
@@ -291,16 +315,25 @@ func storeSecret(ref string) (err error) {
 		return fmt.Errorf("cancelled: %s was stored before the signal was handled; nothing else was written", ref)
 	case isCancelled(promptCancel):
 		// The signal may have reached the helper too (a ^C goes to the
-		// whole foreground group), after its write: ask once.
-		var ce *exec.ExitError
-		switch cerr := helperCheck(x, "CPB_SECRET", ref, nil); {
-		case cerr == nil:
-			return fmt.Errorf("cancelled: %s was stored before the signal was handled; nothing else was written", ref)
-		case errors.As(cerr, &ce) && ce.ExitCode() == notStoredExit:
+		// whole foreground group), after its write: ask once. That an
+		// item of the name exists says no more than that.
+		switch storedNow(x, ref) {
+		case refExists:
+			return fmt.Errorf("cancelled: an item named %s exists now; nothing else was written. Run this again: cpb checks it before going on", ref)
+		case refAbsent:
 			return fmt.Errorf("cancelled: %s was not stored; nothing was written", ref)
 		}
 		return fmt.Errorf("cancelled: %s may be stored: run this again to see; nothing else was written", ref)
 	case errors.As(err, &ee) && ee.ExitCode() == unavailableExit:
+		// The store did not answer: it may have stored nothing (a lock it
+		// did not get, a Keychain it found locked) or the value (a
+		// read-back it did not get). Ask once.
+		switch storedNow(x, ref) {
+		case refExists:
+			return fmt.Errorf("%s: the store did not answer (secret helper %s: %v), and an item of that name exists now; nothing else was written. Run this again: cpb checks it before going on", ref, x.name, err)
+		case refAbsent:
+			return fmt.Errorf("%s was not stored: the store did not answer (secret helper %s: %v); nothing was written. Run this again once it can", ref, x.name, err)
+		}
 		return fmt.Errorf("%s: the store did not answer (secret helper %s: %v), and the value may be stored: run this again to see; nothing else was written", ref, x.name, err)
 	case err != nil:
 		return fmt.Errorf("%s could not be stored (secret helper %s: %v); nothing was written. Store the value with your own tool, then run this again", ref, x.name, err)
@@ -317,6 +350,25 @@ func storeSecret(ref string) (err error) {
 	}
 	fmt.Printf("Stored %s.\n", ref)
 	return nil
+}
+
+// What one --check after an unfinished store says.
+const (
+	refUnknown = iota // the check did not answer either
+	refExists         // an item of that name exists: no more is known
+	refAbsent         // not stored (notStoredExit)
+)
+
+// storedNow asks the helper once whether ref is stored.
+func storedNow(x helperExe, ref string) int {
+	var ce *exec.ExitError
+	switch cerr := helperCheck(x, "CPB_SECRET", ref, nil); {
+	case cerr == nil:
+		return refExists
+	case errors.As(cerr, &ce) && ce.ExitCode() == notStoredExit:
+		return refAbsent
+	}
+	return refUnknown
 }
 
 // storeStepChecked, when set, runs after the step's last check (a test
@@ -337,10 +389,10 @@ func isCancelled(cancel <-chan struct{}) bool {
 	}
 }
 
-// The drain's pace (a test changes it): input is discarded at once while
-// any is waiting, and the terminal counts as quiet once nothing has come
-// for drainQuiet, checked every drainPoll; a stream that never stops for
-// that long, within drainMax, is reported as not quiet.
+// The drain's pace (a test changes it): the terminal counts as quiet once
+// nothing has come for drainQuiet, looked at every drainPoll; after
+// drainMax of input that never pauses that long, the person is told once,
+// and the drain goes on.
 var (
 	drainPoll  = 25 * time.Millisecond
 	drainQuiet = 300 * time.Millisecond
@@ -350,38 +402,125 @@ var (
 // flushTerminal is flushInput (a test makes it fail).
 var flushTerminal = flushInput
 
-// drainInput discards the terminal's input until it has been quiet for
-// drainQuiet: again at once whenever input is waiting, so a long paste is
-// discarded as fast as it arrives. It reports whether the terminal went
-// quiet within drainMax, and an error when input cannot be discarded at
-// all. Where the waiting count cannot be read, it discards once per poll
-// until drainQuiet has passed.
-func drainInput(fd int) (quiet bool, err error) {
-	if err := flushTerminal(fd); err != nil {
-		return false, err
+// drainEnd is how drainInput ended.
+type drainEnd int
+
+const (
+	drainWentQuiet       drainEnd = iota // nothing came for drainQuiet
+	drainStopped                         // a ^C among the input
+	drainStoppedArriving                 // a ^C after drainMax, input still arriving
+	drainCancelled                       // a signal: cancel closed
+)
+
+// drainInput runs after every hidden read, echo still off: it takes the
+// input waiting on the terminal f, keeping none of it, until nothing has
+// come for drainQuiet. It looks before it discards: where the waiting
+// count can be read, it reads those bytes (so the read never blocks) and
+// more reports anything in them but line ends, so a paste of several
+// lines, or keys typed right after Enter, are seen even on a terminal
+// without bracketed paste; a ^C among them ends the drain. Where the count
+// cannot be read, it discards once per poll until drainQuiet has passed.
+// After drainMax it says once that input is still arriving, and goes on
+// until it stops, a ^C or a signal. A signal (cancel) ends it at once
+// after one discard, before any read: a read of the key reader may still
+// be pending then, and the drain must not take a byte from under it. err
+// is a terminal whose input cannot be discarded.
+func drainInput(f *os.File, cancel <-chan struct{}) (end drainEnd, more bool, err error) {
+	fd := int(f.Fd())
+	start := time.Now()
+	since := start
+	told := false
+	look := func(n int) (bool, error) {
+		other, intr, rerr := takeWaiting(f, n)
+		more = more || other
+		if rerr != nil {
+			return false, flushTerminal(fd)
+		}
+		return intr, nil
 	}
-	deadline := time.Now().Add(drainMax)
-	since := time.Now()
-	for time.Now().Before(deadline) {
-		// Look before discarding: what arrived since the last look restarts
-		// the quiet count. Where the count cannot be read, discard each
-		// poll and let the window run.
+	if isCancelled(cancel) {
+		return drainCancelled, false, flushTerminal(fd)
+	}
+	// What already waits behind the line is looked at before the first
+	// discard.
+	if n, perr := pendingInput(fd); perr == nil && n > 0 {
+		intr, err := look(n)
+		if err != nil {
+			return drainWentQuiet, more, err
+		}
+		if intr {
+			return drainStopped, more, flushTerminal(fd)
+		}
+	}
+	if err := flushTerminal(fd); err != nil {
+		return drainWentQuiet, more, err
+	}
+	for {
+		if isCancelled(cancel) {
+			return drainCancelled, more, flushTerminal(fd)
+		}
+		if !told && time.Since(start) >= drainMax {
+			told = true
+			fmt.Print("Input is still arriving on the terminal; cpb takes it, unseen, until it stops. Press Ctrl-C to stop now (what comes after that may be shown).\r\n")
+		}
 		n, perr := pendingInput(fd)
 		switch {
 		case perr != nil:
-			flushTerminal(fd)
+			if err := flushTerminal(fd); err != nil {
+				return drainWentQuiet, more, err
+			}
 		case n > 0:
-			flushTerminal(fd)
+			intr, err := look(n)
+			if err != nil {
+				return drainWentQuiet, more, err
+			}
+			if intr {
+				if told {
+					return drainStoppedArriving, more, flushTerminal(fd)
+				}
+				return drainStopped, more, flushTerminal(fd)
+			}
 			since = time.Now()
 			continue
 		}
 		if time.Since(since) >= drainQuiet {
-			return true, nil
+			return drainWentQuiet, more, nil
 		}
 		time.Sleep(drainPoll)
 	}
-	return false, nil
 }
+
+// takeWaiting reads the n bytes waiting on f, keeps none of them, and
+// reports whether they held anything but line ends, and a ^C.
+func takeWaiting(f *os.File, n int) (other, interrupt bool, err error) {
+	buf := make([]byte, min(n, 4096))
+	defer clear(buf)
+	for n > 0 {
+		m, err := f.Read(buf[:min(n, len(buf))])
+		for _, c := range buf[:m] {
+			switch c {
+			case '\r', '\n':
+			case 3:
+				interrupt = true
+			default:
+				other = true
+			}
+		}
+		clear(buf[:m])
+		if err != nil {
+			return other, interrupt, err
+		}
+		if m == 0 {
+			break
+		}
+		n -= m
+	}
+	return other, interrupt, nil
+}
+
+// pasteStall is how long a paste that has not ended (no end marker) may
+// pause after a line end before the read says so (a test shortens it).
+var pasteStall = time.Second
 
 // Bracketed paste: while it is on, the terminal wraps whatever is pasted
 // in ESC [200~ … ESC [201~, so the read knows where a paste ends whatever
@@ -397,8 +536,8 @@ type hiddenResult int
 const (
 	// hiddenOK: Enter, with the line.
 	hiddenOK hiddenResult = iota
-	// hiddenStopped: ^C, ^D on an empty line, end of input, an error, a
-	// cancel, or a terminal whose input cannot be discarded.
+	// hiddenStopped: ^C (also one typed just after the line), ^D on an
+	// empty line, end of input, an error, or a cancel.
 	hiddenStopped
 	// hiddenEscaped: a key that sends an escape sequence was pressed.
 	hiddenEscaped
@@ -408,13 +547,18 @@ const (
 	hiddenTooLong
 	// hiddenMultiLine: a paste of more than one line.
 	hiddenMultiLine
-	// hiddenNotQuiet: input kept arriving after the line, for longer than
-	// the drain waits.
+	// hiddenMoreInput: more than line ends followed the line (a paste of
+	// several lines where the terminal has no bracketed paste, or keys
+	// typed just after Enter).
+	hiddenMoreInput
+	// hiddenNotQuiet: a ^C while input was still arriving after drainMax.
 	hiddenNotQuiet
+	// hiddenUndiscarded: the terminal's input cannot be discarded.
+	hiddenUndiscarded
 )
 
 // why is the reason a refused line was not taken, for the person; "" for
-// hiddenOK, hiddenStopped and hiddenNotQuiet.
+// hiddenOK, hiddenStopped, hiddenNotQuiet and hiddenUndiscarded.
 func (r hiddenResult) why(limit int) string {
 	switch r {
 	case hiddenEscaped:
@@ -425,6 +569,8 @@ func (r hiddenResult) why(limit int) string {
 		return fmt.Sprintf("the value is longer than the %d bytes this store keeps", limit)
 	case hiddenMultiLine:
 		return "the paste held more than one line, and a value is one line"
+	case hiddenMoreInput:
+		return "more input followed the line (a paste of several lines, or keys typed right after Enter), and a value is one line"
 	}
 	return ""
 }
@@ -439,16 +585,21 @@ func (r hiddenResult) why(limit int) string {
 //
 // Pastes: the read turns bracketed paste on, so a paste is read through
 // its end marker, gaps and all; a paste of more than one line is refused,
-// a single line with its newline is taken. On every way out, while echo is
-// still off, the terminal's waiting input is discarded until it has been
-// quiet (drainInput), and only then is its mode restored: so what was
-// typed or pasted past the line is never shown, never answers the next
-// prompt and never reaches the shell. A terminal that never goes quiet
-// ends the read as hiddenNotQuiet, one whose input cannot be discarded as
-// hiddenStopped.
+// a single line with its newline is taken. A paste whose end marker has
+// not come pasteStall after a line end is named, with how to stop. On
+// every way out, while echo is still off, the terminal's waiting input is
+// taken until it has been quiet (drainInput), and only then is its mode
+// restored: so what was typed or pasted past the line is never shown,
+// never answers the next prompt and never reaches the shell, unless the
+// person stops the drain with ^C while input still arrives
+// (hiddenNotQuiet). A line followed by more than line ends is refused
+// (hiddenMoreInput); a terminal whose input cannot be discarded ends the
+// read as hiddenUndiscarded.
 //
 // Editing: Backspace removes the last character (all of its bytes), ^U
-// the whole line. A line is refused, and nothing of it kept, when a key
+// the whole line; inside a paste they, and ^D, are refused as control
+// keys, since what they removed is not seen. A line is refused, and
+// nothing of it kept, when a key
 // that sends an escape sequence (an arrow, Delete, Home, a function key,
 // Alt with a key) or any other control key was pressed, since echo-off
 // would hide what it added or dropped, or when it is longer than limit.
@@ -461,17 +612,23 @@ func readHidden(f *os.File, cancel <-chan struct{}, limit int) (value []byte, re
 	io.WriteString(f, bracketedPasteOn)
 	defer func() {
 		io.WriteString(f, bracketedPasteOff)
-		quiet, derr := drainInput(fd)
+		end, more, derr := drainInput(f, cancel)
 		term.Restore(fd, old)
 		flushTerminal(fd)
 		switch {
 		case derr != nil:
-			clear(value)
-			value, res = nil, hiddenStopped
-		case !quiet:
-			clear(value)
-			value, res = nil, hiddenNotQuiet
+			res = hiddenUndiscarded
+		case end == drainStoppedArriving:
+			res = hiddenNotQuiet
+		case end == drainStopped || end == drainCancelled:
+			res = hiddenStopped
+		case res == hiddenOK && more:
+			res = hiddenMoreInput
+		default:
+			return
 		}
+		clear(value)
+		value = nil
 	}()
 	type key struct {
 		c   byte
@@ -518,6 +675,8 @@ func readHidden(f *os.File, cancel <-chan struct{}, limit int) (value []byte, re
 	// ended inside the paste, which is then read to its end marker; and
 	// multiLine once anything but line ends followed that line.
 	var inPaste, lineDone, multiLine bool
+	// hinted: the stalled-paste hint was shown (once per read).
+	var hinted bool
 	finish := func() ([]byte, hiddenResult) {
 		fmt.Print("\r\n")
 		switch {
@@ -557,10 +716,27 @@ func readHidden(f *os.File, cancel <-chan struct{}, limit int) (value []byte, re
 		case <-cancel:
 			continue
 		}
-		select {
-		case k = <-keys:
-		case <-cancel:
-			continue
+		var stall <-chan time.Time
+		var stallTimer *time.Timer
+		if inPaste && lineDone && !hinted {
+			stallTimer = time.NewTimer(pasteStall)
+			stall = stallTimer.C
+		}
+		got := false
+		for !got {
+			select {
+			case k = <-keys:
+				got = true
+			case <-cancel:
+				fmt.Print("\r\n")
+				return stop()
+			case <-stall:
+				stall, hinted = nil, true
+				fmt.Print("\r\nThe paste has not ended: the terminal did not send its end. Press Ctrl-C to stop, then try again.\r\n")
+			}
+		}
+		if stallTimer != nil {
+			stallTimer.Stop()
 		}
 		if k.err != nil {
 			return stop()
@@ -638,17 +814,25 @@ func readHidden(f *os.File, cancel <-chan struct{}, limit int) (value []byte, re
 			fmt.Print("^C\r\n")
 			return stop()
 		case 4: // ^D: on an empty line it stops; inside a line it is refused
-			if len(buf) == 0 && !escaped && !control && !tooLong {
+			if len(buf) == 0 && !escaped && !control && !tooLong && !inPaste {
 				fmt.Print("\r\n")
 				return stop()
 			}
 			control = true
 		case 0x7f, 8: // Backspace: the last character, all of its bytes
+			if inPaste {
+				control = true
+				break
+			}
 			if _, size := utf8.DecodeLastRune(buf); size > 0 {
 				clear(buf[len(buf)-size:])
 				buf = buf[:len(buf)-size]
 			}
 		case 0x15: // ^U
+			if inPaste {
+				control = true
+				break
+			}
 			clear(buf)
 			buf = buf[:0]
 		case '\t':

@@ -48,6 +48,15 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # The real-Keychain test runs only on this runner and skips silently
+      # elsewhere; here it must run, and its log must say so.
+      - name: Real Keychain test ran (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          go test -count=1 -v -run '^TestKeychainRealStoreKeepsTheCapWhole$' ./cmd/ | tee "$RUNNER_TEMP/keychain-test.log"
+          grep -q -- '--- PASS: TestKeychainRealStoreKeepsTheCapWhole' "$RUNNER_TEMP/keychain-test.log" \
+            || { echo "TestKeychainRealStoreKeepsTheCapWhole did not run and pass here"; exit 1; }
+
       - name: Shell syntax
         run: |
           sh -n install.sh

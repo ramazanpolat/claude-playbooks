@@ -41,6 +41,11 @@ func (s secretServiceStore) where(name string) string {
 
 func (s secretServiceStore) maxValue() int { return secretServiceMaxValue }
 
+// readyToStore has nothing to ask on Linux: exists already tells a locked
+// item from a missing one, and secret-tool store asks for the keyring's
+// password itself where it can.
+func (secretServiceStore) readyToStore() error { return nil }
+
 // run runs secret-tool with args, bounded by toolTimeout; a run that does
 // not end in time is killed and reported as a store that cannot answer.
 func (s secretServiceStore) run(name string, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {

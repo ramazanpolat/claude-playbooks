@@ -615,8 +615,9 @@ configured (neither `secret_helper` nor `CPB_SECRET_HELPER`) and every
 reference involved is `cpb:<name>`; a configured helper always wins, for
 `cpb:` references too. It is cpb's own binary run in a helper mode, as a
 process of its own: it speaks the interface above (`--check`, exec,
-`--store`), so the cpb that launches still never holds a value. It keeps
-values in the operating system's store:
+`--store`), so the cpb that launches still never holds a value, and one
+verb of its own, `--ready REF`, which only the store step calls (below). It
+keeps values in the operating system's store:
 
 | System | Store | Item |
 |---|---|---|
@@ -640,19 +641,24 @@ values in the operating system's store:
   run this again"). On macOS any `security` failure other than "item not
   found" (its exit 44) is one, and the line names the fix (unlock the
   Keychain, `security unlock-keychain`, or configure a helper of your own).
-  A **Keychain locked where it cannot show its unlock dialog** (an SSH
-  session, say) is found before a value is asked for. The search without
-  `-w` answers on a locked Keychain as on an unlocked one, so `--check`
-  follows "not there" with `security show-keychain-info`, which carries no
-  value: there it exits 36 (errSecInteractionNotAllowed, -25308, as an exit
-  status), and `--check` exits 5 saying the Keychain is locked and how to
-  unlock it (`security unlock-keychain`), so the store step asks for
-  nothing. In a session that can show the dialog, that call waits for it,
-  up to the 60-second limit below, before anything is typed. Every later call that meets a locked Keychain says the
-  same with exit 5: reading the value (exit 36, nothing on stderr) and the
-  add (exit 36, and on stderr `add-generic-password: returned -25308` after
-  a line whose text is localised; the number, the exit status, or the
-  English text is enough, read in-process and never printed). Observed
+  A **presence check brings up no dialog**: `--check` asks
+  `find-generic-password` without `-w`, which answers on a locked Keychain
+  as on an unlocked one (0, or 44), so it reports a missing name as not
+  stored whatever the lock, from any caller (`--dry-run`, `--json`, an
+  agent's session). A **Keychain locked where it cannot show its unlock
+  dialog** (an SSH session, say) is found by `--ready`, which the store
+  step runs right before it asks a person for a value and nowhere else:
+  it asks `security show-keychain-info`, which carries no value. There it
+  exits 36 (errSecInteractionNotAllowed, -25308, as an exit status), and
+  `--ready` exits 5 saying the Keychain is locked and how to unlock it
+  (`security unlock-keychain`), so the step asks for nothing. In a session
+  that can show the dialog, that call waits for it, up to the 60-second
+  limit below, before anything is typed. Every later call that meets a
+  locked Keychain says the same with exit 5: reading the value (exit 36,
+  nothing on stderr) and the add (exit 36, and on stderr
+  `add-generic-password: returned -25308` after a line whose text is
+  localised; the number, the exit status, or the English text is enough,
+  read in-process and never printed). Observed
   over `ssh localhost` with a locked throwaway keychain on GitHub's runner
   images macos-15-arm64 20261104.0514.1 (macOS 15.8.2) and macos-26-arm64
   20261102.0473.1 (macOS 26.7.2); in the runner's own session, which has a
@@ -725,20 +731,38 @@ helper's `--check` exits 4):
   (`^A`, `^W`, `^D` inside a line, …) was pressed, since with echo off what
   it added or dropped is not seen, or when it is longer than the store
   keeps (the default helper's store's limit, else 64 KiB), or when it is a
-  paste of more than one line;
+  paste of more than one line, or when more than line ends followed it
+  (below);
+- **before the first prompt**, with the default helper only, the step runs
+  its `--ready REF`, which asks the store, with nothing that carries a
+  value, whether it can take one (on macOS `security show-keychain-info`,
+  which brings up the Keychain's unlock dialog now where one can be shown;
+  on Linux nothing is asked). Exit 5 stops the step with the store's
+  reason and nothing asked for. A configured helper is never sent it;
 - **pastes:** the read turns the terminal's bracketed paste on (and off
   after), so on a terminal that has it a paste arrives between its markers
   and is read to its end marker, whatever its gaps: one line with its
-  newline is the value, more than one line is refused;
-- **after every read**, while echo is still off, whatever is waiting to be
-  read on the terminal is discarded, at once whenever any is waiting,
-  until nothing has come for 300 ms; only then is the terminal's mode put
-  back, and what came in between is discarded too. So what was typed or
-  pasted past the line is never shown once echo is back, never fills the
-  confirmation and, once cpb exits, never reaches the shell. Input that
-  keeps arriving for 10 seconds without such a pause stops the step with
-  nothing stored, saying so, and a terminal whose input cannot be
-  discarded stops the read. A terminal without bracketed paste whose paste
+  newline is the value, more than one line is refused. Inside a paste,
+  Backspace, `^U` and `^D` are refused as control keys (what they removed
+  is not seen). A paste whose end marker has not come a second after a
+  line end inside it is named, once, with how to stop (`^C`);
+- **after every read**, while echo is still off, the input waiting on the
+  terminal is taken, at once whenever any is waiting, until nothing has
+  come for 300 ms; only then is the terminal's mode put back, and what
+  came in between is discarded too. Where the waiting count can be read
+  (Linux and macOS), that input is read, kept nowhere, and looked at
+  first: a line followed by anything but line ends is refused ("more
+  input followed the line"), so a paste of several lines is refused on a
+  terminal without bracketed paste too, when its rest is waiting or comes
+  within 300 ms, and so are keys typed within 300 ms of Enter. So what was
+  typed or pasted past the line is never shown once echo is back, never
+  fills the confirmation and, once cpb exits, never reaches the shell.
+  Input that keeps arriving for 10 seconds without such a pause is named,
+  once, and the step goes on taking it until it stops; a `^C` among it
+  ends the step with nothing stored, saying that what arrives after may
+  be shown and reach the shell. A signal to cpb ends the drain at once,
+  with the same caveat. A terminal whose input cannot be discarded stops
+  the step, saying why. A terminal without bracketed paste whose paste
   pauses for longer than 300 ms is the one case left: what comes after
   the pause is shown, and answers the next prompt;
 - the value goes to `<helper> --store REF` on stdin, and the reference is
@@ -752,12 +776,14 @@ helper's `--check` exits 4):
   helper; the step stops right after it, saying whether the value was
   stored, and nothing else is written. When the helper failed after the
   signal (a ^C reaches the whole foreground process group, the helper
-  included, perhaps after its write), the step asks the store once and
-  says "stored", "not stored", or "may be stored: run this again to see".
-  A signal after the step's last check stops the run the same way. A
-  helper's `--store` that exits 5 (the store could not answer) may have
-  stored the value: the step says so, and does not send the person to
-  another tool.
+  included, perhaps after its write), the step asks the store once
+  (`--check`) and says only what that shows: "an item named `<ref>`
+  exists now", "not stored", or "may be stored: run this again to see".
+  A signal after the step's last check stops the run the same way, also
+  one that reaches the step's own guard just as it ends. A helper's
+  `--store` that exits 5 (the store could not answer) is followed by the
+  same one check, with the same three answers; the step never sends the
+  person to another tool then.
 - **A reference used more than once** is one secret: listed, checked and
   asked for once.
 

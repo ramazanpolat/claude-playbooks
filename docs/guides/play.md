@@ -122,11 +122,16 @@ Type it again to confirm, or press Enter to stop:
 - If the two entries differ, nothing is stored and cpb asks again, three
   times at most. The same goes for an arrow, Delete, a Ctrl key or another
   key you cannot see the effect of while you type. Backspace and `^U`
-  work. Pasting works too: paste the value, one line. A paste of several
-  lines is refused and asked for again, and nothing you type or paste past
-  the value is shown or reaches your shell. If you paste into a terminal
-  that keeps sending for a long time, cpb stops and asks you to run it
-  again.
+  work (not inside a paste). Pasting works too: paste the value, one line.
+  A paste of several lines is refused and asked for again, and so is a
+  value followed by anything you type within a moment of Enter. On a
+  terminal without bracketed paste that holds only when the rest of the
+  paste arrives within 300 ms of its first line; a paste that pauses for
+  longer than that is the one case where its rest is shown and answers
+  the next prompt. Nothing else you type or paste past the value is shown
+  or reaches your shell. If a paste keeps sending for more than 10
+  seconds, cpb says so and keeps discarding it until it stops; press
+  `^C` to stop instead, and what arrives after that may be shown.
 - An empty answer, `^C`, a closed terminal, or `kill` stops the run, and
   nothing is stored.
 - cpb's own store keeps values up to 1536 bytes in the macOS Keychain and

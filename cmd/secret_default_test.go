@@ -33,7 +33,11 @@ type memStore struct {
 	onExists, onWrite func(name string)
 	// readErr, when set, is what read answers.
 	readErr error
+	// notReady, when set, is what readyToStore answers.
+	notReady error
 }
+
+func (m *memStore) readyToStore() error { return m.notReady }
 
 func (m *memStore) maxValue() int {
 	if m.max > 0 {
@@ -462,5 +466,29 @@ func TestDefaultHelperUnansweredReadIsExit5(t *testing.T) {
 	out = captureStderr(t, func() { err = runSecretHelper([]string{"T=cpb:tok2", "--", "sh", "-c", "true"}, strings.NewReader("")) })
 	if code, ok := exitCode(err); !ok || code != unavailableExit || strings.Contains(out, "v-2") {
 		t.Fatalf("the launch read: %v %q", err, out)
+	}
+}
+
+// --ready is the default helper's own question before the store step asks
+// for a value: exit 0 when the store can take one, exit 5 with the
+// store's reason when it cannot; it takes one cpb: reference.
+func TestDefaultHelperReady(t *testing.T) {
+	m := useMemStore(t)
+	if err := runSecretHelper([]string{"--ready", "cpb:tok"}, strings.NewReader("")); err != nil {
+		t.Fatalf("a ready store: %v", err)
+	}
+	m.notReady = unavailable("the test store is locked; nothing was asked for or stored")
+	var herr error
+	out := captureStderr(t, func() { herr = runSecretHelper([]string{"--ready", "cpb:tok"}, strings.NewReader("")) })
+	if code, ok := exitCode(herr); !ok || code != unavailableExit || !strings.Contains(out, "locked") {
+		t.Fatalf("a store that cannot take a value: %v %q", herr, out)
+	}
+	for _, args := range [][]string{{"--ready"}, {"--ready", "vault:x/y"}, {"--ready", "cpb:a", "cpb:b"}} {
+		if err := runSecretHelper(args, strings.NewReader("")); err == nil {
+			t.Fatalf("%q was taken", args)
+		}
+	}
+	if m.writes != 0 {
+		t.Fatalf("%d writes", m.writes)
 	}
 }
