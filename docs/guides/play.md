@@ -145,7 +145,11 @@ Type it again to confirm, or press Enter to stop:
   an SSH session, say) is found before cpb asks for the value: cpb asks for
   nothing and tells you to run `security unlock-keychain` first. Where the
   window can be shown, the Keychain asks for its password before you type
-  the value.
+  the value; cpb says it is asking, and anything you type meanwhile is not
+  shown and is discarded, so type the value only when you are asked.
+- On a Linux desktop, checking whether a locked keyring holds a name may
+  bring up the keyring's unlock prompt; over SSH and on servers it does
+  not.
 - cpb never replaces a stored secret: to change one, store it under a new name
   and point the recipe at that.
 - If the recipe is someone else's and its name is fixed, or you stored the

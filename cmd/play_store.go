@@ -341,7 +341,7 @@ func storeSecret(ref string) (err error) {
 	}
 	limit := storeLimit(x)
 	stopped := fmt.Errorf("%s was not stored; nothing was written", ref)
-	notQuiet := fmt.Errorf("%s was not stored: you stopped it while input was still arriving on the terminal (a paste still running?), and what arrives from now on may be shown and reach your shell; nothing was written. Run this again once it has stopped", ref)
+	notQuiet := fmt.Errorf("%s was not stored: the step was stopped while input was still arriving on the terminal (a paste still running?), and what arrives from now on may be shown and reach your shell; nothing was written. Run this again once it has stopped", ref)
 	undiscarded := fmt.Errorf("%s was not stored: this terminal's waiting input could not be discarded, so what was typed or pasted past the value could be shown or reach your shell; nothing was written. Use another terminal, or store the value with your own tool", ref)
 	fmt.Printf("%s is not stored on this machine yet. Its value will be written to %s.\n", ref, storeWhere(x, ref))
 	if x.def {
@@ -349,7 +349,20 @@ func storeSecret(ref string) (err error) {
 		// take one, with nothing that carries a value: a Keychain locked
 		// where it cannot ask for its password stops the step here, and
 		// one that can ask brings up its unlock dialog now.
+		// It may take a while (an unlock dialog waits for its answer), so
+		// the person is told, and the terminal's echo is off meanwhile:
+		// what is typed then is not shown, and is discarded before the
+		// first prompt rather than read as the value.
+		fmt.Println("Asking the store whether it can take a value (it may ask for its own password first). Type nothing here until you are asked.")
+		fd := int(secretIn.Fd())
+		restoreEcho := echoOff(fd)
 		rerr := runHelper(x, nil, os.Stderr, os.Stderr, os.Environ(), "--ready", ref)
+		typed, perr := pendingCount(fd)
+		flushTerminal(fd)
+		restoreEcho()
+		if perr == nil && typed > 0 {
+			fmt.Println("What was typed meanwhile was discarded, unseen.")
+		}
 		var re *exec.ExitError
 		switch {
 		case isCancelled(promptCancel):
@@ -501,8 +514,12 @@ var (
 	drainMax   = 10 * time.Second
 )
 
-// flushTerminal is flushInput (a test makes it fail).
-var flushTerminal = flushInput
+// flushTerminal is flushInput, and pendingCount pendingInput (a test makes
+// them fail).
+var (
+	flushTerminal = flushInput
+	pendingCount  = pendingInput
+)
 
 // drainEnd is how drainInput ended.
 type drainEnd int
@@ -516,17 +533,21 @@ const (
 
 // drainInput runs after every hidden read, echo still off: it takes the
 // input waiting on the terminal f, keeping none of it, until nothing has
-// come for drainQuiet. It looks before it discards: where the waiting
-// count can be read, it reads those bytes (so the read never blocks) and
-// more reports anything in them but line ends, so a paste of several
-// lines, or keys typed right after Enter, are seen even on a terminal
-// without bracketed paste; a ^C among them ends the drain. Where the count
-// cannot be read, it discards once per poll until drainQuiet has passed.
-// After drainMax it says once that input is still arriving, and goes on
-// until it stops, a ^C or a signal. A signal (cancel) ends it at once
-// after one discard, before any read: a read of the key reader may still
-// be pending then, and the drain must not take a byte from under it. err
-// is a terminal whose input cannot be discarded.
+// come for drainQuiet. It always looks before it discards: where the
+// waiting count can be read, it reads those bytes (so the read never
+// blocks) and more reports anything in them but line ends, so a paste of
+// several lines, or keys typed right after Enter, are seen even on a
+// terminal without bracketed paste; a ^C among them ends the drain. Only
+// where the count cannot be read does it discard unseen, once per poll,
+// until drainQuiet has passed. After drainMax it says once that input is
+// still arriving, and goes on until it stops, a ^C or a signal. A signal
+// (cancel) ends it at once, with one discard and no read: a read of the
+// key reader may still be pending then, and the drain must not take a byte
+// from under it. A ^C or a signal while other input was arriving (after
+// the notice, among taken input, or waiting at a signal) ends it as
+// drainStoppedArriving, whose wording warns that what comes after may be
+// shown. err is a terminal whose input cannot be discarded where its
+// waiting count cannot be read either.
 func drainInput(f *os.File, cancel <-chan struct{}) (end drainEnd, more bool, err error) {
 	fd := int(f.Fd())
 	start := time.Now()
@@ -540,32 +561,39 @@ func drainInput(f *os.File, cancel <-chan struct{}) (end drainEnd, more bool, er
 		}
 		return intr, nil
 	}
+	// cancelled ends the drain on a signal: the warning wording when input
+	// was arriving (taken already, or waiting, which is counted, not read).
+	cancelled := func() (drainEnd, bool, error) {
+		n, perr := pendingCount(fd)
+		ferr := flushTerminal(fd)
+		if told || more || (perr == nil && n > 0) {
+			return drainStoppedArriving, more, ferr
+		}
+		return drainCancelled, more, ferr
+	}
+	// stopped ends it on a ^C, with the warning wording when other input
+	// came too.
+	stopped := func() (drainEnd, bool, error) {
+		if told || more {
+			return drainStoppedArriving, more, flushTerminal(fd)
+		}
+		return drainStopped, more, flushTerminal(fd)
+	}
 	if isCancelled(cancel) {
-		return drainCancelled, false, flushTerminal(fd)
-	}
-	// What already waits behind the line is looked at before the first
-	// discard.
-	if n, perr := pendingInput(fd); perr == nil && n > 0 {
-		intr, err := look(n)
-		if err != nil {
-			return drainWentQuiet, more, err
-		}
-		if intr {
-			return drainStopped, more, flushTerminal(fd)
-		}
-	}
-	if err := flushTerminal(fd); err != nil {
-		return drainWentQuiet, more, err
+		return cancelled()
 	}
 	for {
 		if isCancelled(cancel) {
-			return drainCancelled, more, flushTerminal(fd)
+			return cancelled()
 		}
 		if !told && time.Since(start) >= drainMax {
 			told = true
 			fmt.Print("Input is still arriving on the terminal; cpb takes it, unseen, until it stops. Press Ctrl-C to stop now (what comes after that may be shown).\r\n")
 		}
-		n, perr := pendingInput(fd)
+		// Look before discarding, every time: input is read and looked at
+		// where the waiting count can be read, and discarded unseen only
+		// where it cannot.
+		n, perr := pendingCount(fd)
 		switch {
 		case perr != nil:
 			if err := flushTerminal(fd); err != nil {
@@ -577,10 +605,7 @@ func drainInput(f *os.File, cancel <-chan struct{}) (end drainEnd, more bool, er
 				return drainWentQuiet, more, err
 			}
 			if intr {
-				if told {
-					return drainStoppedArriving, more, flushTerminal(fd)
-				}
-				return drainStopped, more, flushTerminal(fd)
+				return stopped()
 			}
 			since = time.Now()
 			continue
@@ -653,7 +678,7 @@ const (
 	// several lines where the terminal has no bracketed paste, or keys
 	// typed just after Enter).
 	hiddenMoreInput
-	// hiddenNotQuiet: a ^C while input was still arriving after drainMax.
+	// hiddenNotQuiet: a ^C or a signal while input was still arriving.
 	hiddenNotQuiet
 	// hiddenUndiscarded: the terminal's input cannot be discarded.
 	hiddenUndiscarded

@@ -776,8 +776,12 @@ helper's `--check` exits 4):
   its `--ready REF`, which asks the store, with nothing that carries a
   value, whether it can take one (on macOS `security show-keychain-info`,
   which brings up the Keychain's unlock dialog now where one can be shown;
-  on Linux nothing is asked). Exit 5 stops the step with the store's
-  reason and nothing asked for. A configured helper is never sent it;
+  on Linux nothing is asked). The step says first that it is asking, and
+  keeps the terminal's echo off while it waits (`^C` still works): what is
+  typed meanwhile is not shown, and is discarded before the first prompt,
+  saying so, never read as the value. Exit 5 stops the step with the
+  store's reason and nothing asked for. A configured helper is never sent
+  it;
 - **pastes:** the read turns the terminal's bracketed paste on (and off
   after), so on a terminal that has it a paste arrives between its markers
   and is read to its end marker, whatever its gaps: one line with its
@@ -797,11 +801,13 @@ helper's `--check` exits 4):
   typed or pasted past the line is never shown once echo is back, never
   fills the confirmation and, once cpb exits, never reaches the shell.
   Input that keeps arriving for 10 seconds without such a pause is named,
-  once, and the step goes on taking it until it stops; a `^C` among it
-  ends the step with nothing stored, saying that what arrives after may
-  be shown and reach the shell. A signal to cpb ends the drain at once,
-  with the same caveat. A terminal whose input cannot be discarded stops
-  the step, saying why. A terminal without bracketed paste whose paste
+  once, and the step goes on taking it until it stops. A `^C` in the drain
+  ends the step with nothing stored, and when other input was arriving
+  with it (after that notice, or among the input it came with) it says
+  that what arrives after may be shown and reach the shell. A signal to
+  cpb ends the drain at once, with the same caveat when input was
+  arriving (taken already, or waiting). A terminal whose input can be
+  neither counted nor discarded stops the step, saying why. A terminal without bracketed paste whose paste
   pauses for longer than 300 ms is the one case left: what comes after
   the pause is shown, and answers the next prompt;
 - the value goes to `<helper> --store REF` on stdin, and the reference is

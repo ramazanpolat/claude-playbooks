@@ -21,3 +21,19 @@ func flushInput(fd int) error { return unix.IoctlSetPointerInt(fd, unix.TIOCFLUS
 
 // pendingInput is how many bytes wait to be read on the terminal fd.
 func pendingInput(fd int) (int, error) { return unix.IoctlGetInt(fd, fionread) }
+
+// echoOff turns the terminal fd's echo off and leaves everything else as it
+// was (^C still signals, a line still ends at Enter); the returned func puts
+// it back. Where the mode cannot be read or set, it changes nothing.
+func echoOff(fd int) (restore func()) {
+	t, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
+	if err != nil {
+		return func() {}
+	}
+	old := *t
+	t.Lflag &^= unix.ECHO | unix.ECHONL
+	if unix.IoctlSetTermios(fd, unix.TIOCSETA, t) != nil {
+		return func() {}
+	}
+	return func() { unix.IoctlSetTermios(fd, unix.TIOCSETA, &old) }
+}

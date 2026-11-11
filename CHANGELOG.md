@@ -18,7 +18,10 @@
   reason, never "not stored". A presence check (`--check`) brings up no
   unlock dialog; the store step finds a locked Keychain before it asks for
   a value, through the default helper's own `--ready`
-  (`security show-keychain-info`, which carries no value). Values are capped at what each store keeps
+  (`security show-keychain-info`, which carries no value), saying so and
+  with the terminal's echo off while it waits. On a Linux desktop a check
+  of a locked keyring item may bring up the keyring's unlock prompt; over
+  SSH and on servers it does not. Values are capped at what each store keeps
   whole, 1536 bytes in the Keychain and 4096 in the Secret Service, since
   their tools cut a longer value short without saying so. Each tool call is
   bounded to 60 seconds and the per-name lock to 30. `<name>` is a lowercase

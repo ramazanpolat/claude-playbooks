@@ -42,7 +42,8 @@ key() { printf '%s' "$1" | tr ':/' '__'; }
 # As cpb's default helper, the stub is run with its own argument first.
 [ "$1" = __secret-helper ] && shift
 case "$1" in
-  --ready) [ -n "$READY_EXIT" ] && { echo "the test store is locked and cannot ask for its password here" >&2; exit "$READY_EXIT"; }; exit 0 ;;
+  --ready) [ -n "$READY_SLEEP" ] && sleep "$READY_SLEEP"
+           [ -n "$READY_EXIT" ] && { echo "the test store is locked and cannot ask for its password here" >&2; exit "$READY_EXIT"; }; exit 0 ;;
   --check) [ -z "$FORCE_CHECK_FAIL" ] && [ -f "$STORE_DIR/$(key "${2#*=}")" ] && exit 0; exit "${CHECK_EXIT:-4}" ;;
   --store) if [ -n "$SLOW_STORE" ]; then sleep "${STORE_SLEEP:-5}"; fi
            if [ -n "$FAIL_STORE" ]; then cat >/dev/null; exit "${STORE_EXIT:-1}"; fi
@@ -66,6 +67,7 @@ exit 2
 	t.Setenv("STORE_EXIT", "")
 	t.Setenv("FAIL_AFTER_STORE", "")
 	t.Setenv("READY_EXIT", "")
+	t.Setenv("READY_SLEEP", "")
 	t.Setenv(envset.SecretHelperEnv, path)
 	for _, v := range agentSessionVars {
 		t.Setenv(v, "") // restored after the test
@@ -1188,26 +1190,56 @@ func TestStoreStepWhenInputKeepsArriving(t *testing.T) {
 			t.Fatal("something was stored")
 		}
 	})
-	t.Run("a signal ends the drain at once", func(t *testing.T) {
+	t.Run("a signal ends the drain at once, with the caveat", func(t *testing.T) {
 		typeIt, finish := onPty(t)
 		defer finish()
+		drainQuiet = 150 * time.Millisecond
 		typeIt("abc\r", false)
 		stream(typeIt, 60) // the typing queue holds 64
 		cancel := make(chan struct{})
 		go func() { time.Sleep(700 * time.Millisecond); close(cancel) }()
 		start := time.Now()
-		if v, res := readWithin(t, cancel, testLimit); res != hiddenStopped || v != nil || time.Since(start) > 2*time.Second {
+		if v, res := readWithin(t, cancel, testLimit); res != hiddenNotQuiet || v != nil || time.Since(start) > 2*time.Second {
 			t.Fatalf("read %q %v after %s", v, res, time.Since(start))
 		}
 	})
+	// A ^C in the drain before the notice: with other input among it, the
+	// caveat; alone, a plain stop.
+	for _, tc := range []struct {
+		name, input string
+		res         hiddenResult
+	}{
+		{name: "a ^C among other input", input: "abc\rxyz\x03", res: hiddenNotQuiet},
+		{name: "a ^C alone after Enter", input: "abc\r\x03", res: hiddenStopped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			typeIt, finish := onPty(t)
+			defer finish()
+			typeIt(tc.input, false)
+			if v, res := readWithin(t, nil, testLimit); res != tc.res || v != nil {
+				t.Fatalf("read %q %v, want %v", v, res, tc.res)
+			}
+		})
+	}
 }
 
-// A terminal whose input cannot be discarded ends the read at once, and
-// the step says why.
+// Input is read, not discarded unseen, wherever the waiting count can be
+// read: a failing discard alone changes nothing. A terminal whose input
+// can be neither counted nor discarded ends the read at once, and the step
+// says why.
 func TestReadHiddenStopsWhenInputCannotBeDiscarded(t *testing.T) {
-	saved := flushTerminal
+	saved, savedCount := flushTerminal, pendingCount
 	flushTerminal = func(int) error { return errors.New("not supported") }
-	t.Cleanup(func() { flushTerminal = saved })
+	t.Cleanup(func() { flushTerminal, pendingCount = saved, savedCount })
+	t.Run("the count still works", func(t *testing.T) {
+		typeIt, finish := onPty(t)
+		defer finish()
+		typeIt("abc\r", false)
+		if v, res := readWithin(t, nil, testLimit); res != hiddenOK || string(v) != "abc" {
+			t.Fatalf("read %q %v", v, res)
+		}
+	})
+	pendingCount = func(int) (int, error) { return 0, errors.New("not supported") }
 	t.Run("the read", func(t *testing.T) {
 		typeIt, finish := onPty(t)
 		defer finish()
@@ -1274,6 +1306,8 @@ func TestStoreStepAsksTheStoreBeforeTheValue(t *testing.T) {
 		_, log := storeHelper(t)
 		m := asDefaultHelper(t, log)
 		t.Setenv("READY_EXIT", "5")
+		_, finish := onPty(t)
+		defer finish()
 		var err error
 		var out string
 		stderr := captureStderr(t, func() { out = captureStdout(t, func() { err = storeWithin(t, "cpb:tok") }) })
@@ -1299,6 +1333,34 @@ func TestStoreStepAsksTheStoreBeforeTheValue(t *testing.T) {
 			t.Fatal("the default helper was not asked --ready")
 		}
 	})
+}
+
+// While --ready runs (an unlock dialog may wait for its answer), the
+// person is told, the terminal's echo is off, and what is typed meanwhile
+// is neither shown nor read as the value: it is discarded before the
+// first prompt, saying so.
+func TestStoreStepReadyKeepsTypingOut(t *testing.T) {
+	store, log := storeHelper(t)
+	asDefaultHelper(t, log)
+	t.Setenv("READY_SLEEP", "1")
+	typeIt, finish := onPty(t)
+	typeIt("typed-during-the-question\r", false)
+	typeDelay = 1200 * time.Millisecond // after --ready has answered
+	typeIt(testValue+"\r", false)
+	typeIt(testValue+"\r", false)
+	var err error
+	out := captureStdout(t, func() { err = storeWithin(t, "cpb:tok") })
+	shown := finish()
+	if err != nil || !strings.Contains(out, "Asking the store whether it can take a value") || !strings.Contains(out, "discarded, unseen") {
+		t.Fatalf("store step: %v %q", err, out)
+	}
+	if strings.Contains(shown, "typed-during-the-question") {
+		t.Fatal("what was typed during --ready was shown")
+	}
+	b, rerr := os.ReadFile(filepath.Join(store, "cpb_tok"))
+	if rerr != nil || string(b) != testValue {
+		t.Fatalf("stored %q (%v): what was typed during --ready was taken?", b, rerr)
+	}
 }
 
 // A line with a control key in it is not taken: the step says why and asks

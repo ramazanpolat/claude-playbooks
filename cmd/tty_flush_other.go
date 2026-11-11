@@ -13,3 +13,5 @@ func flushInput(int) error {
 }
 
 func pendingInput(int) (int, error) { return 0, errors.New("not supported on this system") }
+
+func echoOff(int) func() { return func() {} }
