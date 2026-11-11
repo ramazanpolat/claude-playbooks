@@ -429,9 +429,25 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 // is private to that process, and dies with it, so no signal, kill or crash
 // can leave it half-done, and the tool cannot alter its parent's environment
 // at all.
+//
+// cpb's secret-store variables (manifest.SecretFileStoreEnv and the
+// manifest.SecretStoreEnvPrefix family) go too: they are cpb's own, never
+// the launched program's, and a helper gets only what cpb hands it.
 func bindOwnEnv(env []string, configDir string) []string {
-	env = removeEnv(env, "CLAUDE_CONFIG_DIR", config.ConfigDirOverrideEnv)
+	env = removeEnv(env, "CLAUDE_CONFIG_DIR", config.ConfigDirOverrideEnv, manifest.SecretFileStoreEnv)
+	env = removeEnvPrefix(env, manifest.SecretStoreEnvPrefix)
 	return append(env, "CLAUDE_CONFIG_DIR="+configDir)
+}
+
+// removeEnvPrefix drops every variable whose name starts with prefix.
+func removeEnvPrefix(environ []string, prefix string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		if !strings.HasPrefix(kv, prefix) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // EffectiveBlock is the flattened [env] block a launch of configDir applies:

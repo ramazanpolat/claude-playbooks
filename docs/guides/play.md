@@ -207,7 +207,8 @@ cpb:service-token is not stored on this machine yet. Its value will be written t
   whose keyring cannot be used at all (some systems' session buses answer
   in a way cpb does not count as "no keyring"), set
   `CPB_SECRET_FILE_STORE=1` in your own shell, and cpb keeps the value in
-  the file instead.
+  the file instead. It belongs in the environment of the one machine that
+  needs it, never in a playbook: cpb refuses it there.
 
 What this protects, and what it does not: the value stays out of command
 lines and out of cpb's output, so no log or transcript of them holds it. It

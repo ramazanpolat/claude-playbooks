@@ -17,7 +17,7 @@ import (
 func helperStoreReset(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		helperStoreDir, helperToolEnv = "", nil
+		helperStoreDir, helperToolEnv, helperLockDir = "", nil, ""
 		helperHanded, helperFileOK, helperSecretTool = false, false, ""
 	})
 }
@@ -542,19 +542,25 @@ func TestAncestorMessagesAndPrivateGroup(t *testing.T) {
 	if err := f.write("tok", []byte("v")); err == nil || !strings.Contains(err.Error(), "chmod g-w "+open) || !strings.Contains(err.Error(), "not your own private group") {
 		t.Fatalf("a shared group: %v", err)
 	}
-	group := []byte("root:x:0:\nusers:x:100:alice,bob\nalice:x:1000:\nbob:x:1001:alice\nshared:x:1002:\n")
+	group := []byte("root:x:0:\nusers:x:100:alice,bob\nalice:x:1000:\nbob:x:1001:alice\nshared:x:1002:\nerin:x:1005:\ndave:x:1006:\n")
+	passwd := []byte("root:x:0:0::/root:/bin/sh\nalice:x:1000:1000::/home/alice:/bin/sh\nbob:x:1001:1001::/home/bob:/bin/sh\n" +
+		"una:x:1004:100::/home/una:/bin/sh\ncarol:x:1002:1002::/home/carol:/bin/sh\nerin:x:1005:1005::/home/erin:/bin/sh\n" +
+		"svc:x:1500:1005::/srv:/bin/false\ndave:x:1006:4242::/home/dave:/bin/sh\n")
 	for _, c := range []struct {
-		user, gid string
-		want      int
+		who  string
+		uid  int
+		want int
 	}{
-		{"alice", "1000", 1000}, // her own, no other member
-		{"bob", "1001", -1},     // named as him, but alice is in it
-		{"alice", "100", -1},    // users: shared
-		{"carol", "1002", -1},   // not named as her
-		{"dave", "4242", -1},    // not in /etc/group (a directory service)
+		{"alice: her own, no other member", 1000, 1000},
+		{"bob: named as him, but alice is in it", 1001, -1},
+		{"una: users is shared", 1004, -1},
+		{"carol: shared is not named as her", 1002, -1},
+		{"erin: named as her, but svc's primary group", 1005, -1},
+		{"dave: his primary group is not in /etc/group", 1006, -1},
+		{"a uid with no account in /etc/passwd", 4000, -1},
 	} {
-		if got := privateGroupIn(group, c.user, c.gid); got != c.want {
-			t.Errorf("%s/%s: %d, want %d", c.user, c.gid, got, c.want)
+		if got := privateGroupIn(group, passwd, c.uid); got != c.want {
+			t.Errorf("%s: %d, want %d", c.who, got, c.want)
 		}
 	}
 }
@@ -616,5 +622,77 @@ func TestStaleTempsSweptOnStoreAndRead(t *testing.T) {
 	unlock()
 	if _, err := os.Lstat(stale); err != nil {
 		t.Fatal("a read swept a temporary file under a held lock")
+	}
+}
+
+// A helper process started without cpb's hand-over (a wrapper of one's own
+// around the internal verb) takes no opt-in from its own environment: a
+// keyring that fails outright stays exit 5, and nothing reaches the file.
+// cpb's own process still reads its own.
+func TestUnhandedHelperIgnoresTheOptIn(t *testing.T) {
+	stubSecretTool(t)
+	dir := fileStoreHome(t)
+	locks := t.TempDir()
+	savedLocks := secretLockDir
+	secretLockDir = func() (string, error) { return locks, nil }
+	t.Cleanup(func() { secretLockDir = savedLocks })
+	t.Setenv("STUB_LOOKUP_EXIT", "1")
+	t.Setenv("STUB_LOOKUP_SAYS", "The name is not activatable")
+	helperMode(t, nil)
+	t.Setenv(storeEnvPrefix+"SET", "")
+	os.Unsetenv(storeEnvPrefix + "SET")
+	t.Setenv(fileStoreOptInEnv, "1")
+	if code, out := storeExit(t, []string{"--store", "cpb:a"}, "v-1"); code != unavailableExit {
+		t.Fatalf("--store: exit %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a")); err == nil {
+		t.Fatal("the helper's own opt-in was taken")
+	}
+	var err error
+	captureStderr(t, func() { err = runSecretHelper([]string{"--check", "K=cpb:a"}, strings.NewReader("")) })
+	if code, _ := exitCode(err); code != unavailableExit {
+		t.Fatalf("--check: %v", err)
+	}
+	if !fileStoreOptIn() {
+		t.Fatal("cpb's own process lost its own opt-in")
+	}
+}
+
+// A launch's read sweeps under the lock --store holds, the one the cpb
+// that runs the helper handed it: a launch whose playbook sets HOME or
+// XDG_CACHE_HOME never takes another lock and sweeps a write in progress
+// in another terminal.
+func TestLaunchSweepLocksWhereStoreDoes(t *testing.T) {
+	noSecretTool(t)
+	dir := fileStoreHome(t)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	env := defaultHelperEnv(nil)
+	helperMode(t, env)
+	if code, out := storeExit(t, []string{"--store", "cpb:tok"}, "v-1"); code != 0 {
+		t.Fatalf("store: %d %s", code, out)
+	}
+	// Another terminal's --store holds tok's lock, its temporary file
+	// written.
+	applyHelperStoreEnv()
+	unlock, err := lockSecretName("tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	live := filepath.Join(dir, tempPrefix("tok")+"0123")
+	os.WriteFile(live, []byte("in-progress"), 0o600)
+	// The launch: its playbook moved HOME and XDG_CACHE_HOME.
+	launch := t.TempDir()
+	t.Setenv("HOME", launch)
+	t.Setenv("XDG_CACHE_HOME", launch)
+	if err := applyHelperStoreEnv(); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := defaultSecretStore()
+	if _, _, _, err := secretHelperExec(st, []string{"K=cpb:tok", "--", "true"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(live); err != nil {
+		t.Fatal("the launch swept a write in progress: it locked elsewhere")
 	}
 }

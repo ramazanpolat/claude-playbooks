@@ -237,6 +237,35 @@ func ValidateEnvValue(key, value string) error {
 var ReservedEnvKeys = map[string]bool{
 	"CLAUDE_CONFIG_DIR":         true,
 	config.ConfigDirOverrideEnv: true,
+	SecretFileStoreEnv:          true,
+}
+
+// SecretFileStoreEnv and SecretStoreEnvPrefix are cpb's own secret-store
+// variables: the file store opt-in, read only from the environment of the
+// cpb a person runs, and the store that cpb hands its default helper
+// (CPB_SECRET_STORE_*). Both are reserved: declared in a playbook, an env
+// set, --env or --env-file, the opt-in would reach the launched program and
+// every cpb started inside it, an opt-in the person never gave on that
+// machine, and the hand-over would no longer come from cpb alone. A launch
+// drops both from every helper's and every program's environment whatever
+// declared them.
+const (
+	SecretFileStoreEnv   = "CPB_SECRET_FILE_STORE"
+	SecretStoreEnvPrefix = "CPB_SECRET_STORE_"
+)
+
+// IsReservedEnvKey reports whether key is cpb's own (ReservedEnvKeys, or
+// the CPB_SECRET_STORE_ family).
+func IsReservedEnvKey(key string) bool {
+	return ReservedEnvKeys[key] || strings.HasPrefix(key, SecretStoreEnvPrefix)
+}
+
+// reservedKeyError says why key cannot be declared.
+func reservedKeyError(key string) error {
+	if key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix) {
+		return fmt.Errorf("%s is cpb's own secret-store setting and cannot be declared: set %s=1 in the environment of the one machine that needs it, never in a playbook", key, SecretFileStoreEnv)
+	}
+	return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
 }
 
 var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -247,8 +276,8 @@ func ValidateEnvKey(key string) error {
 	if !envKeyPattern.MatchString(key) {
 		return fmt.Errorf("invalid environment variable name %q", key)
 	}
-	if ReservedEnvKeys[key] {
-		return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
+	if IsReservedEnvKey(key) {
+		return reservedKeyError(key)
 	}
 	return nil
 }

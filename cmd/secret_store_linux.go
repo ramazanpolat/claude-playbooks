@@ -229,7 +229,7 @@ func (s linuxStore) exists(name string) (bool, error) {
 	inFile, ferr := s.file.exists(name)
 	if k == keyringFound {
 		if ferr == nil && inFile {
-			fmt.Fprintf(os.Stderr, "cpb:%s is also kept in the file %s; the keyring's value is the one used\n", name, s.file.path(name))
+			fmt.Fprintf(os.Stderr, "cpb:%s"+alsoKeptNotice+"%s; the keyring's value is the one used\n", name, s.file.path(name))
 		}
 		return true, nil
 	}
@@ -274,7 +274,7 @@ func (s linuxStore) read(name string) ([]byte, error) {
 		case keyringBypassed:
 			why = "the keyring fails here, and " + fileStoreOptInEnv + "=1 is set"
 		}
-		fmt.Fprintf(os.Stderr, "cpb:%s is read from the file %s: %s\n", name, s.file.path(name), why)
+		fmt.Fprintf(os.Stderr, "cpb:%s"+readFromFileNotice+"%s: %s\n", name, s.file.path(name), why)
 	}
 	return v, err
 }

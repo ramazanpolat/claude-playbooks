@@ -416,6 +416,10 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	runErr := c.Run()
+	// The secret helper's notice (a token read from the file store) is
+	// the person's to see, as at launch; claude's own stderr is kept for a
+	// failure.
+	fmt.Fprint(os.Stderr, helperNotices(stderr.String()))
 	hint := askFailureHint(root, signIn)
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("Claude Code did not answer within %s: nothing came back. %s", askTimeout, hint)
@@ -443,12 +447,9 @@ func askCommand(ctx context.Context, signIn askSignIn, claudePath string, args, 
 	}
 	argv := append(append(append([]string{}, x.pre...), auth.OAuthTokenEnv+"="+a.Auth.Ref, "--", claudePath), args...)
 	c := exec.CommandContext(ctx, x.path, argv...)
-	c.Env = withoutKeys(env, []string{auth.OAuthTokenEnv})
-	if x.def {
-		// ask's child keeps a narrow environment (askEnvKeep); the store is
-		// cpb's own all the same.
-		c.Env = defaultHelperEnv(c.Env)
-	}
+	// ask's child keeps a narrow environment (askEnvKeep); the store is
+	// cpb's own all the same.
+	c.Env = helperEnv(x.def, withoutKeys(env, []string{auth.OAuthTokenEnv}))
 	return c, nil
 }
 

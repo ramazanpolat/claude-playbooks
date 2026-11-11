@@ -125,28 +125,45 @@ func ownedPrivate(path string, st *unix.Stat_t, dir bool) error {
 
 // privateGroup is the user's own group where the system gives each user one
 // (as Debian and Ubuntu do, with umask 002): its write bit lets no one else
-// in. -1 when there is none, or it cannot be told from /etc/group (a group
-// kept only in a directory service such as LDAP reads as shared). A test
-// replaces it.
+// in. -1 when there is none, or it cannot be told from /etc/passwd and
+// /etc/group (an account or a group kept only in a directory service such
+// as LDAP reads as shared). A test replaces it.
 var privateGroup = sync.OnceValue(func() int {
-	u, err := user.Current()
+	passwd, err := os.ReadFile("/etc/passwd")
 	if err != nil {
 		return -1
 	}
-	data, err := os.ReadFile("/etc/group")
+	group, err := os.ReadFile("/etc/group")
 	if err != nil {
 		return -1
 	}
-	return privateGroupIn(data, u.Username, u.Gid)
+	return privateGroupIn(group, passwd, os.Getuid())
 })
 
-// privateGroupIn is the user's private group in an /etc/group file: the
-// user's primary group, named as the user, with no member listed but the
-// user. -1 otherwise.
-func privateGroupIn(groupFile []byte, username, primaryGid string) int {
-	for _, line := range strings.Split(string(groupFile), "\n") {
-		f := strings.Split(strings.TrimSpace(line), ":")
-		if len(f) < 4 || f[2] != primaryGid {
+// privateGroupIn is the user's private group: the primary group of uid's
+// account in passwdFile, named as that account, with no member listed in
+// groupFile but the user, and the primary group of no other account. -1
+// otherwise, and when uid has no line in passwdFile: nothing else, such as
+// $USER, names the user.
+func privateGroupIn(groupFile, passwdFile []byte, uid int) int {
+	var username, gid string
+	accounts := colonLines(passwdFile)
+	for _, f := range accounts {
+		if len(f) >= 4 && f[2] == strconv.Itoa(uid) {
+			username, gid = f[0], f[3]
+			break
+		}
+	}
+	if username == "" {
+		return -1
+	}
+	for _, f := range accounts {
+		if len(f) >= 4 && f[3] == gid && f[0] != username {
+			return -1
+		}
+	}
+	for _, f := range colonLines(groupFile) {
+		if len(f) < 4 || f[2] != gid {
 			continue
 		}
 		if f[0] != username {
@@ -157,13 +174,24 @@ func privateGroupIn(groupFile []byte, username, primaryGid string) int {
 				return -1
 			}
 		}
-		gid, err := strconv.Atoi(f[2])
+		g, err := strconv.Atoi(f[2])
 		if err != nil {
 			return -1
 		}
-		return gid
+		return g
 	}
 	return -1
+}
+
+// colonLines splits an /etc/passwd or /etc/group file into fields.
+func colonLines(file []byte) [][]string {
+	var out [][]string
+	for _, line := range strings.Split(string(file), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			out = append(out, strings.Split(line, ":"))
+		}
+	}
+	return out
 }
 
 // groupName is gid's name for a message, or the number.

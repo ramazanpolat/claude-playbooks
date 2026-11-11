@@ -244,3 +244,33 @@ func TestAskAccountEmpty(t *testing.T) {
 		t.Fatalf("after: %v", err)
 	}
 }
+
+// cpb ask shows the secret helper's notice that a token was read from the
+// file store, as a launch does; the rest of the child's stderr stays out.
+func TestAskShowsTheHelperNotice(t *testing.T) {
+	askFixture(t)
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "notice-helper")
+	script := `#!/bin/sh
+[ "$1" = --check ] && exit 0
+echo "cpb:gm-token is read from the file /home/user/.local/share/cpb/secrets/gm-token: the keyring does not hold it" >&2
+echo "other helper chatter" >&2
+while [ $# -gt 0 ] && [ "$1" != "--" ]; do k=${1%%=*}; export "$k=resolved"; shift; done
+shift
+exec "$@"
+`
+	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envset.SecretHelperEnv, helper)
+	mustStmt(t, "CREATE ACCOUNT gm SET provider = anthropic, claude_token FROM keychain:ok/gm-token")
+	fakeAskClaude(t, askListPlan)
+	var err error
+	out := captureStderr(t, func() { _, err = askRun(t, map[string]string{"account": "gm"}, "list") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "cpb:gm-token is read from the file /home/user/.local/share/cpb/secrets/gm-token") || strings.Contains(out, "other helper chatter") {
+		t.Fatalf("stderr:\n%s", out)
+	}
+}

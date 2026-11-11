@@ -85,7 +85,7 @@ func storeKindWords(kind string) string {
 // the store, and cpb ask, whose child keeps a narrow environment, finds the
 // same one. The helper uses them for its own store calls and drops them
 // before it runs a command.
-const storeEnvPrefix = "CPB_SECRET_STORE_"
+const storeEnvPrefix = manifest.SecretStoreEnvPrefix
 
 // storeEnvKeys are the variables of cpb's own environment that reach the
 // store's tools: what the Keychain and the keyring are found through.
@@ -95,20 +95,43 @@ var storeEnvKeys = []string{"HOME", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR
 // the file store on a Linux machine whose keyring is installed but fails
 // (a bus cpb does not know, a keyring that cannot be started). cpb reads
 // it from its own environment only and hands it to the helper: a
-// playbook's environment never sets it.
-const fileStoreOptInEnv = "CPB_SECRET_FILE_STORE"
+// playbook's environment never sets it (a reserved key), and no helper or
+// launched program gets it (helperEnv, a launch's own variables).
+const fileStoreOptInEnv = manifest.SecretFileStoreEnv
+
+// helperEnv is env for running a helper (def: cpb's default one): without
+// cpb's own secret-store variables (CPB_SECRET_FILE_STORE and every
+// CPB_SECRET_STORE_*), whatever put them there, and, for the default
+// helper, with the store cpb hands it (defaultHelperEnv). Every helper
+// call goes through it: a check, --ready, --store, a launch, cpb ask.
+func helperEnv(def bool, env []string) []string {
+	env = withoutStoreVars(env)
+	if def {
+		env = defaultHelperEnv(env)
+	}
+	return env
+}
+
+// withoutStoreVars is env without cpb's own secret-store variables.
+func withoutStoreVars(env []string) []string {
+	return withoutKeys(withoutPrefix(env, storeEnvPrefix), []string{fileStoreOptInEnv})
+}
 
 // defaultHelperEnv is env for running cpb's default helper: env without any
 // CPB_SECRET_STORE_* of its own, plus CPB_SECRET_STORE_SET=1, the file
-// store's directory (CPB_SECRET_STORE_DIR), the secret-tool cpb found
+// store's directory (CPB_SECRET_STORE_DIR), the per-name lock directory
+// (CPB_SECRET_STORE_LOCK_DIR), the secret-tool cpb found
 // (CPB_SECRET_STORE_SECRET_TOOL, absent when it found none), the file
 // store opt-in (CPB_SECRET_STORE_FILE_OK=1 when cpb's own
 // CPB_SECRET_FILE_STORE is 1), and cpb's own value of each storeEnvKeys
 // (CPB_SECRET_STORE_<KEY>; absent when cpb's own is unset).
 func defaultHelperEnv(env []string) []string {
-	env = append(withoutPrefix(env, storeEnvPrefix), storeEnvPrefix+"SET=1")
+	env = append(withoutStoreVars(env), storeEnvPrefix+"SET=1")
 	if d := storeDirForHelper(); d != "" {
 		env = append(env, storeEnvPrefix+"DIR="+d)
+	}
+	if d, err := secretLockDir(); err == nil {
+		env = append(env, storeEnvPrefix+"LOCK_DIR="+d)
 	}
 	if t := storeToolForHelper(); t != "" {
 		env = append(env, storeEnvPrefix+"SECRET_TOOL="+t)
@@ -134,30 +157,68 @@ var helperToolEnv []string
 // (defaultHelperEnv); helperFileOK is its file store opt-in.
 var helperHanded, helperFileOK bool
 
-// fileStoreOptIn reports CPB_SECRET_FILE_STORE=1: in helper mode as the
-// running cpb handed it, never from the launch environment; in cpb's own
-// process from its own environment.
+// inHelperProcess: this process runs as the default helper
+// (runSecretHelper), whether a cpb started it or anything else did.
+var inHelperProcess bool
+
+// fileStoreOptIn reports CPB_SECRET_FILE_STORE=1. A helper takes it only
+// from the cpb that runs it (handed, defaultHelperEnv), never from its own
+// environment: a helper started without a hand-over (a wrapper around the
+// internal verb, a launch environment that sets the variable) has no
+// opt-in. cpb's own process reads its own environment.
 func fileStoreOptIn() bool {
-	if helperHanded {
-		return helperFileOK
+	if inHelperProcess || helperHanded {
+		return helperHanded && helperFileOK
 	}
 	return os.Getenv(fileStoreOptInEnv) == "1"
 }
 
+// The default helper's notices, one stderr line each, never a value: a
+// read the file store served while a keyring is installed, and a name the
+// file keeps beside the keyring. helperNotices finds them.
+const (
+	readFromFileNotice = " is read from the file "
+	alsoKeptNotice     = " is also kept in the file "
+)
+
+// helperNotices are the lines of a helper child's stderr that are the
+// default helper's notices, for a caller that keeps the rest (cpb ask
+// keeps claude's own stderr for a failure only).
+func helperNotices(stderr string) string {
+	var b strings.Builder
+	for _, l := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(l, manifest.CPBRefPrefix) && (strings.Contains(l, readFromFileNotice) || strings.Contains(l, alsoKeptNotice)) {
+			b.WriteString(l + "\n")
+		}
+	}
+	return b.String()
+}
+
+// helperLockDir is the lock directory the running cpb handed the helper.
+var helperLockDir string
+
 // applyHelperStoreEnv reads, in helper mode, what the cpb that runs the
-// helper handed it (defaultHelperEnv); nothing when it handed nothing.
-func applyHelperStoreEnv() {
-	helperHanded, helperFileOK, helperToolEnv = false, false, nil
+// helper handed it (defaultHelperEnv); nothing when it handed nothing. A
+// path handed that is not absolute is refused: the hand-over is broken,
+// and nothing is read or stored.
+func applyHelperStoreEnv() error {
+	helperHanded, helperFileOK, helperToolEnv, helperLockDir = false, false, nil, ""
 	setHelperStoreDir("")
 	setHelperSecretTool("")
 	if os.Getenv(storeEnvPrefix+"SET") != "1" {
-		return
+		return nil
 	}
 	helperHanded = true
+	for _, k := range []string{"DIR", "LOCK_DIR", "SECRET_TOOL"} {
+		if v := os.Getenv(storeEnvPrefix + k); v != "" && !filepath.IsAbs(v) {
+			return fmt.Errorf("the store handed to cpb's default helper is not usable (%s%s is not an absolute path); nothing was read or stored", storeEnvPrefix, k)
+		}
+	}
 	helperFileOK = os.Getenv(storeEnvPrefix+"FILE_OK") == "1"
+	helperLockDir = os.Getenv(storeEnvPrefix + "LOCK_DIR")
 	setHelperStoreDir(os.Getenv(storeEnvPrefix + "DIR"))
 	setHelperSecretTool(os.Getenv(storeEnvPrefix + "SECRET_TOOL"))
-	env := withoutPrefix(os.Environ(), storeEnvPrefix)
+	env := withoutStoreVars(os.Environ())
 	env = withoutKeys(env, storeEnvKeys)
 	for _, k := range storeEnvKeys {
 		if v, ok := os.LookupEnv(storeEnvPrefix + k); ok {
@@ -165,6 +226,7 @@ func applyHelperStoreEnv() {
 		}
 	}
 	helperToolEnv = env
+	return nil
 }
 
 // storeToolEnv is the environment for one call to a store's tool.
@@ -172,7 +234,7 @@ func storeToolEnv() []string {
 	if helperToolEnv != nil {
 		return append([]string{}, helperToolEnv...)
 	}
-	return withoutPrefix(os.Environ(), storeEnvPrefix)
+	return withoutStoreVars(os.Environ())
 }
 
 // unavailableError is a store error that storeCannotAnswer reports: the
@@ -250,17 +312,6 @@ func defaultHelperExe() (helperExe, error) {
 	return helperExe{path: self, pre: []string{secretHelperArg}, def: true, name: "cpb's default helper"}, nil
 }
 
-// storeWhere is where a reference's value is written, for the prompt: the
-// default helper names the store and the item; another helper is named.
-func storeWhere(x helperExe, ref string) string {
-	if x.def {
-		if st, err := defaultSecretStore(); err == nil {
-			return st.where(strings.TrimPrefix(ref, manifest.CPBRefPrefix))
-		}
-	}
-	return "the store of your secret helper " + x.name
-}
-
 // cpbRefName returns the name of a valid cpb:<name> reference.
 func cpbRefName(ref string) (string, error) {
 	name, ok := strings.CutPrefix(ref, manifest.CPBRefPrefix)
@@ -290,8 +341,16 @@ func printableASCII(v []byte) bool {
 }
 
 // secretLockDir holds the default helper's per-name store locks: empty
-// files, never a value (a test replaces it).
+// files, never a value (a test replaces it). In helper mode it is the one
+// the running cpb handed over, so a launch whose playbook sets HOME or
+// XDG_CACHE_HOME locks where --store does; otherwise cpb's own.
 var secretLockDir = func() (string, error) {
+	if helperHanded {
+		if helperLockDir == "" {
+			return "", errors.New("the cpb that runs the helper handed no lock directory")
+		}
+		return helperLockDir, nil
+	}
 	d, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
@@ -370,7 +429,11 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 	if len(args) == 0 {
 		return errors.New("cpb's default secret helper takes --check KEY=REF, --ready REF, --store REF [--into STORE], or KEY=REF … -- <command>; a launch runs it, never a person")
 	}
-	applyHelperStoreEnv()
+	inHelperProcess = true
+	defer func() { inHelperProcess = false }()
+	if err := applyHelperStoreEnv(); err != nil {
+		return err
+	}
 	st, err := defaultSecretStore()
 	if err != nil {
 		return err
@@ -482,7 +545,7 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 		}
 		return nil
 	}
-	path, argv, env, err := secretHelperExec(st, args, withoutPrefix(os.Environ(), storeEnvPrefix))
+	path, argv, env, err := secretHelperExec(st, args, withoutStoreVars(os.Environ()))
 	var ue *unavailableError
 	if errors.As(err, &ue) {
 		return storeCannotAnswer(err)

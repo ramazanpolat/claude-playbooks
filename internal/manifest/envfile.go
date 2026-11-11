@@ -40,8 +40,8 @@ func ParseEnvFile(path string) (*Env, error) {
 			return nil, fmt.Errorf("%s:%d: expected KEY=VALUE", path, lineNo)
 		}
 		key = strings.TrimSpace(key)
-		if ReservedEnvKeys[key] {
-			return nil, fmt.Errorf("%s:%d: %s is managed by cpb and cannot be overridden", path, lineNo, key)
+		if IsReservedEnvKey(key) {
+			return nil, fmt.Errorf("%s:%d: %w", path, lineNo, reservedKeyError(key))
 		}
 		if err := ValidateEnvKey(key); err != nil {
 			// The rejected "key" is not echoed either: a secret containing

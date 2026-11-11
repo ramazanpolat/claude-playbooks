@@ -80,14 +80,13 @@ func storeStepRefusal(ref string, interactive, yes bool, trusted []string) strin
 }
 
 // runHelper runs one helper call bounded by helperTimeout. A call that
-// does not end in time is killed, and the error says so. cpb's default
-// helper gets cpb's own store environment (defaultHelperEnv).
+// does not end in time is killed, and the error says so. Its environment
+// is helperEnv's: no secret-store variable but what cpb hands its default
+// helper.
 func runHelper(x helperExe, stdin io.Reader, stdout, stderr io.Writer, env []string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
 	defer cancel()
-	if x.def {
-		env = defaultHelperEnv(env)
-	}
+	env = helperEnv(x.def, env)
 	c := exec.CommandContext(ctx, x.path, append(append([]string{}, x.pre...), args...)...)
 	c.Stdin, c.Stdout, c.Stderr, c.Env = stdin, stdout, stderr, env
 	c.WaitDelay = 2 * time.Second
@@ -183,17 +182,25 @@ func preparePendingStore(refs []string, planOnly, interactive, yes bool, trusted
 func donePendingStore() { refsPendingStore = nil }
 
 // printPendingNote names the references the run will ask to store, and
-// where each value would be kept.
+// where each value would be kept: from secretReport, the probe the JSON
+// report and --check use, so the line never names a store the report does
+// not.
 func printPendingNote(pending []string, planOnly bool) {
-	for _, r := range pending {
+	for _, e := range secretReport(pending) {
 		where := ""
-		if x, err := resolveHelperFor([]string{r}); err == nil {
-			where = " It would be kept in " + storeWhere(x, r) + "."
+		switch e.Store {
+		case "none":
+		case storeUnknown:
+			where = " Where it would be kept cannot be said now: " + e.Note + "."
+		case "helper":
+			where = " It would be kept in the store of your secret helper " + e.Helper + "."
+		default:
+			where = " It would be kept in " + e.where + "."
 		}
 		if planOnly {
-			fmt.Printf("Not stored on this machine yet: %s. Run without --dry-run, from your own terminal, and cpb asks for its value.%s\n", r, where)
+			fmt.Printf("Not stored on this machine yet: %s. Run without --dry-run, from your own terminal, and cpb asks for its value.%s\n", e.Ref, where)
 		} else {
-			fmt.Printf("Not stored on this machine yet: %s. You will be asked for its value after you confirm it.%s\n", r, where)
+			fmt.Printf("Not stored on this machine yet: %s. You will be asked for its value after you confirm it.%s\n", e.Ref, where)
 		}
 	}
 }
@@ -211,6 +218,9 @@ type playSecretJSON struct {
 	Path   string `json:"path,omitempty"`
 	Helper string `json:"helper,omitempty"`
 	Note   string `json:"note,omitempty"`
+	// where is the default helper's store in words (describe), for the
+	// preview line; not in the JSON.
+	where string
 }
 
 // blockRefs are the secret references a play block's risks name.
@@ -254,6 +264,7 @@ func secretReport(refs []string) []playSecretJSON {
 					e.Note = "no keyring: " + t.why
 				}
 				e.Store, e.Path = t.kind, t.path
+				e.where = st.describe(strings.TrimPrefix(r, manifest.CPBRefPrefix), t)
 			}
 		} else {
 			e.Store, e.Helper = "helper", x.name
@@ -279,7 +290,7 @@ func secretReport(refs []string) []playSecretJSON {
 			// locked keyring item is seen only there): when it cannot
 			// answer, where the value is cannot be said either.
 			if x.def && errors.As(err, &ee) && ee.ExitCode() == unavailableExit {
-				e.Store, e.Path = storeUnknown, ""
+				e.Store, e.Path, e.where = storeUnknown, "", ""
 			}
 		}
 		out = append(out, e)
