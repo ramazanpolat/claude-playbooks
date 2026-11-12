@@ -362,12 +362,15 @@ func readSessionFiles(dirs []sessionDir) []liveSession {
 	return out
 }
 
-// matchLaunchRecords gives each session in this pid domain the account of
-// its launch record: the record of its own pid, or else of its parent's (a
+// matchLaunchRecords gives each confirmed live session the account of its
+// launch record: the record of its own pid, or else of its parent's (a
 // secret helper that started claude as its child), and only when that
 // process started when the record says, so a reused pid never borrows
-// another launch's account. starts is what procStarts read for the
-// sessions' own pids; a parent's start is read only when a record names it.
+// another launch's account. A session whose file records no start time is
+// not confirmed to be the process now on its pid (it may be a stale file on
+// a reused pid), so it gets no account. starts is what procStarts read for
+// the sessions' own pids; a parent's start is read only when a record names
+// it.
 func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 	if len(sessions) == 0 {
 		return
@@ -379,7 +382,7 @@ func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 	var parents []int
 	for i := range sessions {
 		s := &sessions[i]
-		if s.f.PIDDomain != "" && s.f.PIDDomain != pidDomain {
+		if s.state != live {
 			continue
 		}
 		info, ok := starts[s.f.PID]
@@ -400,7 +403,7 @@ func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 	pstarts := procStarts(parents)
 	for i := range sessions {
 		s := &sessions[i]
-		if s.account != "" || (s.f.PIDDomain != "" && s.f.PIDDomain != pidDomain) {
+		if s.account != "" || s.state != live {
 			continue
 		}
 		info, ok := starts[s.f.PID]
@@ -509,36 +512,54 @@ func readTranscriptTail(path string) transcriptTail {
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(make([]byte, 0, 64<<10), transcriptTailBytes+1)
 	for sc.Scan() {
+		// Every field raw, so a field of an unexpected type costs that field
+		// only, never the line: an assistant line of any shape still ends a
+		// limit before it.
 		var line struct {
-			Type       string          `json:"type"`
-			Cwd        string          `json:"cwd"`
-			AITitle    string          `json:"aiTitle"`
-			IsAPIError bool            `json:"isApiErrorMessage"`
-			Error      string          `json:"error"`
+			Type       json.RawMessage `json:"type"`
+			Cwd        json.RawMessage `json:"cwd"`
+			AITitle    json.RawMessage `json:"aiTitle"`
+			IsAPIError json.RawMessage `json:"isApiErrorMessage"`
+			Error      json.RawMessage `json:"error"`
 			Quota      json.RawMessage `json:"quotaLimits"`
-			Message    struct {
-				Model string `json:"model"`
-			} `json:"message"`
+			Message    json.RawMessage `json:"message"`
 		}
 		if json.Unmarshal(sc.Bytes(), &line) != nil {
 			continue // the first line of a tail is usually cut
 		}
-		if line.Cwd != "" {
-			t.cwd = line.Cwd
+		if c := rawString(line.Cwd); c != "" {
+			t.cwd = c
 		}
-		if line.AITitle != "" {
-			t.title = line.AITitle
+		if a := rawString(line.AITitle); a != "" {
+			t.title = a
 		}
-		if line.Type == "assistant" {
+		if rawString(line.Type) == "assistant" {
 			// Every assistant line decides: a limit, or (an answer, or any
-			// other error) no limit any more.
-			t.limit = quotaStopOf(line.IsAPIError, line.Error, line.Quota)
-			if line.Message.Model != "" && !strings.HasPrefix(line.Message.Model, "<") {
-				t.model = line.Message.Model
+			// other error, or a shape cpb does not know) no limit any more.
+			var isErr bool
+			apiErr := json.Unmarshal(line.IsAPIError, &isErr) == nil && isErr
+			t.limit = quotaStopOf(apiErr, rawString(line.Error), line.Quota)
+			var msg struct {
+				Model json.RawMessage `json:"model"`
+			}
+			if json.Unmarshal(line.Message, &msg) == nil {
+				if m := rawString(msg.Model); m != "" && !strings.HasPrefix(m, "<") {
+					t.model = m
+				}
 			}
 		}
 	}
 	return t
+}
+
+// rawString is a raw JSON value as a string, "" when it is absent or not a
+// string.
+func rawString(raw json.RawMessage) string {
+	var s string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
 }
 
 // transcriptCwd is the directory a transcript's session ran in: the last

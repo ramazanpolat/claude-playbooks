@@ -2611,8 +2611,10 @@ directory of mode `0700`) and removes it when the launch returns.
   child), and only when that process started when the record says, so a
   reused pid never borrows another launch's account. The parent's pid is
   read in the same pass as the start time (`/proc/<pid>/stat` on Linux,
-  `ps` elsewhere). A session cpb did not launch (plain `claude`, a cpb
-  before v4.8.0, a sandbox, whose sessions are not listed anyway) has none.
+  `ps` elsewhere). A session whose file records no start time is not
+  confirmed to be the process now on its pid (*Live*), so it has none
+  either. A session cpb did not launch (plain `claude`, a cpb before
+  v4.8.0, a sandbox, whose sessions are not listed anyway) has none.
 - **Clean-up.** A record that cannot be written costs the launch a warning
   on stderr, never the session. A launch removes the records of processes
   no longer alive (a launch killed outright cannot remove its own); a reader
@@ -2625,8 +2627,8 @@ Claude Code writes an assistant line in its transcript with
 (`status: "rejected"`, `rateLimitType`: `five_hour`, `seven_day` or
 another window, `resetsAt` in epoch seconds). A session is at a limit while
 the last assistant line of its transcript's last 256 KiB is that line and
-`resetsAt` has not passed; an answer after it, or any other assistant line,
-ends it. The line is undocumented (observed on 2.1.240 to 2.1.322) and read
+`resetsAt` has not passed; an answer after it, or any other assistant line
+whatever its shape, ends it. The line is undocumented (observed on 2.1.240 to 2.1.322) and read
 defensively: a missing part, a value of another type, a window that is not
 a lowercase name, or a time in milliseconds is no limit, never an error.
 

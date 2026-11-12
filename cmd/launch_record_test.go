@@ -122,22 +122,28 @@ func TestShowSessionsAccount(t *testing.T) {
 		sidChild = "66666666-6666-4666-8666-666666666666"
 		sidOther = "77777777-7777-4777-8777-777777777777"
 		sidNone  = "88888888-8888-4888-8888-888888888888"
+		sidStale = "99999999-9999-4999-8999-999999999999"
 		helper   = "Mon Sep 28 07:29:50 2026"
 	)
 	writeSessionFile(t, a, 105, sidChild, work, "interactive", liveStart, now.Add(-30*time.Minute))
 	writeSessionFile(t, a, 106, sidOther, work, "interactive", liveStart, now.Add(-20*time.Minute))
 	writeSessionFile(t, a, 107, sidNone, work, "interactive", liveStart, now.Add(-10*time.Minute))
+	// A session file with no start time, on a pid a cpb launch now holds:
+	// it may be a stale file, so the launch's account is not its.
+	writeSessionFile(t, a, 108, sidStale, work, "interactive", "", now.Add(-5*time.Minute))
 	fakeProcInfo(t, map[int]procInfo{
 		101: {start: liveStart, ppid: 50},
 		105: {start: liveStart, ppid: 900}, // started by a helper with a record
 		106: {start: liveStart, ppid: 901}, // its parent's pid was reused
 		107: {start: liveStart, ppid: 50},  // no record at all
+		108: {start: liveStart, ppid: 900}, // no start time in its file
 		900: {start: helper, ppid: 50},
 		901: {start: "Tue Sep 29 01:00:00 2026", ppid: 50},
 	})
 	writeRecord(t, root, launchRecord{PID: 101, ProcStart: liveStart, Playbook: "alpha", Account: "claude-work"})
 	writeRecord(t, root, launchRecord{PID: 900, ProcStart: helper, Playbook: "alpha", Account: "env:router"})
 	writeRecord(t, root, launchRecord{PID: 901, ProcStart: helper, Playbook: "alpha", Account: "stale"})
+	writeRecord(t, root, launchRecord{PID: 108, ProcStart: liveStart, Playbook: "alpha", Account: "claude-other"})
 
 	rows, _, err := liveSessions("")
 	if err != nil {
@@ -147,7 +153,7 @@ func TestShowSessionsAccount(t *testing.T) {
 	for _, r := range rows {
 		got[r.SessionID] = deref(r.Account, "<null>")
 	}
-	want := map[string]string{sidLive: "claude-work", sidChild: "env:router", sidOther: "<null>", sidNone: "<null>"}
+	want := map[string]string{sidLive: "claude-work", sidChild: "env:router", sidOther: "<null>", sidNone: "<null>", sidStale: "<null>"}
 	for id, w := range want {
 		if got[id] != w {
 			t.Errorf("session %s: account %q, want %q", id[:8], got[id], w)
@@ -178,8 +184,8 @@ func TestShowSessionsAccount(t *testing.T) {
 }
 
 // Records are read defensively: another version, another pid than the file
-// name, an account no launch writes, no start time, too large or not JSON
-// is no record.
+// name, an account holding a control character, no start time, too large
+// or not JSON is no record.
 func TestReadLaunchRecordsDefensive(t *testing.T) {
 	root := t.TempDir()
 	dir := launchRecordsDir(root)
@@ -195,14 +201,18 @@ func TestReadLaunchRecordsDefensive(t *testing.T) {
 	put("10.json", ok)
 	put("11.json", `{"v":2,"pid":11,"proc_start":"x","account":"acc"}`)
 	put("12.json", `{"v":1,"pid":13,"proc_start":"x","account":"acc"}`)
-	put("14.json", `{"v":1,"pid":14,"proc_start":"x","account":"a b"}`)
+	put("14.json", `{"v":1,"pid":14,"proc_start":"x","account":"a\tb"}`)
 	put("15.json", `{"v":1,"pid":15,"proc_start":"","account":"acc"}`)
 	put("16.json", `not json`)
 	put("17.json", `{"v":1,"pid":17,"proc_start":"x","account":"acc","pad":"`+strings.Repeat("x", maxLaunchRecordBytes)+`"}`)
 	put("018.json", `{"v":1,"pid":18,"proc_start":"x","account":"acc"}`)
 	put("19.json", `{"v":1,"pid":19,"proc_start":"x","account":"acc\u001b[31m"}`)
+	// Every form a launch writes reads back: a route's IPv6 host, a block
+	// named for a directory with a space in it.
+	put("20.json", `{"v":1,"pid":20,"proc_start":"x","account":"flags:[::1]:8080"}`)
+	put("21.json", `{"v":1,"pid":21,"proc_start":"x","account":"block:my dir"}`)
 	got := readLaunchRecords(root)
-	if len(got) != 1 || got[10].Account != "acc" {
+	if len(got) != 3 || got[10].Account != "acc" || got[20].Account != "flags:[::1]:8080" || got[21].Account != "block:my dir" {
 		t.Fatalf("records: %+v", got)
 	}
 }
@@ -287,6 +297,8 @@ func TestSessionAtLimit(t *testing.T) {
 		{"no quotaLimits", []string{`{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"}}`}, ""},
 		{"quotaLimits not an object", []string{limitLine(`"rejected"`)}, ""},
 		{"another error", []string{strings.Replace(limitLine(q("rejected", "seven_day", future)), `"rate_limit"`, `"overloaded"`, 1)}, ""},
+		{"an assistant line of a shape cpb does not know", []string{limitLine(q("rejected", "seven_day", future)),
+			`{"type":"assistant","isApiErrorMessage":"yes","error":7,"message":"text","cwd":5}`}, ""},
 	}
 	for _, c := range cases {
 		writeLimitTranscript(t, a, work, sidLive, c.lines...)

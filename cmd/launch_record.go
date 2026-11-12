@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -215,14 +217,16 @@ func readLaunchRecords(root string) map[int]launchRecord {
 
 // validRecordedAccount accepts what a launch records as its account: a
 // stored account's name, machine, or a layer route's colon form (env:<set>,
-// block:<playbook>, flags:<host>). Anything else, which a hand-edited file
-// could hold, is not shown.
+// block:<directory>, flags:<host>, whose host may be a bracketed IPv6
+// address with a port). It refuses only what no launch writes and a
+// hand-edited file could hold to reach a terminal: invalid UTF-8, a control
+// character, or an implausible length.
 func validRecordedAccount(name string) bool {
-	if name == "" || len(name) > 160 {
+	if name == "" || len(name) > 512 || !utf8.ValidString(name) {
 		return false
 	}
 	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune(".-_:/", c)) {
+		if unicode.IsControl(c) {
 			return false
 		}
 	}
