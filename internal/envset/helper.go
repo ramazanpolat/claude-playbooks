@@ -19,8 +19,9 @@ const (
 	// SecretHelperFile under the profiles directory holds the stored
 	// setting: one line, the command.
 	SecretHelperFile = ".secret-helper"
-	// SecretHelperEnv overrides the stored setting for one process.
-	SecretHelperEnv = "CPB_SECRET_HELPER"
+	// SecretHelperEnv overrides the stored setting for one process. A
+	// reserved key: only the person's own environment sets it.
+	SecretHelperEnv = manifest.SecretHelperEnv
 )
 
 // Helper is the secret helper in effect and where it came from.

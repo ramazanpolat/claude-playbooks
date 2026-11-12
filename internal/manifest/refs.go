@@ -59,8 +59,27 @@ func ValidateRefKey(key string) error {
 // one, reference-shaped values, and no key also in set or unset. Errors
 // never quote a reference: a malformed one may be a pasted secret.
 func ValidateRefs(refs, set map[string]string, unset []string) error {
+	return validateRefs(refs, set, unset, ValidateRefKey)
+}
+
+// ValidateStoredRefs is ValidateRefs for a file cpb reads: a key an earlier
+// release could write is read (ValidateStoredEnvKey), the rest is checked
+// the same.
+func ValidateStoredRefs(refs, set map[string]string, unset []string) error {
+	return validateRefs(refs, set, unset, func(key string) error {
+		if err := ValidateStoredEnvKey(key); err != nil {
+			return err
+		}
+		if why, refused := RefRefusedKeys[key]; refused {
+			return fmt.Errorf("%s cannot be a secret reference: %s", key, why)
+		}
+		return nil
+	})
+}
+
+func validateRefs(refs, set map[string]string, unset []string, keyCheck func(string) error) error {
 	for key, ref := range refs {
-		if err := ValidateRefKey(key); err != nil {
+		if err := keyCheck(key); err != nil {
 			return err
 		}
 		if !LooksLikeRef(ref) || strings.ContainsAny(ref, "\x00\n") {

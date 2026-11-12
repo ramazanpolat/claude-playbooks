@@ -117,18 +117,21 @@ func suppliesToken(menv *manifest.Env) bool {
 // replace any inherited value, unset entries are dropped. The token variable
 // is excluded from BOTH directions here because resolveToken has already
 // folded it into the token decision and PrepareLaunchEnv places it itself.
+// A reserved key is never applied, in either direction, whatever put it in
+// the block: what the environment holds for it stays (CPB_SECRET_HELPER,
+// the person's own), and bindOwnEnv decides the rest.
 func applyManifestEnv(environ []string, menv *manifest.Env) []string {
 	if menv.Empty() {
 		return environ
 	}
 	keys := make([]string, 0, len(menv.Set)+len(menv.Block))
 	for key := range menv.Set {
-		if key != OAuthTokenEnv {
+		if key != OAuthTokenEnv && !manifest.IsReservedEnvKey(key) {
 			keys = append(keys, key)
 		}
 	}
 	for _, key := range menv.Block {
-		if key != OAuthTokenEnv {
+		if key != OAuthTokenEnv && !manifest.IsReservedEnvKey(key) {
 			keys = append(keys, key)
 		}
 	}
@@ -429,9 +432,25 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 // is private to that process, and dies with it, so no signal, kill or crash
 // can leave it half-done, and the tool cannot alter its parent's environment
 // at all.
+//
+// cpb's secret-store variables (manifest.SecretFileStoreEnv and the
+// manifest.SecretStoreEnvPrefix family) go too: they are cpb's own, never
+// the launched program's, and a helper gets only what cpb hands it.
 func bindOwnEnv(env []string, configDir string) []string {
-	env = removeEnv(env, "CLAUDE_CONFIG_DIR", config.ConfigDirOverrideEnv)
+	env = removeEnv(env, "CLAUDE_CONFIG_DIR", config.ConfigDirOverrideEnv, manifest.SecretFileStoreEnv)
+	env = removeEnvPrefix(env, manifest.SecretStoreEnvPrefix)
 	return append(env, "CLAUDE_CONFIG_DIR="+configDir)
+}
+
+// removeEnvPrefix drops every variable whose name starts with prefix.
+func removeEnvPrefix(environ []string, prefix string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		if !strings.HasPrefix(kv, prefix) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // EffectiveBlock is the flattened [env] block a launch of configDir applies:
@@ -475,10 +494,17 @@ func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.En
 	// The registry default profile is the bottom layer of every playbook,
 	// manifest or not.
 	profilesDir := envset.Dir(config.ResolvePlaybooksDir())
-	m, merr := manifest.Nearest(configDir)
+	m, mdir, merr := manifest.NearestPath(configDir)
 	var block *manifest.Env
 	if m != nil {
 		block = m.Env
+	}
+	// A reserved key the manifest sets or references (written by hand, or
+	// before it was reserved) refuses the launch, naming the file and the
+	// statement that removes it; the file itself still reads.
+	if key, field := manifest.DeclaredReserved(block); key != "" {
+		return nil, merr, &envset.ReservedError{File: filepath.Join(mdir, manifest.FileName), Key: key, Field: "env." + field,
+			Fix: "cpb ALTER PLAYBOOK " + filepath.Base(mdir) + " UNSET VAR " + key}
 	}
 	menv, perr = envset.ExpandWithDefault(profilesDir, block)
 	if perr != nil {

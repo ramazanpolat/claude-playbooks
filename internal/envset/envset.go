@@ -85,9 +85,33 @@ func (e *ResolveError) Error() string        { return fmt.Sprintf("env set %q: %
 func (e *ResolveError) Unwrap() error        { return e.Err }
 func (e *ResolveError) Is(target error) bool { return target == ErrSet }
 
+// ReservedError reports a playbook or an env set that sets or references
+// a reserved key (manifest.DeclaredReserved): the file is read, and a
+// launch that would use it is refused, naming the file and the statement
+// that removes the key.
+type ReservedError struct {
+	File  string // the .playbook or env set file
+	Key   string
+	Field string // where in the file: env.set, env.refs, set or refs
+	Fix   string // the statement that removes it
+}
+
+func (e *ReservedError) Error() string {
+	msg := fmt.Sprintf("%s: %s is in %s, and a reserved key cannot come from a playbook or an env set; nothing was launched. Remove it with: %s", e.File, e.Key, e.Field, e.Fix)
+	if hint := manifest.ReservedHint(e.Key); hint != "" {
+		msg += " (and " + hint + ")"
+	}
+	return msg
+}
+
+func (e *ReservedError) Is(target error) bool { return target == ErrSet }
+
 func path(dir, name string) string {
 	return filepath.Join(dir, name+FileExt)
 }
+
+// Path is the file an env set is kept in.
+func Path(dir, name string) string { return path(dir, name) }
 
 // Read parses one profile. Returns (nil, nil) when it does not exist.
 func Read(dir, name string) (*Set, error) {
@@ -112,12 +136,17 @@ func Read(dir, name string) (*Set, error) {
 	if err := validate(&p, path(dir, name)); err != nil {
 		return nil, err
 	}
+	p.Block = manifest.WithoutReserved(p.Block)
 	return &p, nil
 }
 
+// validate reads a name an earlier release could write
+// (manifest.ValidateStoredEnvKey), so the set can be shown and repaired
+// (ALTER ENV … UNSET, DROP ENV), and a launch that would use it is refused
+// (Expand).
 func validate(p *Set, at string) error {
 	for key, value := range p.Set {
-		if err := manifest.ValidateEnvKey(key); err != nil {
+		if err := manifest.ValidateStoredEnvKey(key); err != nil {
 			return fmt.Errorf("invalid env set at %s: set: %w", at, err)
 		}
 		if err := manifest.ValidateEnvValue(key, value); err != nil {
@@ -125,14 +154,14 @@ func validate(p *Set, at string) error {
 		}
 	}
 	for _, key := range p.Block {
-		if err := manifest.ValidateEnvKey(key); err != nil {
+		if err := manifest.ValidateStoredEnvKey(key); err != nil {
 			return fmt.Errorf("invalid env set at %s: block: %w", at, err)
 		}
 		if _, both := p.Set[key]; both {
 			return fmt.Errorf("invalid env set at %s: %s is both set and blocked", at, key)
 		}
 	}
-	if err := manifest.ValidateRefs(p.Refs, p.Set, p.Block); err != nil {
+	if err := manifest.ValidateStoredRefs(p.Refs, p.Set, p.Block); err != nil {
 		return fmt.Errorf("invalid env set at %s: refs: %w", at, err)
 	}
 	return nil
@@ -372,6 +401,9 @@ func Expand(dir string, e *manifest.Env) (*manifest.Env, error) {
 		}
 		if p == nil {
 			return nil, &MissingError{Name: name, Dir: dir}
+		}
+		if key, field := manifest.DeclaredReserved(p.Env()); key != "" {
+			return nil, &ReservedError{File: path(dir, name), Key: key, Field: field, Fix: "cpb ALTER ENV " + name + " UNSET " + key}
 		}
 		layers = append(layers, p.Env())
 	}

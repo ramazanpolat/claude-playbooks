@@ -58,10 +58,33 @@
   fails in any other way is exit 5, never a quiet fall back to the file, and
   the write goes to the store the prompt named or nowhere.
   `CPB_SECRET_FILE_STORE=1` in your own shell is the deliberate way to the
-  file where the keyring is installed but cannot be used. The store, and
-  the `secret-tool` it uses, are always those of the cpb that runs the
-  helper (a launch, `cpb ask`), whatever `HOME`, `XDG_DATA_HOME`, `PATH` or
-  session bus a playbook's launch sets. When a keyring
+  file where the keyring is installed but cannot be used. It belongs in the
+  environment of the one machine that needs it: a playbook, an env set,
+  `--env`, `--env-file` or a settings file's `env` that declares it, or any
+  `CPB_SECRET_STORE_*`, is refused, and no helper or launched program gets
+  either from anywhere but cpb, so the opt-in is not passed into a session.
+  The store, its locks and the `secret-tool` it uses are always those
+  of the cpb that runs the helper (a launch, `cpb ask`), whatever `HOME`,
+  `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `PATH` or session bus a playbook's
+  launch sets; a helper process that cpb did not start takes no opt-in
+  from its own environment. A configured secret helper that is cpb's own
+  binary is refused, at `ALTER DEFAULTS SET`, at checks and at launch, with
+  a line to unset it so the default helper is used. `CPB_SECRET_HELPER` is
+  a reserved key too: no layer and no settings file's `env` can declare it.
+  A `.playbook` or env set that already holds one of these names still
+  reads: in a block list it has no effect; as a value or a reference it
+  refuses a launch that would use it, naming the file and the `UNSET` that
+  removes it. A cpb started inside a session runs in that session's
+  environment, so store secrets from your own shell. A settings file whose
+  `env` sets any reserved key (these names, `CLAUDE_CONFIG_DIR`,
+  `CPB_CONFIG_DIR`) now refuses the launch: the playbook's `settings.json`,
+  the working folder's `.claude/settings.json` and `settings.local.json`,
+  and `--settings`. The fix is one line: remove that key from the file's
+  `env`.
+  `cpb ask` shows the
+  line saying a token was read from the file, and `cpb play --dry-run`'s
+  line on where a value would be kept comes from the same check as its
+  report. When a keyring
   starts later, a value in
   the file is still found and new values go to the keyring; a name in both is
   the keyring's, and a locked keyring item is never written over or beside.

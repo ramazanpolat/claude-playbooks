@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -551,5 +552,241 @@ func TestFileStoreOptInIsCPBsOwn(t *testing.T) {
 	t.Setenv(fileStoreOptInEnv, "1")
 	if env := strings.Join(defaultHelperEnv(nil), "\n"); !strings.Contains(env, storeEnvPrefix+"FILE_OK=1") {
 		t.Fatalf("cpb's own opt-in was not handed: %q", env)
+	}
+}
+
+// A configured helper that is cpb's own binary (its path, a symlink to it on
+// PATH, a hard link) is refused before any store is touched: at ALTER
+// DEFAULTS SET, at a check, and at launch, with the line that unsets it.
+// Unset, cpb's default helper is used.
+func TestConfiguredHelperThatIsCPBIsRefused(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	m := useMemStore(t)
+	opened := 0
+	defaultSecretStore = func() (osSecretStore, error) { opened++; return m, nil }
+	touched := 0
+	m.onExists = func(string) { touched++ }
+	m.onWrite = func(string) { touched++ }
+	bin := t.TempDir()
+	self := filepath.Join(bin, "cpb")
+	if err := os.WriteFile(self, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	selfExecutable = func() (string, error) { return self, nil }
+	if err := os.Symlink(self, filepath.Join(bin, "k")); err != nil {
+		t.Fatal(err)
+	}
+	hard := filepath.Join(bin, "cpb-copy")
+	if err := os.Link(self, hard); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(envset.SecretHelperEnv, "")
+	setting := filepath.Join(envset.Dir(config.ResolvePlaybooksDir()), envset.SecretHelperFile)
+
+	for _, cmd := range []string{self, "k", hard} {
+		err := stmtErr(t, "ALTER DEFAULTS SET secret_helper = "+cmd)
+		if err == nil || !strings.Contains(err.Error(), "is cpb itself") || !strings.Contains(err.Error(), "ALTER DEFAULTS RESET secret_helper") {
+			t.Fatalf("SET %s: %v", cmd, err)
+		}
+		if _, serr := os.Stat(setting); serr == nil {
+			t.Fatalf("SET %s was stored", cmd)
+		}
+	}
+
+	// A setting already stored (hand-written, or from before the refusal).
+	if err := envset.SetSecretHelper(envset.Dir(config.ResolvePlaybooksDir()), "k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planLaunch(&manifest.Env{Refs: map[string]string{"TOKEN": "cpb:tok"}}); err == nil || !strings.Contains(err.Error(), "is cpb itself") || !strings.Contains(err.Error(), "ALTER DEFAULTS RESET secret_helper") {
+		t.Fatalf("launch with the setting: %v", err)
+	}
+	mustStmt(t, "CREATE ENV e SET A=literal AS PLAINTEXT")
+	if err := stmtErr(t, "ALTER ENV e SET TOKEN FROM cpb:tok"); err == nil || !strings.Contains(err.Error(), "is cpb itself") {
+		t.Fatalf("check with the setting: %v", err)
+	}
+	// CPB_SECRET_HELPER names the variable to unset.
+	t.Setenv(envset.SecretHelperEnv, hard)
+	if _, err := resolveHelperFor([]string{"cpb:tok"}); err == nil || !strings.Contains(err.Error(), "unset "+envset.SecretHelperEnv) {
+		t.Fatalf("CPB_SECRET_HELPER: %v", err)
+	}
+	if opened != 0 || touched != 0 {
+		t.Fatalf("a store was touched: opened %d, calls %d", opened, touched)
+	}
+
+	// Unset, the default helper is used.
+	t.Setenv(envset.SecretHelperEnv, "")
+	mustStmt(t, "ALTER DEFAULTS RESET secret_helper")
+	if x, err := resolveHelperFor([]string{"cpb:tok"}); err != nil || !x.def {
+		t.Fatalf("unset: %+v %v", x, err)
+	}
+}
+
+// handOver puts this process in the state a helper is in after env's
+// hand-over (applyHelperStoreEnv), and resets it after the test.
+func handOver(t *testing.T, env []string) error {
+	t.Helper()
+	t.Cleanup(func() {
+		helperHanded, helperFileOK, helperToolEnv, helperLockDir = false, false, nil, ""
+		setHelperStoreDir("")
+		setHelperSecretTool("")
+	})
+	for _, k := range []string{"SET", "DIR", "LOCK_DIR", "SECRET_TOOL", "FILE_OK"} {
+		t.Setenv(storeEnvPrefix+k, "")
+		os.Unsetenv(storeEnvPrefix + k)
+	}
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(k, storeEnvPrefix) {
+			t.Setenv(k, v)
+		}
+	}
+	return applyHelperStoreEnv()
+}
+
+// No helper gets a secret-store variable from the launch environment:
+// a configured helper gets none at all, cpb's default helper only what
+// cpb hands it. Checks, launches and cpb ask alike.
+func TestEveryHelperGetsOnlyCPBsHandOver(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	t.Setenv(fileStoreOptInEnv, "")
+	dir := t.TempDir()
+	envLog := filepath.Join(dir, "env.log")
+	helper := filepath.Join(dir, "my-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nenv > \"$ENV_LOG\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENV_LOG", envLog)
+	foreign := append(os.Environ(), fileStoreOptInEnv+"=1", storeEnvPrefix+"SET=1", storeEnvPrefix+"SECRET_TOOL=/tmp/other-tool",
+		storeEnvPrefix+"DIR=/tmp/planted", storeEnvPrefix+"FILE_OK=1", storeEnvPrefix+"LOCK_DIR=/tmp/planted-locks")
+	foreignIn := func(env []string) string {
+		for _, kv := range env {
+			if strings.HasPrefix(kv, fileStoreOptInEnv+"=") || strings.Contains(kv, "/tmp/other-tool") || strings.Contains(kv, "/tmp/planted") || kv == storeEnvPrefix+"FILE_OK=1" {
+				return kv
+			}
+		}
+		return ""
+	}
+	// A configured helper: a check, a launch, cpb ask.
+	x := helperExe{path: helper, name: helper}
+	if err := runHelper(x, nil, nil, nil, foreign, "--check", "K=keychain:x"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(envLog)
+	if len(data) == 0 || strings.Contains(string(data), storeEnvPrefix) || strings.Contains(string(data), fileStoreOptInEnv+"=") {
+		t.Fatalf("a configured helper's check got a store variable:\n%s", data)
+	}
+	lp := &launchPlan{helper: helper, refs: map[string]string{"K": "keychain:x"}}
+	for _, kv := range lp.command("/bin/true", nil, foreign).Env {
+		if strings.HasPrefix(kv, storeEnvPrefix) || strings.HasPrefix(kv, fileStoreOptInEnv+"=") {
+			t.Fatalf("a configured helper's launch got %s", kv)
+		}
+	}
+	t.Setenv(envset.SecretHelperEnv, helper)
+	signIn := askSignIn{mode: askLoginAccount, account: &account.Account{Name: "a", Auth: account.Auth{Ref: "keychain:x"}}}
+	c, err := askCommand(context.Background(), signIn, "/bin/true", nil, foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range c.Env {
+		if strings.HasPrefix(kv, storeEnvPrefix) || strings.HasPrefix(kv, fileStoreOptInEnv+"=") {
+			t.Fatalf("a configured helper under cpb ask got %s", kv)
+		}
+	}
+	// cpb's default helper: cpb's own hand-over, nothing foreign.
+	t.Setenv(envset.SecretHelperEnv, "")
+	useMemStore(t)
+	def := &launchPlan{helper: "/opt/cpb/bin/cpb", helperPre: []string{secretHelperArg}, def: true, refs: map[string]string{"K": "cpb:tok"}}
+	env := def.command("/bin/true", nil, foreign).Env
+	if kv := foreignIn(env); kv != "" || !slices.Contains(env, storeEnvPrefix+"SET=1") {
+		t.Fatalf("the default helper's launch: foreign %q in %q", kv, env)
+	}
+	c, err = askCommand(context.Background(), askSignIn{mode: askLoginAccount, account: &account.Account{Name: "a", Auth: account.Auth{Ref: "cpb:tok"}}}, "/bin/true", nil, foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv := foreignIn(c.Env); kv != "" {
+		t.Fatalf("the default helper under cpb ask got %s", kv)
+	}
+}
+
+// A hand-over whose paths are not absolute is broken: the helper refuses
+// it before any store is touched.
+func TestHandedPathsMustBeAbsolute(t *testing.T) {
+	m := useMemStore(t)
+	touched := 0
+	m.onExists = func(string) { touched++ }
+	for _, k := range []string{"DIR", "LOCK_DIR", "SECRET_TOOL"} {
+		t.Run(k, func(t *testing.T) {
+			handOver(t, nil)
+			t.Setenv(storeEnvPrefix+"SET", "1")
+			t.Setenv(storeEnvPrefix+k, "relative/"+strings.ToLower(k))
+			err := runSecretHelper([]string{"--check", "K=cpb:tok"}, strings.NewReader(""))
+			if err == nil || !strings.Contains(err.Error(), storeEnvPrefix+k+" is not an absolute path") {
+				t.Fatalf("%v", err)
+			}
+		})
+	}
+	if touched != 0 {
+		t.Fatalf("a store was asked %d times", touched)
+	}
+}
+
+// The helper locks where the cpb that runs it says, never under the
+// launch's HOME or XDG_CACHE_HOME.
+func TestHelperLocksWhereCPBSays(t *testing.T) {
+	saved := secretLockDir
+	t.Cleanup(func() { secretLockDir = saved })
+	own, err := secretLockDir()
+	if err != nil {
+		t.Skip("no cache directory here")
+	}
+	env := defaultHelperEnv(nil)
+	if !slices.Contains(env, storeEnvPrefix+"LOCK_DIR="+own) {
+		t.Fatalf("no lock directory handed: %q", env)
+	}
+	launch := t.TempDir()
+	t.Setenv("HOME", launch)
+	t.Setenv("XDG_CACHE_HOME", launch)
+	if err := handOver(t, env); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := secretLockDir(); err != nil || got != own {
+		t.Fatalf("the helper locks in %s (%v), want %s", got, err, own)
+	}
+	// Handed nothing: its own lookup, as before.
+	if err := handOver(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := secretLockDir(); got == own {
+		t.Fatalf("with nothing handed the helper still used %s", own)
+	}
+}
+
+// A playbook never declares cpb's secret-store variables.
+func TestPlaybookCannotDeclareSecretStoreVariables(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "p")
+	for _, line := range []string{
+		"ALTER PLAYBOOK p SET VAR " + fileStoreOptInEnv + "=1 AS PLAINTEXT",
+		"ALTER PLAYBOOK p SET VAR " + storeEnvPrefix + "SET=1 AS PLAINTEXT",
+		"CREATE ENV e SET " + fileStoreOptInEnv + "=1 AS PLAINTEXT",
+	} {
+		if err := stmtErr(t, line); err == nil || !strings.Contains(err.Error(), "never in a playbook") {
+			t.Errorf("%s: %v", line, err)
+		}
+	}
+	// The secret helper is the person's own, from their shell or DEFAULTS.
+	for _, line := range []string{
+		"ALTER PLAYBOOK p SET VAR " + envset.SecretHelperEnv + "='/usr/local/bin/h' AS PLAINTEXT",
+		"ALTER PLAYBOOK p SET VAR " + envset.SecretHelperEnv + " FROM 'keychain:h'",
+		"ALTER PLAYBOOK p BLOCK VAR " + envset.SecretHelperEnv,
+		"CREATE ENV e SET " + envset.SecretHelperEnv + "='/usr/local/bin/h' AS PLAINTEXT",
+	} {
+		if err := stmtErr(t, line); err == nil || !strings.Contains(err.Error(), "own shell") {
+			t.Errorf("%s: %v", line, err)
+		}
 	}
 }

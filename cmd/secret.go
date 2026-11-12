@@ -41,14 +41,42 @@ func resolveHelper() (*envset.Helper, string, error) {
 	if h == nil {
 		return nil, "", errNoHelper
 	}
-	if filepath.IsAbs(h.Command) {
-		return h, h.Command, nil
+	path := h.Command
+	if !filepath.IsAbs(path) {
+		if path, err = lookHelper(h.Command); err != nil {
+			return nil, "", fmt.Errorf("secret helper %q (from %s) is not on PATH", h.Command, h.From)
+		}
 	}
-	path, err := lookHelper(h.Command)
-	if err != nil {
-		return nil, "", fmt.Errorf("secret helper %q (from %s) is not on PATH", h.Command, h.From)
+	if helperIsCPB(path) {
+		return nil, "", errHelperIsCPB(h, "from "+h.From)
 	}
 	return h, path, nil
+}
+
+// helperIsCPB reports whether path, a configured helper's executable, is
+// this cpb binary: the same file through any symlink or hard link.
+func helperIsCPB(path string) bool {
+	self, err := selfExecutable()
+	if err != nil {
+		return false
+	}
+	a, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	b, err := os.Stat(self)
+	return err == nil && os.SameFile(a, b)
+}
+
+// errHelperIsCPB refuses a configured helper that is cpb itself. cpb is not
+// a secret helper: its default helper is an internal verb that only cpb
+// runs, with the store cpb hands it; unsetting the helper is what uses it.
+func errHelperIsCPB(h *envset.Helper, where string) error {
+	fix := "ALTER DEFAULTS RESET secret_helper"
+	if h.From == envset.SecretHelperEnv {
+		fix = "unset " + envset.SecretHelperEnv
+	}
+	return fmt.Errorf("secret helper %q (%s) is cpb itself, and cpb is not a secret helper: %s, so cpb's default helper is used; nothing was asked or stored", h.Command, where, fix)
 }
 
 // helperExe is how a secret helper runs: its executable and the arguments
@@ -132,12 +160,15 @@ func (s helperState) resolve() (*envset.Helper, string, error) {
 	if s.h == nil {
 		return nil, "", errNoHelper
 	}
-	if filepath.IsAbs(s.h.Command) {
-		return s.h, s.h.Command, nil
+	path := s.h.Command
+	if !filepath.IsAbs(path) {
+		var err error
+		if path, err = lookHelper(s.h.Command); err != nil {
+			return nil, "", fmt.Errorf("secret helper %q (set earlier in this run) is not on PATH", s.h.Command)
+		}
 	}
-	path, err := lookHelper(s.h.Command)
-	if err != nil {
-		return nil, "", fmt.Errorf("secret helper %q (set earlier in this run) is not on PATH", s.h.Command)
+	if helperIsCPB(path) {
+		return nil, "", errHelperIsCPB(s.h, "set earlier in this run")
 	}
 	return s.h, path, nil
 }
@@ -258,12 +289,9 @@ func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec
 		argv = append(append(argv, "--", claudePath), claudeArgs...)
 	}
 	c := exec.Command(lp.helper, argv...)
-	c.Env = withoutKeys(env, keys)
-	if lp.def {
-		// The launch environment is the command's; the store is cpb's own,
-		// whatever HOME, XDG_DATA_HOME or bus the playbook sets.
-		c.Env = defaultHelperEnv(c.Env)
-	}
+	// The launch environment is the command's; the store is cpb's own,
+	// whatever HOME, XDG_DATA_HOME or bus the playbook sets.
+	c.Env = helperEnv(lp.def, withoutKeys(env, keys))
 	return c
 }
 

@@ -229,7 +229,7 @@ func (s linuxStore) exists(name string) (bool, error) {
 	inFile, ferr := s.file.exists(name)
 	if k == keyringFound {
 		if ferr == nil && inFile {
-			fmt.Fprintf(os.Stderr, "cpb:%s is also kept in the file %s; the keyring's value is the one used\n", name, s.file.path(name))
+			fmt.Fprintf(os.Stderr, "cpb:%s"+alsoKeptNotice+"%s; the keyring's value is the one used\n", name, s.file.path(name))
 		}
 		return true, nil
 	}
@@ -274,7 +274,7 @@ func (s linuxStore) read(name string) ([]byte, error) {
 		case keyringBypassed:
 			why = "the keyring fails here, and " + fileStoreOptInEnv + "=1 is set"
 		}
-		fmt.Fprintf(os.Stderr, "cpb:%s is read from the file %s: %s\n", name, s.file.path(name), why)
+		fmt.Fprintf(os.Stderr, "cpb:%s"+readFromFileNotice+"%s: %s\n", name, s.file.path(name), why)
 	}
 	return v, err
 }
@@ -407,7 +407,7 @@ func (s secretServiceStore) lookup(name string) (found bool, noService string, e
 	if why == "" {
 		why = err.Error()
 	}
-	return false, "", &unavailableError{keyringFailed: true, msg: fmt.Sprintf("secret-tool could not answer about cpb:%s (%s); nothing was read or stored, in the keyring or in a file. Check your keyring, then run this again; or, on a machine whose keyring cannot be used, set %s=1 in your own shell (never in a playbook), and cpb keeps cpb:<name> values in the file store instead (plaintext, readable by you and root); or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, why, fileStoreOptInEnv)}
+	return false, "", &unavailableError{keyringFailed: true, msg: fmt.Sprintf("secret-tool could not answer about cpb:%s (%s); nothing was read or stored, in the keyring or in a file. Check your keyring, then run this again; or, on a machine whose keyring cannot be used, set %s=1 in your own shell and run cpb from there (a launched session does not pass it on, and a playbook cannot set it), and cpb keeps cpb:<name> values in the file store instead (plaintext, readable by you and root); or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, why, fileStoreOptInEnv)}
 }
 
 // lockedItem reports whether search lists an item for name: it lists a

@@ -40,13 +40,14 @@ func ParseEnvFile(path string) (*Env, error) {
 			return nil, fmt.Errorf("%s:%d: expected KEY=VALUE", path, lineNo)
 		}
 		key = strings.TrimSpace(key)
-		if ReservedEnvKeys[key] {
-			return nil, fmt.Errorf("%s:%d: %s is managed by cpb and cannot be overridden", path, lineNo, key)
-		}
-		if err := ValidateEnvKey(key); err != nil {
-			// The rejected "key" is not echoed either: a secret containing
-			// "=" (padded base64, say) splits into a bogus key and value.
+		// The name's shape first, so a rejected "key" is never echoed: a
+		// secret containing "=" (padded base64, say) splits into a bogus
+		// key and value. Only a well-formed name is named, when reserved.
+		if err := ValidateEnvName(key); err != nil {
 			return nil, fmt.Errorf("%s:%d: invalid environment variable name (not shown; the line may hold a secret)", path, lineNo)
+		}
+		if IsReservedEnvKey(key) {
+			return nil, fmt.Errorf("%s:%d: %w", path, lineNo, reservedKeyError(key))
 		}
 		value = strings.TrimSpace(value)
 		if n := len(value); n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n-1] == value[0] {

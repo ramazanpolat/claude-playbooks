@@ -1595,3 +1595,25 @@ func TestSecretReportUnknownWhenTheHelperCannotAnswer(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// The preview line says where a value would be kept from the report's own
+// check: when cpb's default helper cannot answer, it says so and names no
+// store; when it answers, it names the store as the prompt does.
+func TestPendingNoteFollowsTheReport(t *testing.T) {
+	_, log := storeHelper(t)
+	asDefaultHelper(t, log)
+	t.Setenv("FORCE_CHECK_FAIL", "1")
+	t.Setenv("CHECK_EXIT", "5")
+	t.Setenv("CHECK_SAYS", "cpb:tok is in your Secret Service keyring, which is locked")
+	out := captureStdout(t, func() { printPendingNote([]string{"cpb:tok"}, true) })
+	if !strings.Contains(out, "Where it would be kept cannot be said now") || !strings.Contains(out, "locked") || strings.Contains(out, "test store") {
+		t.Fatalf("the helper could not answer:\n%s", out)
+	}
+	t.Setenv("FORCE_CHECK_FAIL", "")
+	t.Setenv("CHECK_EXIT", "")
+	t.Setenv("CHECK_SAYS", "")
+	out = captureStdout(t, func() { printPendingNote([]string{"cpb:tok"}, true) })
+	if !strings.Contains(out, "It would be kept in the test store (file), as tok.") {
+		t.Fatalf("the helper answered:\n%s", out)
+	}
+}

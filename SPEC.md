@@ -569,10 +569,22 @@ cpb never names or discovers one.
   `SHOW DEFAULTS` and in `SHOW CREATE ALL`.
 - `CPB_SECRET_HELPER=<command>` in the environment overrides the stored
   setting for that process (devbox projects, tests). `EXPLAIN PLAYBOOK`
-  says which of the two is in effect.
+  says which of the two is in effect. It is a **reserved key** (since
+  v4.7.0): a playbook, a recipe, an env set, `--env`, `--env-file` and a
+  settings file's `env` cannot declare it, and a launch passes on what your
+  own environment holds, never a layer's value. A cpb started inside a
+  session runs in that session's environment, so store secrets from your
+  own shell.
 - The helper is **one command**: a name on `PATH` or an absolute path, with
   no arguments. cpb execs it directly with an argument vector, never
   through `sh -c`. A value with whitespace is refused.
+- The helper is **never cpb itself** (since v4.7.0). A `secret_helper` or
+  `CPB_SECRET_HELPER` whose executable is cpb's own binary (the same file,
+  through a symlink or a hard link) is refused at `ALTER DEFAULTS SET`, at
+  every check and at launch, with one line saying to unset it so cpb's
+  default helper (below) is used. The default helper's mode is internal to
+  cpb, not a helper: a wrapper of your own that runs it is not supported,
+  and gets none of the store cpb hands the default helper.
 
 `SET <key> FROM '<ref>'` stores the **reference** only, as an opaque string.
 cpb checks one thing about its shape, a scheme followed by a colon
@@ -651,8 +663,12 @@ keeps values in the operating system's store:
   "dbus-launch --autolaunch=…": Child process exited with code 1`.
   **`CPB_SECRET_FILE_STORE=1`** is the deliberate way to the file store on
   such a machine: set in cpb's own environment (the shell cpb runs in;
-  cpb hands it to the helper, and a playbook's or recipe's environment
-  never sets it), it lets the file store answer when `secret-tool` fails
+  cpb hands it to the helper, and neither a playbook's or recipe's
+  environment nor the helper process's own ever sets it, so a helper
+  started without cpb's hand-over has no opt-in; it belongs in the
+  environment of the one machine that needs it, never in a playbook, and
+  a playbook, an env set, `--env` or `--env-file` that declares it is
+  refused), it lets the file store answer when `secret-tool` fails
   outright, never when it is slow (a timeout) or holds the name locked.
   The exit-5 line names it. The prompt and the report then say why the
   file keeps the value. A **locked keyring** answers `lookup` as a missing item
@@ -709,17 +725,22 @@ keeps values in the operating system's store:
     in one stderr line: which file, and that the keyring does not hold the
     name or cannot be reached. `--store`'s own read-back stays quiet.
   - **Whose store.** The store is the one of the cpb that runs the helper,
-    never the launch's: cpb resolves the file store's directory and
-    `secret-tool` (on its own `PATH`), takes its own `HOME`,
+    never the launch's: cpb resolves the file store's directory, its lock
+    directory and `secret-tool` (on its own `PATH`), takes its own `HOME`,
     `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `DISPLAY` and its own
     `CPB_SECRET_FILE_STORE`, and hands them to the default helper
     (`CPB_SECRET_STORE_*`, for every call: `--check`, `--ready`, `--store`,
     a launch, `cpb ask` on an account whose token is a `cpb:` reference).
-    The helper uses them for its store and its tools, and drops them before
-    it runs the command; anything of that name in the launch environment is
-    replaced. So a playbook or a recipe that sets `XDG_DATA_HOME`, `HOME` or
-    the bus never moves a launch to another directory or from the keyring
-    to the file while `--check` reports the store cpb sees. It keeps values up to 4096 bytes, as the Secret Service
+    The helper uses them for its store, its per-name locks and its tools,
+    and drops them before it runs the command. cpb drops every
+    `CPB_SECRET_STORE_*` and `CPB_SECRET_FILE_STORE` from every helper's
+    environment before it adds its own, so nothing in a launch environment
+    stands in for the hand-over, and a helper refuses a handed path that is
+    not absolute. With nothing handed, the helper's directory, locks and
+    `secret-tool` come from its own lookup, and it has no opt-in. So a
+    playbook or a recipe that sets `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `HOME`
+    or the bus never moves a launch to another directory, another lock or
+    from the keyring to the file while `--check` reports the store cpb sees. It keeps values up to 4096 bytes, as the Secret Service
     does, so a value fits whichever store takes it.
   - **Two stores on one machine** (a keyring that starts later, or stops):
     reads and `--check` look in the keyring when it answers, then in the
@@ -750,10 +771,11 @@ keeps values in the operating system's store:
     opened once, without following a link, and every file in it is reached
     through that handle (`openat`, `fstatat`, `linkat`), so nothing can be
     swapped in between a check and its use. The ancestors are judged before
-    any missing directory is made. The user's private group is the user's
-    primary group, named as the user, with no other member listed in
-    `/etc/group`; a group kept only in a directory service (LDAP) counts as
-    shared. A root-owned volume mounted group-writable for a pod (a
+    any missing directory is made. The user's private group is the
+    primary group of the user's account in `/etc/passwd` (found by uid,
+    never by `$USER`), named as the user, with no other member listed in
+    `/etc/group` and the primary group of no other account; an account or a
+    group kept only in a directory service (LDAP) counts as shared. A root-owned volume mounted group-writable for a pod (a
     Kubernetes `fsGroup` mount) is refused too: put the file store on a
     volume the user owns and alone can write, or use a helper of your own.
     The refusal names the directory, who else could change it, and the
@@ -3152,6 +3174,8 @@ A **bare inherited `CLAUDE_CONFIG_DIR` is discarded**. The opt-in is deliberatel
 
 `CPB_CONFIG_DIR` is a **reserved key**, like `CLAUDE_CONFIG_DIR`: a manifest `[env]` block, an env set, `--env` and `--env-file` all refuse it (`CPB_CONFIG_DIR is managed by cpb and cannot be overridden`). Declaring it could never redirect the launch that declares it — the request is read from the process environment before any layer is applied — but it would place the variable in the child's environment, from where it *would* redirect a further launch made inside the session. A key that cannot do the thing it names, yet silently affects the next launch, is refused outright.
 
+`CPB_SECRET_FILE_STORE` and every `CPB_SECRET_STORE_*` are reserved keys too (since v4.7.0), refused the same way with `<key> is cpb's own secret-store setting and cannot be declared: set CPB_SECRET_FILE_STORE=1 in the environment of the one machine that needs it, never in a playbook`. A launch drops both from the environment of every helper and every launched program, whatever set them, so the file-store opt-in is not passed into a session: a cpb started inside one has none. `CPB_SECRET_HELPER` is reserved too (since v4.7.0), refused with `CPB_SECRET_HELPER is yours to set and cannot be declared in a playbook, a recipe or an env set: set it in your own shell, or use ALTER DEFAULTS SET secret_helper`. It is not dropped: what your own environment holds reaches the session. A settings file's `env` (the playbook's `settings.json`, the working folder's `.claude/settings.json` and `settings.local.json`, `--settings`) that sets a reserved key refuses the launch. A launch never applies a layer's value or block for a reserved key. A `.playbook` or env set that already holds `CPB_SECRET_HELPER`, `CPB_SECRET_FILE_STORE` or a `CPB_SECRET_STORE_*` (an earlier release let a layer declare them) still reads, so it can be shown, changed and dropped: in a block list the name has no effect, is not shown, and is gone on the next write; as a value or a reference it refuses a launch that would use it, naming the file and the statement that removes it (`ALTER PLAYBOOK <name> UNSET VAR <key>`, `ALTER ENV <name> UNSET <key>`), which takes these names. A file holding any other reserved key is refused when read, as before.
+
 The override is **consumed**: the same step that binds `CLAUDE_CONFIG_DIR` removes `CPB_CONFIG_DIR`, on every path and whether or not this launch used it. It happens **after** the authentication branch and after every override layer, so a layer that names the key cannot reintroduce it; the reservation above and this binding are the same two-layer arrangement `CLAUDE_CONFIG_DIR` already has, where the binding is what makes the refusal unnecessary to trust. Every other subprocess the tool starts with an explicitly chosen `CLAUDE_CONFIG_DIR` — the declared `[update] migrate` step, the `claude auth status` probe — drops the variable too: that choice is authoritative, and a migration script that called `cpb run` would otherwise be redirected. Left in place it would reach `claude` and every process below, so an agent inside the session running `cpb run <other>` would have that launch redirected into this one's directory -- the wrong playbook writing into the wrong state. Stripping is an omission while building the child's environment array, not a mutation with a matching restore: a process environment is copied at spawn, is private to that process, and dies with it, so no signal, kill or crash can leave it half-done, and the tool cannot alter its parent's environment at all. One consequence worth stating: an override `export`ed interactively persists in that shell for later commands, since nothing can un-export a parent's variable, so every launch from that shell honours it -- the pilot's explicit request, not a leak.
 
 A **sandboxed launch with an override is refused** (`CPB_CONFIG_DIR and a sandboxed launch together are not supported: a sandbox mounts the config directory, and content reached through symlinks dangles inside it. Launch on the host, or unset CPB_CONFIG_DIR`), for `--sandbox`, `--sandbox-host`, and a manifest's `[sandbox] always = true` alike. The backend mounts directories, so a supplied directory whose playbook content is reached through symlinks -- the shape a caller provisioning its own necessarily produces -- dangles inside, the same failure a shared login's symlinked credentials have. The refusal precedes every backend call.
@@ -4478,7 +4502,7 @@ These have no flag equivalent:
 | `CPB_ISOLATED_LOGIN=true` | Forces the isolation branch of the authentication decision for this launch, as `isolated_login = true` in the manifest does. |
 | `CPB_OAUTH_TOKEN_FILE` | Overrides the long-lived token file read in step 2 of the authentication decision. Default `~/.config/claude-code/oauth-token`. |
 | `CPB_CONFIG_DIR` | The config directory `run` and launcher dispatch bind, in place of the playbook's install directory. Absolute or `~`-prefixed; empty means unset; never created. Consumed -- stripped from the child's environment after every layer. A **reserved key**: a manifest, env set, `--env` or `--env-file` that declares it is refused. Refused together with a sandboxed launch. A bare inherited `CLAUDE_CONFIG_DIR` is discarded. See *Caller-supplied config directory*. |
-| `CPB_SECRET_HELPER` | The secret helper command for this process, over the one `ALTER DEFAULTS SET secret_helper` stored (see *Secrets (optional)*). |
+| `CPB_SECRET_HELPER` | The secret helper command for this process, over the one `ALTER DEFAULTS SET secret_helper` stored (see *Secrets (optional)*). A **reserved key**: a playbook, a recipe, an env set, `--env`, `--env-file` and a settings file's `env` cannot declare it; from your own environment it reaches the session. |
 | `CPB_ASK_LOGIN` | How `cpb ask` signs in: `claude` (the default, Claude Code's own login) or `token` (cpb's machine token, into the child's environment only, with a fresh config directory). See *`cpb ask`*. |
 | `CPB_ASK_MODEL` | The model `cpb ask` asks when `--model` is not given. Default `sonnet`. |
 | `CPB_CLICKHOUSE` | The `clickhouse` binary `SELECT` pipes a query to, instead of `clickhouse` or `ch` on `PATH` (see *SELECT*). |
@@ -4487,7 +4511,7 @@ These have no flag equivalent:
 | `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `self-update` makes, and on `install.sh`'s API lookup, raising the anonymous rate limit. Only to GitHub's own API: never to an overridden API base, and never on the redirect lookup at github.com. |
 | `CPB_UPDATE_VERSION` | The release `self-update` installs, with no lookup at all (a `vMAJOR.MINOR.PATCH` tag; `--major` for another major; never a downgrade). For a network whose GitHub API requests are rate-limited. |
 | `CPB_UPDATE_REPO`, `CPB_UPDATE_API_BASE`, `CPB_UPDATE_LATEST_URL`, `CPB_UPDATE_DOWNLOAD_BASE` | Redirect self-update at another repository, API, latest-release page, or asset host. Test seams. |
-| `CPB_SECRET_FILE_STORE` | `1` in cpb's own environment lets the Linux file store keep `cpb:<name>` values where `secret-tool` is installed but fails outright (a bus cpb does not know); never where it is slow or holds the name locked. A playbook's or recipe's environment never sets it (*Secrets*, the file store). |
+| `CPB_SECRET_FILE_STORE` | `1` in cpb's own environment lets the Linux file store keep `cpb:<name>` values where `secret-tool` is installed but fails outright (a bus cpb does not know); never where it is slow or holds the name locked. Set it in the environment of the one machine that needs it, never in a playbook: a **reserved key**, refused in a manifest, an env set, `--env` and `--env-file`, and dropped from every helper's and launched program's environment (*Secrets*, the file store). `CPB_SECRET_STORE_*` are reserved the same way: cpb's hand-over to its default helper. |
 
 A variable marked *test seam* exists so the suites can run without network or a real release.
 

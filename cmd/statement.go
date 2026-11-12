@@ -351,6 +351,24 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 
+	// A helper that is cpb itself is refused before anything is written:
+	// cpb is not a secret helper, and leaving the setting unset is what
+	// uses cpb's default helper.
+	for _, c := range helperClauses {
+		if c.Kind != grammar.SetHelper {
+			continue
+		}
+		path := c.Arg
+		if !filepath.IsAbs(path) {
+			if p, err := lookHelper(path); err == nil {
+				path = p
+			}
+		}
+		if helperIsCPB(path) {
+			return fmt.Errorf("secret helper %q is cpb itself, and cpb is not a secret helper; DEFAULTS were not changed. Leave secret_helper unset (ALTER DEFAULTS RESET secret_helper) so cpb's default helper is used", c.Arg)
+		}
+	}
+
 	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err
