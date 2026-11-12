@@ -96,15 +96,21 @@ func runRecorded(c *exec.Cmd, rec *launchRecord, watch *failoverWatch) error {
 type failoverRelaunch struct {
 	args []string
 	sw   *failoverSwitch
+	// back resumes the session on the account it came from, for when the
+	// launch on the new one is refused before claude starts.
+	back []string
 }
 
 func (r *failoverRelaunch) Error() string { return r.sw.Error() }
 
 // runRun launches a playbook, and launches it again on another account
-// each time its session moves there (account failover).
+// each time its session moves there (account failover). A launch on the new
+// account that fails at once (refused, or its secret helper failing before
+// claude runs) resumes the session on the account it came from instead, so
+// a switch never leaves it ended.
 func runRun(cmd *cobra.Command, args []string) error {
+	err := runRunOnce(cmd, args)
 	for {
-		err := runRunOnce(cmd, args)
 		var rl *failoverRelaunch
 		if !errors.As(err, &rl) {
 			return err
@@ -112,7 +118,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		sw := rl.sw
 		fmt.Fprintf(os.Stderr, "cpb: account %s hit its %s limit (resets %s); resuming this session on %s\n",
 			sw.From, windowWords(sw.Window), sw.resetsAt.Local().Format("Mon 2 Jan 15:04"), sw.To)
-		args = rl.args
+		started := failoverNow()
+		err = runRunOnce(cmd, rl.args)
+		var again *failoverRelaunch
+		if err == nil || errors.As(err, &again) || failoverNow().Sub(started) >= failoverStartGrace {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, firstLine(err.Error()), sw.From)
+		err = runRunOnce(cmd, rl.back)
 	}
 }
 
@@ -417,7 +430,15 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 		activeEpisode.mu.Lock()
 		activeEpisode.switches = append(activeEpisode.switches, sw)
 		activeEpisode.mu.Unlock()
-		return &failoverRelaunch{args: relaunchArgs(tokens, pb.Name, claudeArgs, sw), sw: sw}
+		var switches []string
+		if failoverFlag {
+			switches = append(switches, "--failover")
+		}
+		if sopts.disabled {
+			switches = append(switches, "--no-sandbox")
+		}
+		return &failoverRelaunch{args: relaunchArgs(switches, tokens, pb.Name, claudeArgs, sw), sw: sw, back: relaunchArgs(switches, tokens, pb.Name, claudeArgs,
+			&failoverSwitch{From: sw.To, To: sw.From, sessionID: sw.sessionID, model: sw.model, noPrompt: true})}
 	}
 	err = preserveExitCode(err)
 	printFailoverSummary()

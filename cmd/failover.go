@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -50,6 +51,9 @@ var (
 	failoverCap       = 3 // switches per session
 	failoverCapWindow = 5 * time.Hour
 	failoverNow       = time.Now
+	// failoverStartGrace: a launch on the new account that ends with an
+	// error sooner than this did not get to run the session.
+	failoverStartGrace = 10 * time.Second
 )
 
 // failoverSwitch is one switch the watcher decided on.
@@ -63,6 +67,9 @@ type failoverSwitch struct {
 	sessionID string
 	model     string
 	resetsAt  time.Time
+	// noPrompt resumes with no prompt: the way back to the account the
+	// session came from, when the new one refused the launch.
+	noPrompt bool
 }
 
 func (s *failoverSwitch) Error() string {
@@ -191,6 +198,10 @@ func (w *failoverWatch) check(claudePID int) *failoverSwitch {
 	}
 	w.handled = l.resetsAt
 	limit := fmt.Sprintf("%s limit, resets %s", windowWords(l.window), l.resetsAt.Local().Format("Mon 2 Jan 15:04"))
+	if w.cfg.maxContext > 0 && tail.context == 0 {
+		w.episode.note(fmt.Sprintf("cpb: did not switch accounts at the %s: failover_max_context is set and the context's size is not in the transcript's last 256 KiB", limit))
+		return nil
+	}
 	if w.cfg.maxContext > 0 && tail.context > w.cfg.maxContext {
 		w.episode.note(fmt.Sprintf("cpb: did not switch accounts at the %s: the context, %s tokens, is above failover_max_context (%s)", limit, groupDigits(tail.context), groupDigits(w.cfg.maxContext)))
 		return nil
@@ -356,14 +367,18 @@ func resumeClaudeArgs(original []string, sw *failoverSwitch) []string {
 			i++
 		}
 	}
+	if sw.noPrompt {
+		return out
+	}
 	return append(out, continuePrompt(sw))
 }
 
-// relaunchArgs is a cpb run command line for the same launch on to: its
-// launch flags without --account, --account to, the playbook, and the
-// resume's claude arguments.
-func relaunchArgs(tokens []launchToken, name string, claudeArgs []string, sw *failoverSwitch) []string {
-	var out []string
+// relaunchArgs is a cpb run command line for the same launch on to: the
+// wrapper switches it was given (--failover, --no-sandbox), its launch flags
+// without --account, --account to, the playbook, and the resume's claude
+// arguments.
+func relaunchArgs(switches []string, tokens []launchToken, name string, claudeArgs []string, sw *failoverSwitch) []string {
+	out := append([]string(nil), switches...)
 	for _, t := range tokens {
 		if t.flag == "--account" {
 			continue
@@ -440,7 +455,24 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 		if err != nil {
 			return err
 		}
-		return liveLoginRefusal(in.pb.Name, in.configDir, a)
+		if err := liveLoginRefusal(in.pb.Name, in.configDir, a); err != nil {
+			return err
+		}
+		// Every other guard a launch runs before it changes anything, on
+		// the target's own layers: the secret helper for its references,
+		// its request headers, a token over the playbook's own login.
+		eff, err := auth.EffectiveBlock(in.configDir, a.layers)
+		if err != nil {
+			return err
+		}
+		plan, err := planLaunch(eff)
+		if err != nil {
+			return err
+		}
+		if err := plan.withHeaders(a.rendered.Headers); err != nil {
+			return err
+		}
+		return auth.OwnLoginRefusal(in.configDir, eff, in.pb.Name)
 	}
 	w.fullAccounts = func() map[string]bool {
 		out := map[string]bool{}

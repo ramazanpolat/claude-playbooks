@@ -12,6 +12,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // fastFailover shortens the thresholds and gives the test a fresh episode.
@@ -198,6 +199,14 @@ func TestFailoverCheck(t *testing.T) {
 		if sw := w.check(pid); sw != nil || len(w.episode.notes) != 1 || !strings.Contains(w.episode.notes[0], "500,000 tokens, is above failover_max_context (400,000)") {
 			t.Fatalf("cap: %+v %v", sw, w.episode.notes)
 		}
+		// Under a cap, a size the tail does not hold is no switch either.
+		dir, pid = watchFixture(t, far.Add(30*time.Minute), "idle", 0)
+		w = newWatch("acc-b")
+		w.configDir = dir
+		w.cfg.maxContext = 400000
+		if sw := w.check(pid); sw != nil || !strings.Contains(strings.Join(w.episode.notes, "\n"), "the context's size is not in the transcript's last 256 KiB") {
+			t.Fatalf("unknown size under a cap: %+v %v", sw, w.episode.notes)
+		}
 		dir, pid = watchFixture(t, far.Add(time.Hour), "idle", 1000)
 		w = newWatch("acc-b", "router")
 		w.configDir = dir
@@ -236,9 +245,14 @@ func TestResumeClaudeArgs(t *testing.T) {
 	if len(got) != len(want)+1 || strings.Join(got[:len(want)], " ") != strings.Join(want, " ") || !strings.HasPrefix(got[len(got)-1], "[cpb: this session moved from account a (5-hour limit") {
 		t.Fatalf("got %q", got)
 	}
-	args := relaunchArgs([]launchToken{{flag: "--env-set", value: "tracing"}, {flag: "--account", value: "a"}}, "alpha", nil, sw)
-	if strings.Join(args[:4], " ") != "--env-set=tracing --account b alpha" {
+	args := relaunchArgs([]string{"--failover", "--no-sandbox"}, []launchToken{{flag: "--env-set", value: "tracing"}, {flag: "--account", value: "a"}}, "alpha", nil, sw)
+	if strings.Join(args[:6], " ") != "--failover --no-sandbox --env-set=tracing --account b alpha" {
 		t.Fatalf("relaunch: %q", args)
+	}
+	// The way back to the account the session came from sends no prompt.
+	back := resumeClaudeArgs(nil, &failoverSwitch{From: "b", To: "a", sessionID: sidLive, noPrompt: true})
+	if strings.Join(back, " ") != "--resume "+sidLive {
+		t.Fatalf("back: %q", back)
 	}
 }
 
@@ -296,5 +310,86 @@ func TestFailoverConfigPrecedence(t *testing.T) {
 	}
 	if err := checkFailoverAccounts(root, []string{"nope"}, nil); err == nil {
 		t.Fatal("an unknown account was accepted")
+	}
+}
+
+// The check before ending claude runs every guard a launch on the target
+// runs: a reference with no helper on PATH refuses the target.
+func TestFailoverPreflightRunsLaunchGuards(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
+	tokenAccount(t, "acc-a", "tok-a")
+	putAccount(t, account.Account{Name: "acc-ref", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Ref: "stub:ref"}})
+	t.Setenv("CPB_SECRET_HELPER", "no-such-helper-anywhere")
+	if err := writeFailoverDefaults(root, failoverDefaults{Failover: "on", Accounts: []string{"acc-ref"}}); err != nil {
+		t.Fatal(err)
+	}
+	pb, err := playbook.Find(root, "alpha")
+	if err != nil || pb == nil {
+		t.Fatal(err)
+	}
+	w, err := failoverWatchFor(failoverWatchInput{pb: pb, configDir: pb.Path, wd: t.TempDir(), from: "acc-a"})
+	if err != nil || w == nil {
+		t.Fatalf("watch: %v %v", w, err)
+	}
+	if err := w.canRunOn("acc-ref"); err == nil || !strings.Contains(err.Error(), "no-such-helper-anywhere") {
+		t.Fatalf("a launch whose helper is missing passed the check: %v", err)
+	}
+}
+
+// A launch on the new account that fails at once (here its secret helper
+// fails before claude runs) resumes the session on the account it came
+// from, with no prompt, so the switch never leaves it ended.
+func TestFailoverFallsBackWhenTheNewAccountFails(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
+	fakeProcs(t, nil)
+	fastFailover(t, 0, time.Minute)
+	tokenAccount(t, "acc-a", "tok-a")
+	putAccount(t, account.Account{Name: "acc-ref", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Ref: "stub:ref"}})
+	if err := writeFailoverDefaults(root, failoverDefaults{Failover: "on", Accounts: []string{"acc-ref"}}); err != nil {
+		t.Fatal(err)
+	}
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Chdir(work)
+	dir := t.TempDir()
+	// A helper that is there but cannot resolve anything.
+	if err := os.WriteFile(filepath.Join(dir, "failing-helper"), []byte("#!/bin/sh\n[ \"$1\" = --check ] && exit 0\necho 'cannot resolve' >&2\nexit 7\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CPB_SECRET_HELPER", "failing-helper")
+	const sid = "11111111-2222-4333-8444-666666666666"
+	script := `#!/bin/sh
+for a in "$@"; do [ "$a" = --resume ] && resumed=1; done
+if [ -n "$resumed" ]; then printf '%s\n' "$@" > "$FAKE_OUT.args"; printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" > "$FAKE_OUT.token"; exit 0; fi
+sf="$CLAUDE_CONFIG_DIR/sessions/$$.json"; mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
+enc=$(printf %s "$(pwd -P)" | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$CLAUDE_CONFIG_DIR/projects/$enc"
+printf '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$FAKE_RESETS" > "$CLAUDE_CONFIG_DIR/projects/$enc/$FAKE_SID.jsonl"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"kind":"interactive","status":"idle"}' $$ "$FAKE_SID" "$(pwd -P)" > "$sf"
+trap 'rm -f "$sf"; exit 143' TERM
+while :; do sleep 0.05; done
+`
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out := filepath.Join(dir, "out")
+	t.Setenv("FAKE_OUT", out)
+	t.Setenv("FAKE_SID", sid)
+	t.Setenv("FAKE_RESETS", strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10))
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, []string{"--account", "acc-a", "alpha"}) })
+	if err != nil {
+		t.Fatalf("%v\n%s", err, msg)
+	}
+	if !strings.Contains(msg, "could not resume this session on acc-ref") || !strings.Contains(msg, "resuming it on acc-a instead") {
+		t.Fatalf("stderr:\n%s", msg)
+	}
+	args, _ := os.ReadFile(out + ".args")
+	if got := strings.TrimSpace(string(args)); got != "--resume\n"+sid {
+		t.Fatalf("the way back: %q", got)
+	}
+	if tok, _ := os.ReadFile(out + ".token"); string(tok) != "tok-a" {
+		t.Fatalf("back on token %q, want acc-a's", tok)
 	}
 }

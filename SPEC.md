@@ -1342,12 +1342,14 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   - is the same kind as the session's account (a Claude login or token, or
     the same provider), unless listed as `'<account> (any provider)'`;
   - the playbook may run on, with every refusal a launch on it would give
-    checked first, before anything changes.
+    checked first, before anything changes (the account, the login guards,
+    the secret helper of its references, its headers).
   At most 3 switches per session in 5 hours. When no account is left, cpb
   says so once and leaves the session as it is.
 - **What moves.** cpb ends claude with SIGTERM (Claude Code removes its
   session file, the transcript stays, a playbook's SessionEnd hook runs) and
-  runs the same launch again with `--account <next>` and `--resume <id>`:
+  runs the same launch again with `--account <next>` and `--resume <id>`,
+  keeping `--failover` and `--no-sandbox` when the launch had them:
   - the session's last model (`--model`), and only claude's flags a resume can
     carry safely (`--permission-mode`, `--effort`, `--fallback-model`,
     `--agent`, `--append-system-prompt`, `--system-prompt`, `--settings`,
@@ -1360,9 +1362,15 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     again on <b> with no cache.]`. The prompt the limit refused is in the
     transcript, so the model answers it.
   - Text typed in the input box and not sent is lost.
+  - A launch on the new account that ends with an error within 10 seconds
+    (refused, or its secret helper failing before claude runs) resumes the
+    session on the account it came from, with no prompt, and says so: a
+    switch never leaves the session ended.
 - **Cost.** The new account reads the whole context again with no cache.
   `failover_max_context` (tokens) is an optional cap above which cpb does
-  not switch and says why; there is none by default.
+  not switch and says why; there is none by default. Under a cap, a context
+  whose size the transcript's last 256 KiB does not show is not switched
+  either.
 - **What it says.** A line on stderr at each switch, the switches and any
   "did not switch" reason at the end, the first line of the continue
   prompt in the session itself, and `switches` in the launch record (*SHOW
