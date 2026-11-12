@@ -1,0 +1,20 @@
+-- Two Claude accounts, each holding its token by reference (as in
+-- example 23). With failover on, a session that stops at a usage limit
+-- moves to the next listed account by itself, in the same terminal.
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
+
+CREATE OR REPLACE ACCOUNT acct-work
+  SET provider = 'anthropic', claude_token FROM 'file:claude-token-work';
+
+CREATE OR REPLACE ACCOUNT acct-personal
+  SET provider = 'anthropic', claude_token FROM 'file:claude-token-personal';
+
+-- On for every playbook that inherits it, in this order.
+ALTER DEFAULTS SET failover = 'on', failover_accounts = ['acct-work', 'acct-personal'];
+
+-- agent follows DEFAULTS; scratch never moves a session.
+CREATE OR ALTER PLAYBOOK agent
+  SET launcher = '', login = 'isolated';
+
+CREATE OR ALTER PLAYBOOK scratch
+  SET launcher = '', login = 'isolated', failover = 'off';

@@ -455,6 +455,9 @@ func transcriptPath(configDir, cwd, id string) string {
 type transcriptTail struct {
 	model, cwd, title string
 	limit             *quotaStop
+	// context is the size of the context at the last answer: its input,
+	// cache reads and cache writes, in tokens; 0 when unknown.
+	context int64
 }
 
 // quotaStop is a usage limit a session ran into: the window Claude Code
@@ -541,10 +544,21 @@ func readTranscriptTail(path string) transcriptTail {
 			t.limit = quotaStopOf(apiErr, rawString(line.Error), line.Quota)
 			var msg struct {
 				Model json.RawMessage `json:"model"`
+				Usage json.RawMessage `json:"usage"`
 			}
 			if json.Unmarshal(line.Message, &msg) == nil {
 				if m := rawString(msg.Model); m != "" && !strings.HasPrefix(m, "<") {
 					t.model = m
+				}
+				var u struct {
+					Input       int64 `json:"input_tokens"`
+					CacheRead   int64 `json:"cache_read_input_tokens"`
+					CacheCreate int64 `json:"cache_creation_input_tokens"`
+				}
+				if len(msg.Usage) > 0 && json.Unmarshal(msg.Usage, &u) == nil {
+					if n := u.Input + u.CacheRead + u.CacheCreate; n > 0 {
+						t.context = n
+					}
 				}
 			}
 		}

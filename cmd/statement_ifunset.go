@@ -236,6 +236,11 @@ func (r *stmtRun) propertyReader(name string, pb *playbook.Playbook) (func(key s
 				return manifest.ModelPickerDefaultsExcluded, true
 			}
 			return grammar.PlaybookPropertyDefault("model_picker_defaults"), true
+		case "failover":
+			if m != nil && m.Failover != "" {
+				return m.Failover, true
+			}
+			return failoverInherited, true
 		}
 		if k, ok := strings.CutPrefix(key, "sandbox."); ok {
 			sb := (*manifest.Sandbox)(nil)

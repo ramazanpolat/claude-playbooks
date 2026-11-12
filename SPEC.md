@@ -171,6 +171,9 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
             | RESET secret_helper
+            | SET failover = 'off' | 'on', failover_accounts = ['<account>', ...],
+                  failover_max_context = <tokens>   account failover (see Account failover)
+            | RESET failover, failover_accounts, failover_max_context
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
                                            a row every launch offers; see "Model picker"
             | DROP MODEL '<id>'
@@ -309,6 +312,8 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
 | `ALTER DEFAULTS … USE / ADD / DROP / REPLACE ENV` | `<root>/.env-sets/.defaults`, one set name per line, in order |
 | `ALTER DEFAULTS SET / RESET secret_helper` | `<root>/.env-sets/.secret-helper`, one line: the command |
+| `ALTER DEFAULTS SET / RESET failover, failover_accounts, failover_max_context` | `<root>/.env-sets/.failover`, TOML (`failover`, `accounts`, `max_context`), mode `0600`; removed when nothing is set |
+| `ALTER PLAYBOOK … SET failover` | the playbook's `.playbook`, `failover = "on"` or `"off"` (none for `'inherited'`) |
 | `CREATE / ALTER / DROP ACCOUNT` | `<root>/.accounts/<name>.toml` |
 | `ALTER PLAYBOOK … USE ACCOUNT` | the playbook's `.playbook`, `[env] accounts = [...]` |
 | `ALTER DEFAULTS USE ACCOUNT` | `<root>/.accounts/.default`, one name |
@@ -1298,6 +1303,82 @@ when a cloud switch is on, and only a cloud account turns one on.
 renders (`Account: glm (gateway http://localhost:4000/v1, auth_token from a
 reference; the playbook's first)`); `--json` has `route.account`.
 
+### Account failover
+
+(Since v4.8.0.) When a session stops at a usage limit, a launch with failover
+on can move it to another account by itself: the launching cpb ends that
+claude and resumes the same session on the next listed account, in the same
+terminal and folder. It is what a person would otherwise do by hand, `/exit`
+then `cpb run --account <other> <playbook> --resume <id>`. It is off unless
+turned on.
+
+```sql
+ALTER DEFAULTS SET failover = 'on', failover_accounts = ['claude-work', 'claude-home'];
+ALTER DEFAULTS SET failover_max_context = 400000;   -- optional; no cap by default
+ALTER PLAYBOOK scratch SET failover = 'off';         -- 'inherited' (the default), 'on' or 'off'
+cpb run --failover reviewer                          -- one launch; --no-failover the opposite
+```
+
+- **On or off.** The launch flag decides, else the playbook's `failover`
+  (`'on'`, `'off'`), else DEFAULTS' `failover`; off by default. A session
+  launched without it is never touched: only the cpb that launched a session
+  watches it. Not for `cpb start`, `cpb play`, a sandboxed launch or one
+  with `CPB_CONFIG_DIR` (`--failover` there is refused).
+- **When.** The launch looks at its own session every 10 seconds and moves it
+  only when all of these hold:
+  - Claude Code's session file says `idle`: no turn, and no background shell,
+    subagent or monitor (those show `busy` or `shell`);
+  - the transcript ends at Claude Code's limit line (*Stopped at a limit*),
+    and that limit resets more than 30 minutes from now: a sooner one is left
+    to Claude Code, which continues by itself at the reset;
+  - the transcript has not changed for 2 minutes.
+- **Where to.** The first account of DEFAULTS' `failover_accounts`, in order,
+  that:
+  - is not the one the session runs on, and was not tried in this episode
+    (each account at most once, so it never loops);
+  - is not known to be at a limit (a live session cpb launched on it shows
+    `at_limit`). Otherwise a refused request costs nothing: the next poll
+    sees the new limit and moves on;
+  - is the same kind as the session's account (a Claude login or token, or
+    the same provider), unless listed as `'<account> (any provider)'`;
+  - the playbook may run on, with every refusal a launch on it would give
+    checked first, before anything changes.
+  At most 3 switches per session in 5 hours. When no account is left, cpb
+  says so once and leaves the session as it is.
+- **What moves.** cpb ends claude with SIGTERM (Claude Code removes its
+  session file, the transcript stays, a playbook's SessionEnd hook runs) and
+  runs the same launch again with `--account <next>` and `--resume <id>`:
+  - the session's last model (`--model`), and only claude's flags a resume can
+    carry safely (`--permission-mode`, `--effort`, `--fallback-model`,
+    `--agent`, `--append-system-prompt`, `--system-prompt`, `--settings`,
+    `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`,
+    `--verbose`, `--strict-mcp-config`); never the first prompt, nor a flag
+    that takes a list;
+  - as its prompt, Claude Code's own continue text, after a first line that
+    says what moved: `[cpb: this session moved from account <a> (weekly
+    limit, resets <time>) to <b>; its context, about <n> tokens, is read
+    again on <b> with no cache.]`. The prompt the limit refused is in the
+    transcript, so the model answers it.
+  - Text typed in the input box and not sent is lost.
+- **Cost.** The new account reads the whole context again with no cache.
+  `failover_max_context` (tokens) is an optional cap above which cpb does
+  not switch and says why; there is none by default.
+- **What it says.** A line on stderr at each switch, the switches and any
+  "did not switch" reason at the end, the first line of the continue
+  prompt in the session itself, and `switches` in the launch record (*SHOW
+  SESSIONS*). It never acts on a session it did not launch, and touches no
+  credential beyond what `--account` does.
+- **Without a restart.** An account whose credential is a `helper` gets its
+  key from the helper again while the session runs (Claude Code re-runs an
+  `apiKeyHelper` after `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`), so a helper
+  that picks the key can rotate keys of one provider address on its own.
+  cpb does not do that; a Claude login or token needs the restart above.
+- `EXPLAIN PLAYBOOK` says what a launch would do (`Failover: on (DEFAULTS);
+  at a usage limit, the session moves to claude-work, claude-home`), and its
+  `--json` has `failover` (`on`, `from`, `accounts`, `max_context`).
+  DEFAULTS' settings are stored in `<playbooks root>/.env-sets/.failover`
+  (mode `0600`).
+
 ## ALTER PLAYBOOK
 
 ### Environment overrides (`[env]`)
@@ -1335,10 +1416,14 @@ ALTER PLAYBOOK <name> RESET login, global_instructions       -- back to the defa
 | `statusline.command` | a command | none | The status line, `settings.json` `statusLine.command` (see *Status line and model*); `RESET statusline` (or `statusline.command`) removes it, its refresh with it |
 | `statusline.refresh` | whole seconds, at least 1 | none | `statusLine.refreshInterval` |
 | `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `RESET model_picker` is the mode too: the rows are a collection, which `DROP MODEL` empties |
+| `failover` | `'inherited'`, `'on'`, `'off'` | `'inherited'` | Whether a launch moves its session to another account at a usage limit (see *Account failover*); `'inherited'` follows DEFAULTS' `failover`. The manifest's `failover`, written only when `'on'` or `'off'`. `CREATE … FROM` ignores a source manifest's, as it ignores `[env]`; `cpb update` keeps the installed one. A plain directory refuses it |
 | `model_picker_defaults` | `'inherited'`, `'excluded'` | `'inherited'` | Whether the playbook's launches offer the DEFAULTS model rows (see *Model picker*); the manifest's `model_picker_defaults`, written only when `'excluded'`. A key of its own: `RESET model_picker` stays the mode. A plain directory has no manifest and refuses it, as it refuses `login` |
 
-`DEFAULTS` has one property, `secret_helper` (`ALTER DEFAULTS SET
-secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
+`DEFAULTS` has the property `secret_helper` (`ALTER DEFAULTS SET
+secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*), and
+`failover` (`'off'` or `'on'`), `failover_accounts` (a list, `['a', 'b
+(any provider)']`) and `failover_max_context` (a whole number of tokens),
+each removed by `RESET` (see *Account failover*).
 
 - **The form.** A pair is one word (`global_instructions='inherited'`) or three
   (`global_instructions = 'inherited'`); pairs are separated by commas, which may be left
@@ -2149,13 +2234,15 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 **`SHOW DEFAULTS`**: human form, `Env sets:` in order, `Account:` (the
 `DEFAULTS` account, or `machine (none set)`), `Secret helper:` with the
 command and where it came from (`setting` or `CPB_SECRET_HELPER`), or
-`(none)`, and `Model picker:` with the DEFAULTS model rows, `<model> (<label>)`
-each, pinned ids marked, or `(none)`. `--json`:
+`(none)`, `Model picker:` with the DEFAULTS model rows, `<model> (<label>)`
+each, pinned ids marked, or `(none)`, and `Failover:` (`off`, or `on; accounts
+a, b`, with `at most <n> tokens of context` when capped). `--json`:
 
 ```
 {"envs": ["claude-default", "corp-proxy"], "account": "mine",
  "secret_helper": "my-keychain-helper", "secret_helper_from": "setting",
- "model_picker": {"options": [{"model": "fable", "label": "Fable (newest)", "description": null, "behaves_as": null}]}}
+ "model_picker": {"options": [{"model": "fable", "label": "Fable (newest)", "description": null, "behaves_as": null}]},
+ "failover": "on", "failover_accounts": ["claude-work", "claude-home"], "failover_max_context": null}
 ```
 
 (`account` is null when `DEFAULTS` names none; `secret_helper` and
@@ -2502,6 +2589,7 @@ code to the same lines):
 | `token_blocked` | `Bool` | True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login. |
 | `accounts` | `Array(String)` | The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook. |
 | `account` | `Nullable(String)` | The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why). |
+| `failover` | `String` | The failover property: inherited (DEFAULTS' failover decides), on or off. |
 
 **`ENVS`**
 
@@ -2558,6 +2646,9 @@ code to the same lines):
 | `secret_helper` | `Nullable(String)` | The command that resolves secret references (SET secret_helper); null when none is configured. |
 | `secret_helper_from` | `Nullable(String)` | Where the secret helper is set: setting or CPB_SECRET_HELPER; null when none is configured. |
 | `model_picker` | `JSON` | The DEFAULTS model rows (ADD MODEL), offered by every launch on Anthropic's own API after the playbook's own rows: options; null when there are none. |
+| `failover` | `String` | Account failover for every playbook whose failover is inherited: off or on. |
+| `failover_accounts` | `Array(String)` | The accounts a session at a usage limit moves to, in order; an entry marked (any provider) may take a session from another kind of account. |
+| `failover_max_context` | `Nullable(Int64)` | The largest context, in tokens, a session may have to be moved; null for no cap. |
 
 ## SHOW SESSIONS
 
@@ -2604,8 +2695,9 @@ directory of mode `0700`) and removes it when the launch returns.
   (a directory for `cpb start`), `config_dir`, `account` (the account the
   launch runs on: a stored account's name, `machine`, or a layer route's
   `env:<set>`, `block:<playbook>` or `flags:<host>`), `why` (the reason
-  EXPLAIN gives), `identity` (the account's `identity` label, or null) and
-  `launched_at`. No credential, no reference, nothing from the environment.
+  EXPLAIN gives), `identity` (the account's `identity` label, or null),
+  `launched_at`, and after an account failover, `switches` (each `from`,
+  `to`, `at`, `window`, `resets_at`, `context_tokens`). No credential, no reference, nothing from the environment.
 - **Matching.** A session gets the account of the record of its own pid,
   or else of its parent's pid (a secret helper that starts claude as its
   child), and only when that process started when the record says, so a
@@ -2768,7 +2860,7 @@ CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
   SET launcher = 'w', login = 'isolated', global_instructions = 'excluded'
-  RESET sandbox, model, agent, statusline, model_picker.mode, model_picker_defaults
+  RESET sandbox, model, agent, statusline, model_picker.mode, model_picker_defaults, failover
   USE ENV tracing
   USE ACCOUNT router;
 
@@ -3248,6 +3340,7 @@ cpb run --env-file ./work.env sre -p "..."
 | Flag | Layer |
 |------|-------|
 | `--account NAME` | not a layer: the account this launch runs on (see *Which account a launch runs on*); the last one wins |
+| `--failover`, `--no-failover` | not a layer: account failover on or off for this launch, whatever the playbook and DEFAULTS say (see *Account failover*); not both |
 | `--env-set NAME` | an existing env set (`<playbooks root>/.env-sets/NAME.toml`); a missing or invalid one refuses the launch |
 | `--env KEY=VALUE` | set one variable |
 | `--block KEY` | remove one variable |

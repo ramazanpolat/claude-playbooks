@@ -179,6 +179,9 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
             | RESET secret_helper
+            | SET failover = 'off' | 'on', failover_accounts = ['<account>', ...],
+                  failover_max_context = <tokens>   account failover (see Account failover)
+            | RESET failover, failover_accounts, failover_max_context
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
                                            a row every launch offers; see "Model picker"
             | DROP MODEL '<id>'

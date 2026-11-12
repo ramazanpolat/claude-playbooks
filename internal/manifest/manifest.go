@@ -433,11 +433,15 @@ type Manifest struct {
 	// ModelPickerDefaults is the model_picker_defaults property: "excluded"
 	// keeps the DEFAULTS model rows out of this playbook's launches; empty
 	// (or "inherited") lets them in (SPEC.md, "Model picker").
-	ModelPickerDefaults string   `toml:"model_picker_defaults"`
-	Source              *Source  `toml:"source,omitempty"`
-	Update              *Update  `toml:"update,omitempty"`
-	Env                 *Env     `toml:"env,omitempty"`
-	Sandbox             *Sandbox `toml:"sandbox,omitempty"`
+	ModelPickerDefaults string `toml:"model_picker_defaults"`
+	// Failover is the failover property: "on" or "off" decide this
+	// playbook's launches; empty (or "inherited") follows DEFAULTS
+	// (SPEC.md, "Account failover").
+	Failover string   `toml:"failover"`
+	Source   *Source  `toml:"source,omitempty"`
+	Update   *Update  `toml:"update,omitempty"`
+	Env      *Env     `toml:"env,omitempty"`
+	Sandbox  *Sandbox `toml:"sandbox,omitempty"`
 
 	// MCP records, per MCP server a statement declared, the variables cpb
 	// derived for its secret references, so dropping the server forgets
@@ -771,6 +775,9 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.ModelPickerDefaults == ModelPickerDefaultsExcluded {
 		fmt.Fprintf(&b, "model_picker_defaults = %s\n", QuoteTOML(m.ModelPickerDefaults))
+	}
+	if m.Failover == "on" || m.Failover == "off" {
+		fmt.Fprintf(&b, "failover = %s\n", QuoteTOML(m.Failover))
 	}
 	if m.Source != nil {
 		b.WriteString("\n[source]\n")

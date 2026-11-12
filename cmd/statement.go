@@ -337,9 +337,11 @@ func (r *stmtRun) writeProfile(dir string, old, p *envset.Set, changed, what str
 func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	dir := envset.Dir(config.ResolvePlaybooksDir())
 
-	var listClauses, helperClauses, accountClauses, pickerClauses []grammar.Clause
+	var listClauses, helperClauses, accountClauses, pickerClauses, failoverClauses []grammar.Clause
 	for _, c := range st.Clauses {
 		switch c.Kind {
+		case grammar.SetProperties, grammar.ResetProperties:
+			failoverClauses = append(failoverClauses, c)
 		case grammar.SetHelper, grammar.UnsetHelper:
 			helperClauses = append(helperClauses, c)
 		case grammar.UseAccount:
@@ -435,6 +437,22 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		lines = append(lines, pickerLines...)
 	}
 
+	// DEFAULTS' account failover (failover_settings.go).
+	var failoverNew failoverDefaults
+	failoverSame := true
+	if len(failoverClauses) > 0 {
+		cur, err := readFailoverDefaults(root)
+		if err != nil {
+			return fmt.Errorf("DEFAULTS' failover settings cannot be read: %w", err)
+		}
+		var failoverLines []string
+		if failoverNew, failoverLines, err = applyFailoverDefaults(root, cur, failoverClauses, r.requireAccount); err != nil {
+			return err
+		}
+		failoverSame = len(failoverLines) == 0
+		lines = append(lines, failoverLines...)
+	}
+
 	// Unchanged when the list and the helper setting would stay as they are.
 	listSame := len(listClauses) == 0 || slices.Equal(current, names)
 	helperSame := true
@@ -444,7 +462,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		helperSame = (c.Kind == grammar.SetHelper && stored == c.Arg) || (c.Kind == grammar.UnsetHelper && stored == "")
 	}
 	switch {
-	case listSame && helperSame && accountSame && pickerSame:
+	case listSame && helperSame && accountSame && pickerSame && failoverSame:
 		r.outcome = outUnchanged
 		r.say("DEFAULTS unchanged", nil)
 		return nil
@@ -511,6 +529,12 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		if err := writeDefaultsPicker(root, picker); err != nil {
 			restore()
 			return fmt.Errorf("cannot write the DEFAULTS model rows: %w", err)
+		}
+	}
+	if !failoverSame {
+		if err := writeFailoverDefaults(root, failoverNew); err != nil {
+			restore()
+			return fmt.Errorf("cannot write DEFAULTS' failover settings: %w", err)
 		}
 	}
 	r.say("Altered DEFAULTS", lines)
@@ -708,6 +732,23 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			lines = append(lines, "model_picker_defaults  inherited: a launch offers the DEFAULTS model rows")
 		}
 	}
+	// failover (SPEC.md, "Account failover"), in the same manifest write.
+	wasFailover := m.Failover
+	if wasFailover == "" {
+		wasFailover = failoverInherited
+	}
+	nowFailover := wasFailover
+	if v, ok := grammar.PropertyValue(st.Clauses, "failover"); ok {
+		nowFailover = v
+	}
+	failoverChange := nowFailover != wasFailover
+	m.Failover = ""
+	if nowFailover != failoverInherited {
+		m.Failover = nowFailover
+	}
+	if failoverChange {
+		lines = append(lines, "failover  "+nowFailover+failoverMeaning(nowFailover))
+	}
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
 	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
@@ -754,7 +795,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && !pickerDefaultsChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && !pickerDefaultsChange && !failoverChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		head := "PLAYBOOK " + st.Name + " unchanged"
 		if r.exists {
@@ -808,7 +849,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return nil
 	}
-	if envChange || mcpRecordChange || loginChange || sandboxChange || pickerDefaultsChange {
+	if envChange || mcpRecordChange || loginChange || sandboxChange || pickerDefaultsChange || failoverChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}

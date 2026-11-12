@@ -103,6 +103,9 @@ type playbookJSON struct {
 	// cannot be resolved, or is not read (v4.2.0). Last.
 	Accounts []string `json:"accounts"`
 	RunsOn   *string  `json:"account"`
+	// Failover is the failover property: inherited, on or off (v4.8.0).
+	// Last.
+	Failover string `json:"failover"`
 }
 
 // statuslineJSON is a playbook's status line (settings.json statusLine):
@@ -203,6 +206,12 @@ type defaultsJSON struct {
 	// ModelPicker is the DEFAULTS model rows (ADD MODEL) every launch on
 	// Anthropic's own API offers; null when there are none.
 	ModelPicker *defaultsModelsJSON `json:"model_picker"`
+	// Failover, FailoverAccounts and FailoverMaxContext are DEFAULTS'
+	// account failover (v4.8.0): off or on, the accounts in order, and the
+	// context cap in tokens, null for none.
+	Failover           string   `json:"failover"`
+	FailoverAccounts   []string `json:"failover_accounts"`
+	FailoverMaxContext *int64   `json:"failover_max_context"`
 }
 
 // defaultsModelsJSON is the DEFAULTS model rows: a picker's options, with
@@ -269,6 +278,9 @@ type explainJSON struct {
 	ModelPickerAtLaunch *launchPickerJSON `json:"model_picker_at_launch"`
 	// Account is SHOW's, flattened (v4.2.0).
 	auth.Account
+	// Failover is what a launch with no flags does at a usage limit
+	// (v4.8.0). Last.
+	Failover failoverExplainJSON `json:"failover"`
 }
 
 // agentJSON is the agent a launch starts as, when the playbook names one.
@@ -389,11 +401,14 @@ func readStatement(st *grammar.Stmt) error {
 		if err := withDefaultsPicker(&v, playbooksDir); err != nil {
 			return err
 		}
+		if err := withFailoverDefaults(&v, playbooksDir); err != nil {
+			return err
+		}
 		if st.JSON {
 			return printJSON(v)
 		}
 		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Account", deref(v.Account, account.Machine+" (none set)")}, {"Secret helper", humanHelper(helper)},
-			{"Model picker", defaultsModelsLine(v.ModelPicker)}})
+			{"Model picker", defaultsModelsLine(v.ModelPicker)}, {"Failover", failoverDefaultsLine(v)}})
 		return nil
 	}
 	return fmt.Errorf("cannot run %s", st.String())
@@ -442,6 +457,10 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v.Login = "shared"
 	v.GlobalInstructions, _ = globalInstructionsStateOf(pb.Path)
 	v.ModelPickerDefaults = grammar.PlaybookPropertyDefault("model_picker_defaults")
+	v.Failover = failoverInherited
+	if pb.Manifest != nil && pb.Manifest.Failover != "" {
+		v.Failover = pb.Manifest.Failover
+	}
 	if pb.Manifest.ExcludesModelPickerDefaults() {
 		v.ModelPickerDefaults = manifest.ModelPickerDefaultsExcluded
 	}
@@ -647,6 +666,9 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	if v.ModelPickerDefaults == manifest.ModelPickerDefaultsExcluded {
 		rows = append(rows, [2]string{"Model picker defaults", "excluded (a launch offers no DEFAULTS model row)"})
 	}
+	if v.Failover != failoverInherited {
+		rows = append(rows, [2]string{"Failover", v.Failover + failoverMeaning(v.Failover)})
+	}
 	if len(v.Skills) > 0 {
 		names := make([]string, len(v.Skills))
 		for i, s := range v.Skills {
@@ -826,7 +848,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		pv := describePlaybook(pb)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
 			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions,
-			ModelPickerAtLaunch: launchPickerJSONOf(explainPicker(pb)), Account: pv.Account})
+			ModelPickerAtLaunch: launchPickerJSONOf(explainPicker(pb)), Account: pv.Account, Failover: explainFailover(pb)})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -896,6 +918,7 @@ func printLaunchPicker(pb *playbook.Playbook) {
 	if line := launchPickerLine(explainPicker(pb)); line != "" {
 		fmt.Println(line)
 	}
+	fmt.Println(explainFailoverLine(explainFailover(pb)))
 }
 
 // printLaunchSandbox says where a launch runs and what its login is, when
