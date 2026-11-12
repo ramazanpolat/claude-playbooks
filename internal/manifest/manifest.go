@@ -295,9 +295,25 @@ func ReservedHint(key string) string {
 // read, so it can be shown and repaired, and a launch that would use it is
 // refused (envset.ReservedError).
 func DeclaredReserved(e *Env) (key, field string) {
-	if e == nil {
-		return "", ""
+	if all := DeclaredReservedAll(e); len(all) > 0 {
+		return all[0].Key, all[0].Field
 	}
+	return "", ""
+}
+
+// Declared is a reserved key a layer sets or references, and which.
+type Declared struct {
+	Key   string
+	Field string // "set" or "refs"
+}
+
+// DeclaredReservedAll is every reserved key e sets or references: those it
+// sets first, then those it references, each by name.
+func DeclaredReservedAll(e *Env) []Declared {
+	if e == nil {
+		return nil
+	}
+	var out []Declared
 	for _, f := range []struct {
 		name string
 		keys map[string]string
@@ -308,12 +324,12 @@ func DeclaredReserved(e *Env) (key, field string) {
 				names = append(names, k)
 			}
 		}
-		if len(names) > 0 {
-			sort.Strings(names)
-			return names[0], f.name
+		sort.Strings(names)
+		for _, k := range names {
+			out = append(out, Declared{Key: k, Field: f.name})
 		}
 	}
-	return "", ""
+	return out
 }
 
 // WithoutReserved is keys without the reserved ones. A reserved key in a

@@ -502,9 +502,17 @@ func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.En
 	// A reserved key the manifest sets or references (written by hand, or
 	// before it was reserved) refuses the launch, naming the file and the
 	// statement that removes it; the file itself still reads.
-	if key, field := manifest.DeclaredReserved(block); key != "" {
-		return nil, merr, &envset.ReservedError{File: filepath.Join(mdir, manifest.FileName), Key: key, Field: "env." + field,
-			Fix: "cpb ALTER PLAYBOOK " + filepath.Base(mdir) + " UNSET VAR " + key}
+	if found := manifest.DeclaredReservedAll(block); len(found) > 0 {
+		r := &envset.ReservedError{File: filepath.Join(mdir, manifest.FileName), Prefix: "env.", Found: found}
+		keys := strings.Join(r.Keys(), " ")
+		// A playbook in the registry is repaired by name; one outside it
+		// (cpb start <dir>) has no name a statement takes: edit the file.
+		if filepath.Clean(filepath.Dir(mdir)) == filepath.Clean(config.ResolvePlaybooksDir()) {
+			r.Fix = "cpb ALTER PLAYBOOK " + filepath.Base(mdir) + " UNSET VAR " + keys
+		} else {
+			r.Fix = "delete " + keys + " from that file's [env.set] or [env.refs]"
+		}
+		return nil, merr, r
 	}
 	menv, perr = envset.ExpandWithDefault(profilesDir, block)
 	if perr != nil {

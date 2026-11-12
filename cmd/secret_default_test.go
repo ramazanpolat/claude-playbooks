@@ -784,6 +784,7 @@ func TestPlaybookCannotDeclareSecretStoreVariables(t *testing.T) {
 		"ALTER PLAYBOOK p SET VAR " + envset.SecretHelperEnv + " FROM 'keychain:h'",
 		"ALTER PLAYBOOK p BLOCK VAR " + envset.SecretHelperEnv,
 		"CREATE ENV e SET " + envset.SecretHelperEnv + "='/usr/local/bin/h' AS PLAINTEXT",
+		"ALTER ENV e BLOCK " + envset.SecretHelperEnv,
 	} {
 		if err := stmtErr(t, line); err == nil || !strings.Contains(err.Error(), "own shell") {
 			t.Errorf("%s: %v", line, err)

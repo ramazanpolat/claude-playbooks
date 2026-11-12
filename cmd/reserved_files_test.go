@@ -179,3 +179,54 @@ func TestPlaybookCannotDeclareThePlaybooksDir(t *testing.T) {
 		t.Fatalf("after UNSET VAR: %v", err)
 	}
 }
+
+// SHOW CREATE leaves a reserved key the stored file still sets or
+// references out of the export, with a note naming the statement that
+// removes it; the export applies, and for an env set (CREATE OR REPLACE)
+// applying it is the repair. Every reserved key is named, not only the
+// first.
+func TestShowCreateLeavesReservedKeysOut(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	t.Setenv(envset.SecretHelperEnv, "")
+	root := seedFlatPlaybook(t, "kept")
+	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("version = \"1.0.0\"\nname = \"kept\"\n\n[env.set]\nCPB_SECRET_FILE_STORE = \"1\"\nEDITOR = \"vi\"\n\n[env.refs]\nCPB_SECRET_HELPER = \"keychain:h\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := mustStmt(t, "SHOW CREATE PLAYBOOK kept")
+	for _, want := range []string{"-- CPB_SECRET_FILE_STORE left out", "cpb ALTER PLAYBOOK kept UNSET VAR CPB_SECRET_FILE_STORE", "-- CPB_SECRET_HELPER left out", "cpb ALTER PLAYBOOK kept UNSET VAR CPB_SECRET_HELPER", "EDITOR"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("SHOW CREATE lacks %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "--") && strings.Contains(line, "CPB_SECRET") {
+			t.Errorf("a statement names a reserved key: %q", line)
+		}
+	}
+	if o, err := apply(t, writePlaybookFile(t, out)); err != nil {
+		t.Fatalf("re-applying the export: %v\n%s", err, o)
+	}
+	_, err := auth.EffectiveBlock(root, nil)
+	if err == nil || !strings.Contains(err.Error(), "CPB_SECRET_FILE_STORE is in env.set, CPB_SECRET_HELPER is in env.refs") || !strings.Contains(err.Error(), "UNSET VAR CPB_SECRET_FILE_STORE CPB_SECRET_HELPER") {
+		t.Fatalf("both keys named, one statement for both: %v", err)
+	}
+
+	dir := envset.Dir(config.ResolvePlaybooksDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envset.Path(dir, "e"), []byte("[set]\nCPB_SECRET_HELPER = \"/usr/local/bin/h\"\nPAGER = \"less\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out = mustStmt(t, "SHOW CREATE ENV e")
+	if !strings.Contains(out, "-- CPB_SECRET_HELPER left out") || !strings.Contains(out, "cpb ALTER ENV e UNSET CPB_SECRET_HELPER") || !strings.Contains(out, "CREATE OR REPLACE ENV e") {
+		t.Fatalf("SHOW CREATE ENV:\n%s", out)
+	}
+	if o, err := apply(t, writePlaybookFile(t, out)); err != nil {
+		t.Fatalf("re-applying the env set's export: %v\n%s", err, o)
+	}
+	if data, _ := os.ReadFile(envset.Path(dir, "e")); strings.Contains(string(data), "CPB_SECRET") || !strings.Contains(string(data), "PAGER") {
+		t.Fatalf("after APPLY the set still holds the reserved key, or lost PAGER:\n%s", data)
+	}
+}

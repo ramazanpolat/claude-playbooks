@@ -81,7 +81,8 @@ func TestLaunchKeepsThePersonsSecretHelper(t *testing.T) {
 
 	writeManifest(t, configDir, "[env.set]\n"+manifest.SecretHelperEnv+" = \"/playbook/helper\"\n")
 	env, err := PrepareLaunchEnvFor(configDir, nil, "")
-	if !errors.Is(err, envset.ErrSet) || !strings.Contains(err.Error(), manifest.SecretHelperEnv) || !strings.Contains(err.Error(), "UNSET VAR "+manifest.SecretHelperEnv) || !strings.Contains(err.Error(), "own shell") {
+	// configDir is outside the registry, so the fix is to edit the file.
+	if !errors.Is(err, envset.ErrSet) || !strings.Contains(err.Error(), manifest.SecretHelperEnv) || !strings.Contains(err.Error(), "delete "+manifest.SecretHelperEnv+" from that file's [env.set] or [env.refs]") || !strings.Contains(err.Error(), "own shell") {
 		t.Fatalf("a .playbook declaring it: %v", err)
 	}
 	if v, ok := envValue(t, env, manifest.SecretHelperEnv); ok {
@@ -116,10 +117,19 @@ func TestLaunchKeepsThePersonsPlaybooksDir(t *testing.T) {
 	}
 	writeManifest(t, configDir, "[env.set]\n"+config.PlaybooksDirEnv+" = \"/srv/elsewhere\"\n")
 	env, err := PrepareLaunchEnvFor(configDir, nil, "")
-	if !errors.Is(err, envset.ErrSet) || !strings.Contains(err.Error(), "UNSET VAR "+config.PlaybooksDirEnv) {
+	if !errors.Is(err, envset.ErrSet) || !strings.Contains(err.Error(), "delete "+config.PlaybooksDirEnv+" from that file's") {
 		t.Fatalf("a .playbook declaring it: %v", err)
 	}
 	if v, _ := envValue(t, env, config.PlaybooksDirEnv); v == "/srv/elsewhere" {
 		t.Fatal("a .playbook declaring it: its value reached the session")
+	}
+}
+
+// cpb auth and cpb ask show a reserved-key refusal as it is: it names the
+// file, the keys and the fix, and holds no value.
+func TestReservedErrorIsShownAsItIs(t *testing.T) {
+	r := &envset.ReservedError{File: "/x/.playbook", Prefix: "env.", Found: []manifest.Declared{{Key: manifest.SecretHelperEnv, Field: "set"}}, Fix: "cpb ALTER PLAYBOOK x UNSET VAR " + manifest.SecretHelperEnv}
+	if got := sanitizeProfileError(r); got != r.Error() || !strings.Contains(got, "/x/.playbook") {
+		t.Fatalf("%q", got)
 	}
 }

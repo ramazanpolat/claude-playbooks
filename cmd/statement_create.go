@@ -128,10 +128,16 @@ func withheldLiteral(key, value string) bool {
 
 // varClauses turns one layer into SET, SET … FROM and BLOCK clauses, and
 // comments for the literals it withholds. fix names the statement that
-// would store a withheld key by reference.
-func varClauses(set, refs map[string]string, unset []string, fix func(key string) string) ([]grammar.Clause, []string) {
+// would store a withheld key by reference. A reserved key the stored file
+// still sets or references (manifest.DeclaredReserved) is left out, as the
+// parser would refuse it, with a note naming the statement (remove) that
+// takes it out of the stored file; notes are not withheld literals.
+func varClauses(set, refs map[string]string, unset []string, fix, remove func(key string) string) ([]grammar.Clause, []string, []string) {
 	var clauses []grammar.Clause
-	var comments []string
+	var comments, notes []string
+	leftOut := func(k string) {
+		notes = append(notes, fmt.Sprintf("-- %s left out: a reserved key, which no playbook or env set can declare (%s); a launch is refused until it is removed: %s", k, manifest.ReservedHint(k), remove(k)))
+	}
 	keys := make([]string, 0, len(set))
 	for k := range set {
 		keys = append(keys, k)
@@ -139,6 +145,10 @@ func varClauses(set, refs map[string]string, unset []string, fix func(key string
 	sort.Strings(keys)
 	lit := grammar.Clause{Kind: grammar.SetVar}
 	for _, k := range keys {
+		if manifest.IsReservedEnvKey(k) {
+			leftOut(k)
+			continue
+		}
 		if withheldLiteral(k, set[k]) {
 			comments = append(comments,
 				fmt.Sprintf("-- SET %s=<withheld> AS PLAINTEXT  (a credential-looking literal never goes into a file)", k),
@@ -156,6 +166,10 @@ func varClauses(set, refs map[string]string, unset []string, fix func(key string
 	}
 	sort.Strings(refKeys)
 	for _, k := range refKeys {
+		if manifest.IsReservedEnvKey(k) {
+			leftOut(k)
+			continue
+		}
 		clauses = append(clauses, grammar.Clause{Kind: grammar.SetRef, Vars: []grammar.Var{{Key: k, Ref: refs[k]}}})
 	}
 	if len(unset) > 0 {
@@ -163,7 +177,7 @@ func varClauses(set, refs map[string]string, unset []string, fix func(key string
 		sort.Strings(blocked)
 		clauses = append(clauses, grammar.Clause{Kind: grammar.BlockVar, Keys: blocked})
 	}
-	return clauses, comments
+	return clauses, comments, notes
 }
 
 func createEnvBlock(p *envset.Set) createBlock {
@@ -171,13 +185,17 @@ func createEnvBlock(p *envset.Set) createBlock {
 	if p.Description != "" {
 		clauses = append(clauses, grammar.Clause{Kind: grammar.Description, Arg: p.Description})
 	}
-	vars, comments := varClauses(p.Set, p.Refs, p.Block, func(k string) string {
+	vars, comments, notes := varClauses(p.Set, p.Refs, p.Block, func(k string) string {
 		return fmt.Sprintf("ALTER ENV %s SET %s FROM '<ref>'", p.Name, k)
+	}, func(k string) string {
+		return fmt.Sprintf("cpb ALTER ENV %s UNSET %s", p.Name, k)
 	})
 	clauses = append(clauses, vars...)
 	if len(comments) == 0 {
+		// A reserved key left out is gone from the set this rebuilds: APPLY
+		// is the repair.
 		st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Env, Name: p.Name, OrReplace: true, Clauses: clauses}
-		return createBlock{text: st.Pretty() + ";"}
+		return createBlock{text: joinComments(notes, st.Pretty()+";")}
 	}
 	// A withheld literal is not in the file, so CREATE OR REPLACE would
 	// rebuild the set without it and delete the stored value on APPLY.
@@ -192,7 +210,7 @@ func createEnvBlock(p *envset.Set) createBlock {
 	if len(clauses) > 0 {
 		text += "\n" + (&grammar.Stmt{Verb: grammar.Alter, Object: grammar.Env, Name: p.Name, Clauses: clauses}).Pretty() + ";"
 	}
-	return createBlock{text: joinComments(comments, text), withheld: withheld}
+	return createBlock{text: joinComments(append(notes, comments...), text), withheld: withheld}
 }
 
 // createDefaultsBlocks is DEFAULTS as two statements: the secret helper,
@@ -386,18 +404,20 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName, withheld: withheldSource}, nil
 	}
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
-	var comments []string
+	var comments, notes []string
 	if !env.Empty() {
 		var clauses []grammar.Clause
-		clauses, comments = varClauses(env.Set, env.Refs, env.Block, func(k string) string {
+		clauses, comments, notes = varClauses(env.Set, env.Refs, env.Block, func(k string) string {
 			return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
+		}, func(k string) string {
+			return fmt.Sprintf("cpb ALTER PLAYBOOK %s UNSET VAR %s", pb.Name, k)
 		})
 		alter.Clauses = append(alter.Clauses, clauses...)
 	}
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}
-	return withPlugins(createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource}), nil
+	return withPlugins(createBlock{text: joinComments(append(notes, comments...), text), withheld: len(comments)/2 + withheldSource}), nil
 }
 
 // sandboxCreateClauses is the [sandbox] table as SHOW CREATE states it:
