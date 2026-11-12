@@ -34,7 +34,7 @@ release instead, which needs no lookup at all; on a network you know is shared,
 you can always start this way:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | CPB_INSTALL_VERSION=v4.6.1 sh
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | CPB_INSTALL_VERSION=v4.7.0 sh
 ```
 
 Where `GITHUB_TOKEN` is already in the environment (CI runners set one), the
@@ -98,7 +98,7 @@ claude-playbooks is a Nix flake, so a [devbox](https://www.jetify.com/devbox)
 project pins it like any other package:
 
 ```bash
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.6.1#cpb"
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.7.0#cpb"
 devbox run -- cpb --version
 ```
 
@@ -110,7 +110,7 @@ one a `devbox run` command. A `devbox.json` like this:
 ```json
 {
   "packages": [
-    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.6.1#cpb",
+    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.7.0#cpb",
     "claude-code@latest"
   ],
   "env": {
@@ -150,8 +150,8 @@ enables them for one command, or set `experimental-features = nix-command flakes
 in `nix.conf`:
 
 ```bash
-nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.6.1#cpb" -- --version
-nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.6.1#cpb"
+nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.7.0#cpb" -- --version
+nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.7.0#cpb"
 ```
 
 (`nix profile add` is the current name; older Nix versions call it `nix profile install`.)
@@ -160,7 +160,7 @@ devbox needs none of this: it enables flakes itself.
 ### Notes
 
 - **Use the `git+https:` form shown here.** The shorter
-  `github:ramazanpolat/claude-playbooks/v4.6.1#cpb` also works, but it
+  `github:ramazanpolat/claude-playbooks/v4.7.0#cpb` also works, but it
   is resolved through GitHub's API, which rate-limits unauthenticated callers per
   IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
   it only with a GitHub token configured for Nix (`access-tokens`) or on a
@@ -300,7 +300,7 @@ cpb self-update --force    # reinstall even if already on the newest
   major is out) or when the redirect does not answer.
 - **If the release list is needed and cannot be read** (a rate limit, no
   network), it says why and installs nothing. Name the release, which needs no
-  lookup: `CPB_UPDATE_VERSION=v4.6.1 cpb self-update` (the tags are on the
+  lookup: `CPB_UPDATE_VERSION=v4.7.0 cpb self-update` (the tags are on the
   [releases page](https://github.com/ramazanpolat/claude-playbooks/releases));
   or set `GITHUB_TOKEN` to raise GitHub's rate limit.
 

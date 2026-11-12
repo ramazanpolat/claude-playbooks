@@ -1,6 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [v4.7.0] -- 2026-11-12
+
+v4.7.0 lets cpb keep your secrets itself. A `cpb:<name>` reference needs no
+secret helper: the value lives in your macOS Keychain, your Linux keyring, or,
+on a Linux machine with no keyring, a private file (plaintext at rest, and cpb
+says so first). `cpb play` asks for a recipe's missing secret after you confirm
+it, twice and with echo off, from your own terminal only, and never replaces a
+stored one. `install.sh` and `cpb self-update` find the newest release without
+GitHub's API, so a shared address that hits its rate limit still installs.
+cpb's own variables (the secret helper, the registry, the secret-store names)
+can no longer come from a playbook or a settings file; set them in your own
+shell. A playbook that sets one refuses to launch and names the one-line fix.
 
 ### Changed
 
