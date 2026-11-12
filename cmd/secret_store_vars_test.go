@@ -95,7 +95,7 @@ func TestStoreVariablesNeverReachAToolOrACommand(t *testing.T) {
 	saved := helperExec
 	helperExec = func(_ string, _ []string, env []string) error { got = env; return nil }
 	t.Cleanup(func() { helperExec = saved })
-	if err := runSecretHelper([]string{"TOKEN=cpb:tok", "--", "/bin/true"}, nil); err != nil {
+	if err := runSecretHelper([]string{"TOKEN=cpb:tok", "--", "sh", "-c", "true"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got == nil {
