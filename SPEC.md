@@ -2631,6 +2631,12 @@ the last assistant line of its transcript's last 256 KiB is that line and
 whatever its shape, ends it. The line is undocumented (observed on 2.1.240 to 2.1.322) and read
 defensively: a missing part, a value of another type, a window that is not
 a lowercase name, or a time in milliseconds is no limit, never an error.
+- **What it marks.** `at_limit` marks a session whose own turn was refused.
+  A session that has not tried since its account hit the limit is not
+  marked: Claude Code then writes nothing in its transcript (seen on 2.1.322:
+  a session that sent nothing already knows its account is at the limit,
+  and a request made outside the conversation leaves no assistant line), so
+  its status stays Claude Code's own even when its screen shows the limit.
 
 **`SHOW SESSIONS`** prints the live sessions, newest first: one line each
 (`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
