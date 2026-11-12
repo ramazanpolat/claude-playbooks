@@ -134,10 +134,10 @@ var selectTables = map[string]selectTable{
 	},
 	"SESSIONS": {
 		columns: []string{"playbook", "pid", "session_id", "cwd", "kind", "status", "name", "claude_version",
-			"started_at", "last_active", "model", "launcher", "config_dir", "resume", "tty"},
+			"started_at", "last_active", "model", "launcher", "config_dir", "resume", "tty", "account", "at_limit"},
 		structure: "playbook String, pid UInt32, session_id String, cwd String, kind String, status Nullable(String), name Nullable(String), " +
 			"claude_version Nullable(String), started_at DateTime64(3, 'UTC'), last_active Nullable(DateTime64(3, 'UTC')), model Nullable(String), " +
-			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String)",
+			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String), account Nullable(String), at_limit JSON",
 		comments: map[string]string{
 			"playbook":       "The playbook's name; a plain directory's path.",
 			"pid":            "The Claude Code process's id.",
@@ -154,6 +154,8 @@ var selectTables = map[string]selectTable{
 			"config_dir":     "The config directory the session runs under.",
 			"resume":         "The command that resumes this session from any folder once it ends.",
 			"tty":            "The process's controlling terminal (pts/3, ttys012); null for none, as for a bg session.",
+			"account":        "The account cpb launched the session on, from its launch record; null for a session cpb did not launch.",
+			"at_limit":       "The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped.",
 		},
 		rows: sessionRows,
 	},

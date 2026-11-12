@@ -401,7 +401,8 @@ contains = "sessions-ok"
 # A session's controlling terminal (v3.25.0): null for a process with none
 # (a background sleep in this shell), the terminal ps names for one run
 # under a pty (a sleep started inside script); SELECT reads it; DESCRIBE
-# lists tty last, the 14 columns before it unchanged.
+# lists tty after the 14 columns before it, unchanged, then account and
+# at_limit (v4.8.0).
 command = '''
 P="$HOME/.claude-playbooks/tty"; W="$HOME/ttyw"; mkdir -p "$W" && W="$(cd "$W" && pwd -P)"
 N1=77777777-aaaa-4aaa-8aaa-777777777771; T1=77777777-aaaa-4aaa-8aaa-777777777772
@@ -421,7 +422,7 @@ obj() { printf %s "$J" | tr '}' '\n' | grep -F "\"session_id\":\"$1\""; }
 obj "$N1" | grep -qF '"tty":null' && obj "$T1" | grep -qF "\"tty\":\"$PT\"" || { echo tty-show-wrong; exit 1; }
 cpb "SELECT session_id, tty FROM SESSIONS" --json | tr -d ' \n' | grep -qF "\"tty\":\"$PT\"" || { echo tty-select-wrong; exit 1; }
 D="$(cpb DESCRIBE SESSIONS --json | tr -d ' \n')"
-[ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)","comment":"The' || { echo tty-describe-wrong; exit 1; }
+[ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty account at_limit " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)","comment":"The' || { echo tty-describe-wrong; exit 1; }
 echo sessions-tty-ok'''
 contains = "sessions-tty-ok"
 

@@ -83,6 +83,58 @@ command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE A
 contains = "aside-ok"
 
 [[verify.commands]]
+# SHOW SESSIONS names each session's account (v4.8.0), from the record a
+# launch keeps while it runs, on a real process: a stand-in claude that
+# writes its own session file, as Claude Code does, and waits. One launch
+# goes through a helper that execs claude (the record is claude's own pid),
+# one through a helper that starts claude as its child (the record is the
+# helper's, claude's parent). SELECT and the table have the column; a
+# transcript that ends at Claude Code's limit error shows at_limit; the
+# records are mode 600, hold no resolved value, and are gone with their
+# launches.
+command = '''
+H="$HOME/holdbin"; L="$HOME/.claude-playbooks/.state/launches"; P="$HOME/.claude-playbooks/sesacct"; mkdir -p "$H"
+S1=aaaaaaaa-0000-4000-8000-00000000000a; S2=bbbbbbbb-0000-4000-8000-00000000000b
+cat > "$H/claude" <<'EOF'
+#!/bin/sh
+if [ "$1" = --version ]; then echo "2.1.322 (Claude Code)"; exit 0; fi
+d="$CLAUDE_CONFIG_DIR/sessions"; mkdir -p "$d"
+if [ -r "/proc/$$/stat" ]; then s=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}'); else s=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}'); fi
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":%s000,"procStart":"%s","kind":"interactive","status":"busy"}\n' $$ "$SID" "$(pwd -P)" "$(date +%s)" "$s" > "$d/$$.json"
+while [ ! -e "$HOME/hold.stop" ]; do sleep 0.1; done
+rm -f "$d/$$.json"
+EOF
+cat > "$H/arena-fork-helper" <<'EOF'
+#!/bin/sh
+if [ "$1" = --check ]; then exit 0; fi
+while [ "$1" != -- ]; do export "${1%%=*}=secret-${1#*=stub:}"; shift; done
+shift
+"$@"
+EOF
+chmod 755 "$H/claude" "$H/arena-fork-helper"; export PATH="$H:$PATH"
+cpb CREATE PLAYBOOK sesacct SET launcher = '', login = 'isolated' USE ACCOUNT acct-personal, acct-work >/dev/null || exit 1
+obj() { cpb SHOW SESSIONS --json | tr -d ' \n' | tr '}' '\n' | grep -F "\"session_id\":\"$1\""; }
+w() { i=0; until obj "$1" | grep -qF "\"account\":\"$2\""; do i=$((i+1)); [ $i -lt 100 ] || return 1; sleep 0.1; done; }
+SID=$S1 cpb run sesacct >/dev/null 2>&1 & R1=$!
+trap 'touch "$HOME/hold.stop"' EXIT
+w "$S1" acct-personal || { echo exec-helper-account-wrong; obj "$S1"; exit 1; }
+cpb ALTER DEFAULTS SET secret_helper = 'arena-fork-helper' >/dev/null
+SID=$S2 cpb run --account acct-work sesacct >/dev/null 2>&1 & R2=$!
+w "$S2" acct-work || { echo fork-helper-account-wrong; obj "$S2"; exit 1; }
+cpb ALTER DEFAULTS SET secret_helper = 'arena-helper' >/dev/null
+P1="$(obj "$S1" | sed 's/.*"pid":\([0-9]*\).*/\1/')"; P2="$(obj "$S2" | sed 's/.*"pid":\([0-9]*\).*/\1/')"
+test -e "$L/$P1.json" && ! test -e "$L/$P2.json" && [ "$(ls "$L" | wc -l | tr -d ' ')" = 2 ] || { echo records-wrong; ls -l "$L"; exit 1; }
+[ "$(stat -c %a "$L/$P1.json" 2>/dev/null || stat -f %Lp "$L/$P1.json")" = 600 ] && ! grep -rq "secret-" "$L" || { echo record-mode-or-value-wrong; exit 1; }
+cpb "SELECT session_id, account FROM SESSIONS" --json | tr -d ' \n' | grep -qF '"account":"acct-work"' && cpb SHOW SESSIONS | grep -q 'ACCOUNT' || { echo select-or-table-wrong; exit 1; }
+E="$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"; mkdir -p "$P/projects/$E"
+printf '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"five_hour","resetsAt":%s}}\n' "$(( $(date +%s) + 3600 ))" > "$P/projects/$E/$S1.jsonl"
+cpb SHOW SESSIONS --json | tr -d ' \n' | grep -qF '"at_limit":{"window":"five_hour","resets_at":"' && cpb SHOW SESSIONS | grep -q 'limit 5h' || { echo at-limit-wrong; exit 1; }
+touch "$HOME/hold.stop"; wait $R1 $R2; rm -f "$HOME/hold.stop"
+[ -z "$(ls -A "$L")" ] || { echo records-left; ls -l "$L"; exit 1; }
+echo sessions-account-ok'''
+contains = "sessions-account-ok"
+
+[[verify.commands]]
 # After every launch above: no resolved value (secret-<name>) was ever
 # written under the playbooks root.
 command = '! grep -rq "secret-" "$HOME/.claude-playbooks" && echo no-value-on-disk'

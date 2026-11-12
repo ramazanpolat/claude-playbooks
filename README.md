@@ -117,7 +117,7 @@ playbook or to `~/.claude`. A playbook can also be installed from a source, a gi
 ### See everything that is running
 
 ```bash
-cpb SHOW SESSIONS                                  # live Claude Code sessions, in every playbook
+cpb SHOW SESSIONS                                  # live sessions in every playbook: account, who is at a usage limit
 cpb run work --continue                            # this folder's latest, in its playbook; never one live elsewhere
 cpb tui                                            # browse playbooks, sessions and env sets; never shows a secret
 cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHouse for full SQL

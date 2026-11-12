@@ -2425,7 +2425,7 @@ what it means, is listed under *DESCRIBE* below.
 | `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play` is the last column) |
 | `ENVS` | env set | the `SHOW ENV` object |
 | `VARS` | variable, per layer, per playbook | one variable of one layer, with its `playbook`, `layer` and `effective` |
-| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty` is the last column) |
+| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty`, then `account` and `at_limit`, are the last columns) |
 | `DEFAULTS` | (one row) | the `SHOW DEFAULTS` object |
 
 `version_tuple` is `Array(UInt32)`, the numbers of the version's leading
@@ -2546,6 +2546,8 @@ code to the same lines):
 | `config_dir` | `String` | The config directory the session runs under. |
 | `resume` | `String` | The command that resumes this session from any folder once it ends. |
 | `tty` | `Nullable(String)` | The process's controlling terminal (pts/3, ttys012); null for none, as for a bg session. |
+| `account` | `Nullable(String)` | The account cpb launched the session on, from its launch record; null for a session cpb did not launch. |
+| `at_limit` | `JSON` | The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped. |
 
 **`DEFAULTS`**
 
@@ -2583,16 +2585,58 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
   be confirmed: it is listed, and a `--resume` of it is refused.
 - **Kinds.** Kinds other than `interactive` and `bg` are not listed; a
   daemon's spare workers write no file.
-- **Nothing else is read.** cpb reads no process's environment, runs no
-  daemon, and never writes, deletes or renames anything under `sessions/`:
-  a stale file is Claude Code's business.
+- **Nothing else is read**, except cpb's own launch records (below). cpb
+  reads no process's environment, runs no daemon, and never writes, deletes
+  or renames anything under `sessions/`: a stale file is Claude Code's
+  business.
 - **The format is Claude Code's.** It is undocumented, observed on 2.1.233
   (Linux) and 2.1.282–2.1.283 (macOS), and read defensively: a file that
   does not decode is skipped, and a dir without `sessions/` has no live
   session.
 
+**Which account** (since v4.8.0). Claude Code's session file does not say
+which account a session runs on, so a host launch (`cpb run`, a launcher,
+`cpb start`) writes it down itself: once the process it starts is running,
+cpb writes `<playbooks root>/.state/launches/<pid>.json` (mode `0600`, in a
+directory of mode `0700`) and removes it when the launch returns.
+- **The record.** One JSON object: `v` (1), `pid` and `proc_start` (the
+  process cpb started and its start time, read as for *Live*), `playbook`
+  (a directory for `cpb start`), `config_dir`, `account` (the account the
+  launch runs on: a stored account's name, `machine`, or a layer route's
+  `env:<set>`, `block:<playbook>` or `flags:<host>`), `why` (the reason
+  EXPLAIN gives), `identity` (the account's `identity` label, or null) and
+  `launched_at`. No credential, no reference, nothing from the environment.
+- **Matching.** A session gets the account of the record of its own pid,
+  or else of its parent's pid (a secret helper that starts claude as its
+  child), and only when that process started when the record says, so a
+  reused pid never borrows another launch's account. The parent's pid is
+  read in the same pass as the start time (`/proc/<pid>/stat` on Linux,
+  `ps` elsewhere). A session whose file records no start time is not
+  confirmed to be the process now on its pid (*Live*), so it has none
+  either. A session cpb did not launch (plain `claude`, a cpb before
+  v4.8.0, a sandbox, whose sessions are not listed anyway) has none.
+- **Clean-up.** A record that cannot be written costs the launch a warning
+  on stderr, never the session. A launch removes the records of processes
+  no longer alive (a launch killed outright cannot remove its own); a reader
+  skips any record it cannot read, of another version, or whose pid differs
+  from its file's name.
+
+**Stopped at a limit** (since v4.8.0). When a session hits a usage limit,
+Claude Code writes an assistant line in its transcript with
+`isApiErrorMessage: true`, `error: "rate_limit"` and `quotaLimits`
+(`status: "rejected"`, `rateLimitType`: `five_hour`, `seven_day` or
+another window, `resetsAt` in epoch seconds). A session is at a limit while
+the last assistant line of its transcript's last 256 KiB is that line and
+`resetsAt` has not passed; an answer after it, or any other assistant line
+whatever its shape, ends it. The line is undocumented (observed on 2.1.240 to 2.1.322) and read
+defensively: a missing part, a value of another type, a window that is not
+a lowercase name, or a time in milliseconds is no limit, never an error.
+
 **`SHOW SESSIONS`** prints the live sessions, newest first: one line each
-(`PLAYBOOK PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
+(`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
+`ACCOUNT` is `-` for none; `STATUS` reads `limit 5h`, `limit 7d` (or
+`limit <window>`) while the session is at a limit, and Claude Code's own
+status otherwise.
 - `FOR PLAYBOOK` limits it to one playbook, and an unknown name is refused.
 - **`--json`** is an array of objects:
 
@@ -2611,13 +2655,16 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 | `launcher` | string or null | the playbook's launcher, as SHOW PLAYBOOK reports it (null for a plain directory) |
 | `resume` | string | `cd '<cwd>' && <launcher> --resume <id>`: the command that resumes this session from any folder once it ends (see below) |
 | `tty` | string or null | the process's controlling terminal (`pts/3`, `ttys012`), null for none (a `bg` session). It is read in the same pass as the start time: `/proc/<pid>/stat`'s tty_nr on Linux, `ps`'s tty elsewhere |
+| `account` | string or null | the launch record (since v4.8.0); null for a session cpb did not launch |
+| `at_limit` | object or null | the transcript (since v4.8.0): `{"window": "seven_day", "resets_at": "<RFC 3339, UTC>"}` while the session is at a limit, else null |
 
 A session's transcript is
 `<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`.
 If that path is missing, cpb looks under every project directory.
 
 **`SELECT … FROM SESSIONS`** has the same rows. ClickHouse reads
-`started_at` and `last_active` as `DateTime64(3, 'UTC')`.
+`started_at` and `last_active` as `DateTime64(3, 'UTC')`, and `at_limit`
+as `JSON`.
 
 **Resuming.** There is no resume statement. `<launcher> --resume <id>`,
 `--continue`, or `cpb run <name> --resume …` hand Claude Code's own flags to
@@ -3622,7 +3669,7 @@ shows `SHOW CREATE`, copies statements and commands, and exports a `.cpb`.
 |---|---|---|
 | Playbooks | `SHOW PLAYBOOKS --json`, `SHOW SESSIONS --json` | name, launcher, version, env sets, login kind (`shared`, `isolated`, `sandbox`), live-session count, model |
 | a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview, Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line, Model (the picker), Sessions |
-| Sessions | `SHOW SESSIONS --json` | pid, tty, kind, status, age, last active, model, folder; the footer says where past sessions are, `past sessions: <launcher> --resume` |
+| Sessions | `SHOW SESSIONS --json` | playbook, account, pid, tty, kind, status (the limit a session is stopped at, if any), age, last active, model, folder; the footer says where past sessions are, `past sessions: <launcher> --resume` |
 | Env sets | `SHOW ENVS --json` | the env sets: variables, `used_by`, default |
 | Defaults | `SHOW DEFAULTS --json` | the env sets under every playbook, the secret helper |
 | Log | none | what this session copied and exported |
@@ -4364,7 +4411,7 @@ them: cpb tui`. Off a terminal, the output is the listing above, without that li
 
 ### The filesystem is the source of truth
 
-There is no index of playbooks and no database. The state cpb reads and writes is: the playbooks root (each playbook directory with its optional `.playbook` manifest, where its launcher is recorded; `.env-sets/`, the shared env sets and DEFAULTS; and `.state/`, cpb's own records about what it does not own: `dirs.toml` for the plain config directories statements target), the launcher directory (symlinks to the binary that serve as per-playbook commands), the launcher receipt (`<state>/cpb/launchers`, `$XDG_STATE_HOME` or `~/.local/state`: one line per launcher cpb wrote), and a flock lock file in the user cache dir (`<cache>/cpb/registry.lock`, falling back to `<tmp>/cpb-registry-<uid>.lock` when no cache directory can be resolved or created; used only to serialize concurrent mutations — it holds no data). Discovery reads the directories themselves, so a change the pilot makes with `mv`, `rm`, or a text editor is what cpb sees on its next invocation.
+There is no index of playbooks and no database. The state cpb reads and writes is: the playbooks root (each playbook directory with its optional `.playbook` manifest, where its launcher is recorded; `.env-sets/`, the shared env sets and DEFAULTS; and `.state/`, cpb's own records about what it does not own: `dirs.toml` for the plain config directories statements target, and `launches/`, one record per live host launch, which SHOW SESSIONS reads for each session's account), the launcher directory (symlinks to the binary that serve as per-playbook commands), the launcher receipt (`<state>/cpb/launchers`, `$XDG_STATE_HOME` or `~/.local/state`: one line per launcher cpb wrote), and a flock lock file in the user cache dir (`<cache>/cpb/registry.lock`, falling back to `<tmp>/cpb-registry-<uid>.lock` when no cache directory can be resolved or created; used only to serialize concurrent mutations — it holds no data). Discovery reads the directories themselves, so a change the pilot makes with `mv`, `rm`, or a text editor is what cpb sees on its next invocation.
 
 ### Playbook manifest
 

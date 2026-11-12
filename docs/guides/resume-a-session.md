@@ -9,10 +9,16 @@ Claude Code under the playbook's own config dir.
 
 ```
 $ cpb SHOW SESSIONS
-PLAYBOOK       PID    KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
-work           59735  interactive  busy    9h   54s     claude-opus-5-5  bfb2d226-403f-46da-8216-e39b2a71dae9  /Users/me/DEV/app
-review         30641  interactive  idle    39m  35m     claude-opus-5-5  15247cc4-c3e1-4b98-9c53-54402e029bce  /Users/me/other-app
+PLAYBOOK  ACCOUNT      PID    TTY      KIND         STATUS    AGE  ACTIVE  MODEL            SESSION                               CWD
+work      claude-work  59735  ttys039  interactive  busy      9h   54s     claude-opus-5-5  bfb2d226-403f-46da-8216-e39b2a71dae9  /Users/me/DEV/app
+review    claude-home  30641  ttys012  interactive  limit 7d  39m  35m     claude-opus-5-5  15247cc4-c3e1-4b98-9c53-54402e029bce  /Users/me/other-app
 ```
+
+- **ACCOUNT** is the account the session runs on, for a session cpb
+  launched: cpb keeps a record of each launch while it runs, since Claude
+  Code's own file does not say. `-` for a session started some other way.
+- **STATUS** reads `limit 5h` or `limit 7d` while the session is stopped at
+  a usage limit (from its transcript), until the limit resets.
 
 - `--json` gives every field, `resume` included: the exact command that
   resumes that session.
@@ -25,6 +31,8 @@ The list comes from files Claude Code keeps itself, one per live process
 - A session counts as live only while that process runs and is the same
   process (a reused pid is not).
 - cpb reads nothing from other processes, and never changes those files.
+  Its own launch records live in `.state/launches/` under the playbooks
+  root, one per running launch, removed when the launch ends.
 
 ## Resume
 

@@ -182,6 +182,31 @@ type Session struct {
 	Launcher   *string `json:"launcher"`
 	Resume     string  `json:"resume"`
 	TTY        *string `json:"tty"` // v3.25.0; nil from an older cpb
+	// Account and AtLimit (v4.8.0): nil from an older cpb.
+	Account *string       `json:"account"`
+	AtLimit *SessionLimit `json:"at_limit"`
+}
+
+// SessionLimit is the usage limit a session is stopped at.
+type SessionLimit struct {
+	Window   string `json:"window"`
+	ResetsAt string `json:"resets_at"`
+}
+
+// StatusLine is a session's status as the tables show it: the limit it is
+// stopped at, else Claude Code's own status.
+func (s Session) StatusLine() *string {
+	if s.AtLimit == nil {
+		return s.Status
+	}
+	l := "limit " + s.AtLimit.Window
+	switch s.AtLimit.Window {
+	case "five_hour":
+		l = "limit 5h"
+	case "seven_day":
+		l = "limit 7d"
+	}
+	return &l
 }
 
 type EnvSet struct {

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -83,6 +85,19 @@ type sessionJSON struct {
 	// TTY is the process's controlling terminal (v3.25.0), last so every
 	// earlier field keeps its place.
 	TTY *string `json:"tty"`
+	// Account is the account cpb launched the session on, from its launch
+	// record; null for a session cpb did not launch. AtLimit is the usage
+	// limit the session is stopped at, from its transcript. Both follow tty,
+	// so every earlier field keeps its place.
+	Account *string       `json:"account"`
+	AtLimit *sessionLimit `json:"at_limit"`
+}
+
+// sessionLimit is the usage limit a session is stopped at: the window
+// (five_hour, seven_day, or another Claude Code names) and when it resets.
+type sessionLimit struct {
+	Window   string `json:"window"`
+	ResetsAt string `json:"resets_at"`
 }
 
 // liveState is what cpb can tell about a session file's process.
@@ -95,10 +110,12 @@ const (
 )
 
 // procInfo is what cpb reads about a live process: its start time, in the
-// form Claude Code writes as procStart on this platform, and its
-// controlling terminal ("" for none).
+// form Claude Code writes as procStart on this platform, its controlling
+// terminal ("" for none), and its parent's pid, which matches a session to
+// the launch record of a secret helper that started it (launch_record.go).
 type procInfo struct {
 	start, tty string
+	ppid       int
 }
 
 // procStarts returns procInfo for each pid that is alive: on Linux from
@@ -136,7 +153,8 @@ func procStatStarts(pids []int) map[int]procInfo {
 		// tty_nr is a signed %d: a pts minor of 0x80000 or more sets bit 31
 		// and prints negative (Codex, #134). Its bits are the device number.
 		n, _ := strconv.ParseInt(f[4], 10, 32)
-		out[pid] = procInfo{start: f[19], tty: linuxTTY(uint64(uint32(int32(n))))}
+		ppid, _ := strconv.Atoi(f[1])
+		out[pid] = procInfo{start: f[19], tty: linuxTTY(uint64(uint32(int32(n)))), ppid: ppid}
 	}
 	return out
 }
@@ -174,23 +192,24 @@ func psStarts(pids []int) map[int]procInfo {
 	// others either.
 	// tty last: lstart in the C locale is always five words, so the
 	// columns cannot shift whatever the tty column holds.
-	c := exec.Command("ps", "-A", "-o", "pid=,lstart=,tty=")
+	c := exec.Command("ps", "-A", "-o", "pid=,ppid=,lstart=,tty=")
 	c.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
 	b, _ := c.Output()
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
-		if len(f) < 6 {
+		if len(f) < 7 {
 			continue
 		}
 		pid, err := strconv.Atoi(f[0])
 		if err != nil || !want[pid] {
 			continue
 		}
+		ppid, _ := strconv.Atoi(f[1])
 		tty := ""
-		if len(f) > 6 && strings.Trim(f[6], "?-") != "" {
-			tty = f[6]
+		if len(f) > 7 && strings.Trim(f[7], "?-") != "" {
+			tty = f[7]
 		}
-		out[pid] = procInfo{start: strings.Join(f[1:6], " "), tty: tty}
+		out[pid] = procInfo{start: strings.Join(f[2:7], " "), tty: tty, ppid: ppid}
 	}
 	return out
 }
@@ -278,6 +297,8 @@ type liveSession struct {
 	f     sessionFile
 	state liveState
 	tty   string // the process's controlling terminal, "" for none
+	// account is the account of its launch record, "" for none.
+	account string
 }
 
 // readSessionFiles reads the session files of dirs. It only reads.
@@ -336,8 +357,65 @@ func readSessionFiles(dirs []sessionDir) []liveSession {
 		}
 		out = append(out, s)
 	}
+	matchLaunchRecords(out, starts)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].f.StartedAt > out[j].f.StartedAt })
 	return out
+}
+
+// matchLaunchRecords gives each confirmed live session the account of its
+// launch record: the record of its own pid, or else of its parent's (a
+// secret helper that started claude as its child), and only when that
+// process started when the record says, so a reused pid never borrows
+// another launch's account. A session whose file records no start time is
+// not confirmed to be the process now on its pid (it may be a stale file on
+// a reused pid), so it gets no account. starts is what procStarts read for
+// the sessions' own pids; a parent's start is read only when a record names
+// it.
+func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
+	if len(sessions) == 0 {
+		return
+	}
+	recs := readLaunchRecords(launchRecordsRoot())
+	if len(recs) == 0 {
+		return
+	}
+	var parents []int
+	for i := range sessions {
+		s := &sessions[i]
+		if s.state != live {
+			continue
+		}
+		info, ok := starts[s.f.PID]
+		if !ok {
+			continue
+		}
+		if r, ok := recs[s.f.PID]; ok && sameStart(r.ProcStart, info.start) {
+			s.account = r.Account
+			continue
+		}
+		if _, ok := recs[info.ppid]; ok && info.ppid > 1 {
+			parents = append(parents, info.ppid)
+		}
+	}
+	if len(parents) == 0 {
+		return
+	}
+	pstarts := procStarts(parents)
+	for i := range sessions {
+		s := &sessions[i]
+		if s.account != "" || s.state != live {
+			continue
+		}
+		info, ok := starts[s.f.PID]
+		if !ok || info.ppid <= 1 {
+			continue
+		}
+		r, ok := recs[info.ppid]
+		p, alive := pstarts[info.ppid]
+		if ok && alive && sameStart(r.ProcStart, p.start) {
+			s.account = r.Account
+		}
+	}
 }
 
 // encodeProjectDir is Claude Code's directory name under projects/ for a
@@ -372,9 +450,48 @@ func transcriptPath(configDir, cwd, id string) string {
 }
 
 // transcriptTail is what cpb reads from a transcript's last 256 KiB: the
-// model of its last assistant line, its last cwd and its last AI title.
+// model of its last assistant line, its last cwd, its last AI title, and
+// the usage limit its last assistant line reports, if that line is one.
 type transcriptTail struct {
 	model, cwd, title string
+	limit             *quotaStop
+}
+
+// quotaStop is a usage limit a session ran into: the window Claude Code
+// names and when it resets.
+type quotaStop struct {
+	window   string
+	resetsAt time.Time
+}
+
+// limitWindow is the shape of a window name cpb shows: Claude Code's own
+// (five_hour, seven_day, and any it adds), never free text.
+var limitWindow = regexp.MustCompile(`^[a-z0-9_]{1,40}$`)
+
+// quotaStopOf reads the usage limit an assistant line reports. Claude Code
+// (observed on 2.1.240 to 2.1.322; undocumented) writes a session that
+// hit a limit as an assistant line with isApiErrorMessage, error
+// "rate_limit" and quotaLimits {status "rejected", rateLimitType, resetsAt
+// in epoch seconds}. Anything else, or any part of that shape missing or of
+// another type, is no limit: an unknown shape is never shown, and never an
+// error.
+func quotaStopOf(isAPIError bool, errKind string, quota json.RawMessage) *quotaStop {
+	if !isAPIError || errKind != "rate_limit" || len(quota) == 0 {
+		return nil
+	}
+	var q struct {
+		Status        *string  `json:"status"`
+		RateLimitType *string  `json:"rateLimitType"`
+		ResetsAt      *float64 `json:"resetsAt"`
+	}
+	if json.Unmarshal(quota, &q) != nil || q.Status == nil || q.RateLimitType == nil || q.ResetsAt == nil {
+		return nil
+	}
+	r := *q.ResetsAt
+	if *q.Status != "rejected" || !limitWindow.MatchString(*q.RateLimitType) || r <= 0 || r > 1e11 || r != math.Trunc(r) {
+		return nil
+	}
+	return &quotaStop{window: *q.RateLimitType, resetsAt: time.Unix(int64(r), 0)}
 }
 
 const transcriptTailBytes = 256 << 10
@@ -392,32 +509,57 @@ func readTranscriptTail(path string) transcriptTail {
 		}
 	}
 	b, _ := io.ReadAll(f)
-	var line struct {
-		Type    string `json:"type"`
-		Cwd     string `json:"cwd"`
-		AITitle string `json:"aiTitle"`
-		Message struct {
-			Model string `json:"model"`
-		} `json:"message"`
-	}
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(make([]byte, 0, 64<<10), transcriptTailBytes+1)
 	for sc.Scan() {
-		line.Type, line.Cwd, line.AITitle, line.Message.Model = "", "", "", ""
+		// Every field raw, so a field of an unexpected type costs that field
+		// only, never the line: an assistant line of any shape still ends a
+		// limit before it.
+		var line struct {
+			Type       json.RawMessage `json:"type"`
+			Cwd        json.RawMessage `json:"cwd"`
+			AITitle    json.RawMessage `json:"aiTitle"`
+			IsAPIError json.RawMessage `json:"isApiErrorMessage"`
+			Error      json.RawMessage `json:"error"`
+			Quota      json.RawMessage `json:"quotaLimits"`
+			Message    json.RawMessage `json:"message"`
+		}
 		if json.Unmarshal(sc.Bytes(), &line) != nil {
 			continue // the first line of a tail is usually cut
 		}
-		if line.Cwd != "" {
-			t.cwd = line.Cwd
+		if c := rawString(line.Cwd); c != "" {
+			t.cwd = c
 		}
-		if line.AITitle != "" {
-			t.title = line.AITitle
+		if a := rawString(line.AITitle); a != "" {
+			t.title = a
 		}
-		if line.Type == "assistant" && line.Message.Model != "" && !strings.HasPrefix(line.Message.Model, "<") {
-			t.model = line.Message.Model
+		if rawString(line.Type) == "assistant" {
+			// Every assistant line decides: a limit, or (an answer, or any
+			// other error, or a shape cpb does not know) no limit any more.
+			var isErr bool
+			apiErr := json.Unmarshal(line.IsAPIError, &isErr) == nil && isErr
+			t.limit = quotaStopOf(apiErr, rawString(line.Error), line.Quota)
+			var msg struct {
+				Model json.RawMessage `json:"model"`
+			}
+			if json.Unmarshal(line.Message, &msg) == nil {
+				if m := rawString(msg.Model); m != "" && !strings.HasPrefix(m, "<") {
+					t.model = m
+				}
+			}
 		}
 	}
 	return t
+}
+
+// rawString is a raw JSON value as a string, "" when it is absent or not a
+// string.
+func rawString(raw json.RawMessage) string {
+	var s string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
 }
 
 // transcriptCwd is the directory a transcript's session ran in: the last
@@ -453,15 +595,37 @@ func (s liveSession) json() sessionJSON {
 		Cwd: s.f.Cwd, Kind: s.f.Kind, Status: optStr(s.f.Status), Name: optStr(s.f.Name),
 		ClaudeVersion: optStr(s.f.Version), StartedAt: rfc3339(time.UnixMilli(s.f.StartedAt)),
 		Launcher: optStr(s.dir.launcher), Resume: s.dir.resumeIn(s.f.SessionID, s.f.Cwd),
-		TTY: optStr(s.tty),
+		TTY: optStr(s.tty), Account: optStr(s.account),
 	}
 	if p := transcriptPath(s.dir.path, s.f.Cwd, s.f.SessionID); p != "" {
 		if fi, err := os.Stat(p); err == nil {
 			v.LastActive = strPtr(rfc3339(fi.ModTime()))
 		}
-		v.Model = optStr(readTranscriptTail(p).model)
+		tail := readTranscriptTail(p)
+		v.Model = optStr(tail.model)
+		// A limit that has reset no longer stops the session: its next
+		// message goes through.
+		if l := tail.limit; l != nil && l.resetsAt.After(sessionsNow()) {
+			v.AtLimit = &sessionLimit{Window: l.window, ResetsAt: rfc3339(l.resetsAt)}
+		}
 	}
 	return v
+}
+
+// sessionsNow is the clock a limit's reset is compared with; a variable
+// for tests.
+var sessionsNow = time.Now
+
+// limitLabel is the short form of a limit for the human tables: limit 5h,
+// limit 7d, or the window Claude Code names.
+func limitLabel(l *sessionLimit) string {
+	switch l.Window {
+	case "five_hour":
+		return "limit 5h"
+	case "seven_day":
+		return "limit 7d"
+	}
+	return "limit " + l.Window
 }
 
 // liveSessions is SHOW SESSIONS' rows, and the playbooks it left out
@@ -530,9 +694,13 @@ func showSessions(st *grammar.Stmt) error {
 		fmt.Println("No live Claude Code sessions.")
 		return leftOut(bad)
 	}
-	t := newTable("PLAYBOOK", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(9)
+	t := newTable("PLAYBOOK", "ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(10)
 	for _, r := range rows {
-		t.add(r.Playbook, strconv.Itoa(r.PID), deref(r.TTY, "-"), r.Kind, deref(r.Status, "-"), ageOf(&r.StartedAt),
+		status := deref(r.Status, "-")
+		if r.AtLimit != nil {
+			status = limitLabel(r.AtLimit)
+		}
+		t.add(r.Playbook, deref(r.Account, "-"), strconv.Itoa(r.PID), deref(r.TTY, "-"), r.Kind, status, ageOf(&r.StartedAt),
 			ageOf(r.LastActive), deref(r.Model, "-"), r.SessionID, r.Cwd)
 	}
 	t.render(os.Stdout)
