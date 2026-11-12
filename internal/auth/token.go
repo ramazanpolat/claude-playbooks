@@ -494,10 +494,17 @@ func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.En
 	// The registry default profile is the bottom layer of every playbook,
 	// manifest or not.
 	profilesDir := envset.Dir(config.ResolvePlaybooksDir())
-	m, merr := manifest.Nearest(configDir)
+	m, mdir, merr := manifest.NearestPath(configDir)
 	var block *manifest.Env
 	if m != nil {
 		block = m.Env
+	}
+	// A reserved key the manifest sets or references (written by hand, or
+	// before it was reserved) refuses the launch, naming the file and the
+	// statement that removes it; the file itself still reads.
+	if key, field := manifest.DeclaredReserved(block); key != "" {
+		return nil, merr, &envset.ReservedError{File: filepath.Join(mdir, manifest.FileName), Key: key, Field: "env." + field,
+			Fix: "cpb ALTER PLAYBOOK " + filepath.Base(mdir) + " UNSET VAR " + key}
 	}
 	menv, perr = envset.ExpandWithDefault(profilesDir, block)
 	if perr != nil {

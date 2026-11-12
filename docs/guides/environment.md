@@ -169,8 +169,8 @@ be a secret passes: empty, an integer, or `true`/`false`, so
   runs, and at launch cpb execs `<helper> KEY=REF … -- claude <args>`, so the
   value exists only in that one process. `CPB_SECRET_HELPER` in the environment
   overrides the stored setting. It is yours alone: a playbook, a recipe or an
-  env set cannot declare it, and a cpb started inside a session uses the one
-  from your own shell. Without a helper, `SET … FROM` is refused, and
+  env set cannot declare it. A cpb started inside a session runs in that
+  session's environment, so store secrets from your own shell. Without a helper, `SET … FROM` is refused, and
   so is launching a playbook whose layers hold a reference.
   An account's credential takes a reference the same way
   (`auth_token FROM '<ref>'`, see [Accounts](accounts.md)).

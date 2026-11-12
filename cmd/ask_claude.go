@@ -417,14 +417,15 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	c.Stdout, c.Stderr = &stdout, &stderr
 	runErr := c.Run()
 	// The secret helper's notice (a token read from the file store) is
-	// the person's to see, as at launch; claude's own stderr is kept for a
-	// failure.
-	fmt.Fprint(os.Stderr, helperNotices(stderr.String()))
+	// the person's to see, once, as at launch; a failure's reason is read
+	// from claude's own stderr.
+	notices, claudeStderr := splitHelperNotices(stderr.String())
+	fmt.Fprint(os.Stderr, notices)
 	hint := askFailureHint(root, signIn)
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("Claude Code did not answer within %s: nothing came back. %s", askTimeout, hint)
 	}
-	return parseAskAnswer(stdout.Bytes(), stderr.String(), runErr, hint)
+	return parseAskAnswer(stdout.Bytes(), claudeStderr, runErr, hint)
 }
 
 // askCommand builds the claude child: claude itself, or, for an account

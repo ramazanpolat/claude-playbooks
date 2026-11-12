@@ -424,12 +424,20 @@ func (p *parser) envNames(what string) ([]string, *Error) {
 	return p.list(what, "<env>", func(t Token) *Error { return checkName(Env, t, false) })
 }
 
-func (p *parser) keys(what string) ([]string, *Error) {
+// keys parses a list of variable names. A removal (UNSET, UNSET VAR) may
+// name a reserved key an earlier release could write, so a file that holds
+// one can be repaired; anything else declares the key, and a reserved one
+// is refused.
+func (p *parser) keys(what string, removal bool) ([]string, *Error) {
 	return p.list(what, "<key>", func(t Token) *Error {
 		if !keyPattern.MatchString(t.Text) {
 			return errAt(t.Pos, what+" takes variable names")
 		}
-		if err := manifest.ValidateEnvKey(t.Text); err != nil {
+		check := manifest.ValidateEnvKey
+		if removal {
+			check = manifest.ValidateStoredEnvKey
+		}
+		if err := check(t.Text); err != nil {
 			return errAt(t.Pos, err.Error())
 		}
 		return nil
@@ -936,13 +944,13 @@ func (p *parser) envClause() (*Clause, *Error) {
 	case "BLOCK":
 		p.kw("VAR")
 		c.Kind = BlockVar
-		keys, err := p.keys("BLOCK")
+		keys, err := p.keys("BLOCK", false)
 		c.Keys = keys
 		return c, err
 	case "UNSET":
 		p.kw("VAR")
 		c.Kind = UnsetVar
-		keys, err := p.keys("UNSET")
+		keys, err := p.keys("UNSET", true)
 		c.Keys = keys
 		return c, err
 	case "DESCRIPTION":
@@ -1065,7 +1073,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return nil, p.fail("BLOCK inside ALTER PLAYBOOK takes VAR: BLOCK VAR <key>")
 		}
 		c.Kind = BlockVar
-		keys, err := p.keys("BLOCK VAR")
+		keys, err := p.keys("BLOCK VAR", false)
 		c.Keys = keys
 		return c, err
 	case "UNSET":
@@ -1100,7 +1108,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR or TOOL; a property is RESET <key>")
 		}
 		c.Kind = UnsetVar
-		keys, err := p.keys("UNSET VAR")
+		keys, err := p.keys("UNSET VAR", true)
 		c.Keys = keys
 		return c, err
 	case "RENAME":

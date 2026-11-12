@@ -407,7 +407,7 @@ func (s secretServiceStore) lookup(name string) (found bool, noService string, e
 	if why == "" {
 		why = err.Error()
 	}
-	return false, "", &unavailableError{keyringFailed: true, msg: fmt.Sprintf("secret-tool could not answer about cpb:%s (%s); nothing was read or stored, in the keyring or in a file. Check your keyring, then run this again; or, on a machine whose keyring cannot be used, set %s=1 in your own shell (never in a playbook), and cpb keeps cpb:<name> values in the file store instead (plaintext, readable by you and root); or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, why, fileStoreOptInEnv)}
+	return false, "", &unavailableError{keyringFailed: true, msg: fmt.Sprintf("secret-tool could not answer about cpb:%s (%s); nothing was read or stored, in the keyring or in a file. Check your keyring, then run this again; or, on a machine whose keyring cannot be used, set %s=1 in your own shell and run cpb from there (a launched session does not pass it on, and a playbook cannot set it), and cpb keeps cpb:<name> values in the file store instead (plaintext, readable by you and root); or configure a helper of your own (ALTER DEFAULTS SET secret_helper = '<command>')", name, why, fileStoreOptInEnv)}
 }
 
 // lockedItem reports whether search lists an item for name: it lists a

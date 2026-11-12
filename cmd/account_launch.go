@@ -423,7 +423,7 @@ func settingsReserved(name string, data []byte) error {
 	if err := json.Unmarshal(data, &top); err != nil {
 		return fmt.Errorf("%s does not parse as a JSON object: it may route or authenticate this launch, so it is refused", name)
 	}
-	var found []string
+	var found, own []string
 	if raw, ok := top["env"]; ok && string(raw) != "null" {
 		var env map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &env); err != nil {
@@ -432,8 +432,16 @@ func settingsReserved(name string, data []byte) error {
 		for k := range env {
 			if account.IsReserved(k) {
 				found = append(found, k)
+			} else if manifest.IsReservedEnvKey(k) {
+				own = append(own, k)
 			}
 		}
+	}
+	// cpb's reserved keys (manifest.IsReservedEnvKey) come from no layer,
+	// and settings Claude Code applies to the session are one.
+	if len(own) > 0 {
+		sort.Strings(own)
+		return fmt.Errorf("%s sets %s in its env: a reserved key, which cannot come from settings Claude Code applies to the session; remove it", name, strings.Join(own, ", "))
 	}
 	sort.Strings(found)
 	if raw, ok := top["apiKeyHelper"]; ok && string(raw) != "null" {

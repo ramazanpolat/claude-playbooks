@@ -175,23 +175,28 @@ func fileStoreOptIn() bool {
 
 // The default helper's notices, one stderr line each, never a value: a
 // read the file store served while a keyring is installed, and a name the
-// file keeps beside the keyring. helperNotices finds them.
+// file keeps beside the keyring. splitHelperNotices finds them.
 const (
 	readFromFileNotice = " is read from the file "
 	alsoKeptNotice     = " is also kept in the file "
 )
 
-// helperNotices are the lines of a helper child's stderr that are the
-// default helper's notices, for a caller that keeps the rest (cpb ask
-// keeps claude's own stderr for a failure only).
-func helperNotices(stderr string) string {
-	var b strings.Builder
-	for _, l := range strings.Split(stderr, "\n") {
-		if strings.HasPrefix(l, manifest.CPBRefPrefix) && (strings.Contains(l, readFromFileNotice) || strings.Contains(l, alsoKeptNotice)) {
-			b.WriteString(l + "\n")
+// splitHelperNotices splits a helper child's stderr into the default
+// helper's notices and the rest, for a caller that keeps the rest: cpb ask
+// shows the notices, and reads a failure's reason from what claude itself
+// wrote.
+func splitHelperNotices(stderr string) (notices, rest string) {
+	var n, r strings.Builder
+	lines := strings.SplitAfter(stderr, "\n")
+	for _, l := range lines {
+		line := strings.TrimSuffix(l, "\n")
+		if strings.HasPrefix(line, manifest.CPBRefPrefix) && (strings.Contains(line, readFromFileNotice) || strings.Contains(line, alsoKeptNotice)) {
+			n.WriteString(line + "\n")
+		} else {
+			r.WriteString(l)
 		}
 	}
-	return b.String()
+	return n.String(), r.String()
 }
 
 // helperLockDir is the lock directory the running cpb handed the helper.
@@ -553,8 +558,12 @@ func runSecretHelper(args []string, stdin io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return syscall.Exec(path, argv, env)
+	return helperExec(path, argv, env)
 }
+
+// helperExec replaces the helper with the command in exec mode (a test
+// records it instead).
+var helperExec = syscall.Exec
 
 // secretHelperExec is exec mode's plan: the command to exec and its
 // environment with each KEY set from its reference. Errors name keys and

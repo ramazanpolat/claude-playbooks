@@ -242,21 +242,16 @@ var ReservedEnvKeys = map[string]bool{
 }
 
 // SecretHelperEnv names the secret helper for one process, over the
-// DEFAULTS setting. It is the person's own: from their shell it reaches
-// the session, so a cpb started inside it uses their helper. It is
-// reserved: declared in a playbook, a recipe or an env set, it would pick
-// the helper that every cpb inside the session hands its references to.
+// DEFAULTS setting. It is a reserved key: a layer cannot declare it, and a
+// launch passes on only what the person's own environment holds.
 const SecretHelperEnv = "CPB_SECRET_HELPER"
 
 // SecretFileStoreEnv and SecretStoreEnvPrefix are cpb's own secret-store
 // variables: the file store opt-in, read only from the environment of the
 // cpb a person runs, and the store that cpb hands its default helper
-// (CPB_SECRET_STORE_*). Both are reserved: declared in a playbook, an env
-// set, --env or --env-file, the opt-in would reach the launched program and
-// every cpb started inside it, an opt-in the person never gave on that
-// machine, and the hand-over would no longer come from cpb alone. A launch
-// drops both from every helper's and every program's environment whatever
-// declared them.
+// (CPB_SECRET_STORE_*). Both are reserved keys, and a launch drops both
+// from the environment of every helper and every launched program, so the
+// opt-in is not passed into a session.
 const (
 	SecretFileStoreEnv   = "CPB_SECRET_FILE_STORE"
 	SecretStoreEnvPrefix = "CPB_SECRET_STORE_"
@@ -271,12 +266,98 @@ func IsReservedEnvKey(key string) bool {
 // reservedKeyError says why key cannot be declared.
 func reservedKeyError(key string) error {
 	if key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix) {
-		return fmt.Errorf("%s is cpb's own secret-store setting and cannot be declared: set %s=1 in the environment of the one machine that needs it, never in a playbook", key, SecretFileStoreEnv)
+		return fmt.Errorf("%s is cpb's own secret-store setting and cannot be declared: %s, never in a playbook", key, ReservedHint(key))
 	}
 	if key == SecretHelperEnv {
-		return fmt.Errorf("%s is yours to set and cannot be declared in a playbook, a recipe or an env set: set it in your own shell, or use ALTER DEFAULTS SET secret_helper", key)
+		return fmt.Errorf("%s is yours to set and cannot be declared in a playbook, a recipe or an env set: %s", key, ReservedHint(key))
 	}
 	return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
+}
+
+// ReservedHint is where a reserved key's value belongs instead of a layer,
+// or "" for one that is cpb's alone.
+func ReservedHint(key string) string {
+	switch {
+	case key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix):
+		return "set " + SecretFileStoreEnv + "=1 in the environment of the one machine that needs it"
+	case key == SecretHelperEnv:
+		return "set it in your own shell, or use ALTER DEFAULTS SET secret_helper"
+	}
+	return ""
+}
+
+// DeclaredReserved is the first reserved key, by name, that e sets or
+// references, and which ("set" or "refs"); "" when none. A file cpb reads
+// may hold one (written by hand, or before the key was reserved): it is
+// read, so it can be shown and repaired, and a launch that would use it is
+// refused (envset.ReservedError).
+func DeclaredReserved(e *Env) (key, field string) {
+	if e == nil {
+		return "", ""
+	}
+	for _, f := range []struct {
+		name string
+		keys map[string]string
+	}{{"set", e.Set}, {"refs", e.Refs}} {
+		names := make([]string, 0, len(f.keys))
+		for k := range f.keys {
+			if IsReservedEnvKey(k) {
+				names = append(names, k)
+			}
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			return names[0], f.name
+		}
+	}
+	return "", ""
+}
+
+// WithoutReserved is keys without the reserved ones. A reserved key in a
+// block list has no effect (a launch never applies one), so a file cpb
+// reads keeps no such entry once read, and the next write drops it.
+func WithoutReserved(keys []string) []string {
+	if keys == nil {
+		return nil
+	}
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if !IsReservedEnvKey(k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// ValidateEnvName reports whether key is a well-formed variable name,
+// reserved or not. A declaration must also pass ValidateEnvKey.
+func ValidateEnvName(key string) error {
+	if !envKeyPattern.MatchString(key) {
+		return fmt.Errorf("invalid environment variable name %q", key)
+	}
+	return nil
+}
+
+// ReadableReserved reports a reserved key that an earlier release let a
+// layer declare: the secret helper and the secret-store names. A file such
+// a release wrote may hold one.
+func ReadableReserved(key string) bool {
+	return key == SecretHelperEnv || key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix)
+}
+
+// ValidateStoredEnvKey is ValidateEnvKey for a name in a file cpb reads,
+// or one a statement removes: a ReadableReserved key passes, so the file
+// can be shown and repaired (UNSET VAR, DROP PLAYBOOK), and a launch that
+// would use it is refused (DeclaredReserved). Any other reserved key is
+// refused, as before.
+func ValidateStoredEnvKey(key string) error {
+	if err := ValidateEnvName(key); err != nil {
+		return err
+	}
+	if IsReservedEnvKey(key) && !ReadableReserved(key) {
+		return reservedKeyError(key)
+	}
+	return nil
 }
 
 var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -459,6 +540,9 @@ func Read(dir string) (*Manifest, error) {
 	if err := m.validate(path); err != nil {
 		return nil, err
 	}
+	if m.Env != nil {
+		m.Env.Block = WithoutReserved(m.Env.Block)
+	}
 	return &m, nil
 }
 
@@ -558,8 +642,9 @@ func (m *Manifest) validate(path string) error {
 			}
 			seen[name] = true
 		}
+		// A name an earlier release could write is read (ValidateStoredEnvKey).
 		for key, value := range m.Env.Set {
-			if err := ValidateEnvKey(key); err != nil {
+			if err := ValidateStoredEnvKey(key); err != nil {
 				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
 			}
 			if err := ValidateEnvValue(key, value); err != nil {
@@ -567,14 +652,14 @@ func (m *Manifest) validate(path string) error {
 			}
 		}
 		for _, key := range m.Env.Block {
-			if err := ValidateEnvKey(key); err != nil {
+			if err := ValidateStoredEnvKey(key); err != nil {
 				return fmt.Errorf("invalid .playbook at %s: env.block: %w", path, err)
 			}
 			if _, both := m.Env.Set[key]; both {
 				return fmt.Errorf("invalid .playbook at %s: env: %s is both set and blocked", path, key)
 			}
 		}
-		if err := ValidateRefs(m.Env.Refs, m.Env.Set, m.Env.Block); err != nil {
+		if err := ValidateStoredRefs(m.Env.Refs, m.Env.Set, m.Env.Block); err != nil {
 			return fmt.Errorf("invalid .playbook at %s: env.refs: %w", path, err)
 		}
 	}

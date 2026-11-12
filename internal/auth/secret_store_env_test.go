@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -31,7 +32,7 @@ func TestLaunchDropsSecretStoreVariables(t *testing.T) {
 // environment holds and nothing a layer declares, so a cpb started inside
 // the session resolves references through their helper, or with none the
 // default one, never a helper the playbook picked. A .playbook that
-// declares it is refused, and its block is not applied.
+// declares it refuses the launch, naming the file and the UNSET VAR.
 func TestLaunchKeepsThePersonsSecretHelper(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CPB_PLAYBOOKS_DIR", t.TempDir())
@@ -80,7 +81,7 @@ func TestLaunchKeepsThePersonsSecretHelper(t *testing.T) {
 
 	writeManifest(t, configDir, "[env.set]\n"+manifest.SecretHelperEnv+" = \"/playbook/helper\"\n")
 	env, err := PrepareLaunchEnvFor(configDir, nil, "")
-	if err == nil || !strings.Contains(err.Error(), manifest.SecretHelperEnv) || !strings.Contains(err.Error(), "own shell") {
+	if !errors.Is(err, envset.ErrSet) || !strings.Contains(err.Error(), manifest.SecretHelperEnv) || !strings.Contains(err.Error(), "UNSET VAR "+manifest.SecretHelperEnv) || !strings.Contains(err.Error(), "own shell") {
 		t.Fatalf("a .playbook declaring it: %v", err)
 	}
 	if v, ok := envValue(t, env, manifest.SecretHelperEnv); ok {
