@@ -86,6 +86,51 @@ export CPB_INSTALL_API_BASE="http://127.0.0.1:$port"
 wait "$cpid"
 SHEOF
 chmod +x "$HOME/api.sh"''',
+  # web.sh MODE CMD...: a stand-in for github.com's releases/latest page on a
+  # free loopback port, for the length of CMD, with CPB_INSTALL_LATEST_URL
+  # pointed at it. MODE 302 redirects to .../releases/tag/v4.0.0-rc3, MODE
+  # notag redirects to .../releases (no tag), any other MODE is that status.
+  # Each request's path and Authorization header (or "-") go to ~/web.log.
+  '''cat > "$HOME/web.py" <<'PYEOF'
+import http.server, os, sys
+mode = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(os.path.expanduser("~/web.log"), "a") as f:
+            f.write(self.path + "\t" + (self.headers.get("Authorization") or "-") + "\n")
+        repo = self.path.rsplit("/releases/latest", 1)[0]
+        if mode in ("302", "notag"):
+            host, port = self.server.server_address
+            loc = "http://%s:%d%s%s" % (host, port, repo, "/releases/tag/v4.0.0-rc3" if mode == "302" else "/releases")
+            self.send_response(302)
+            self.send_header("Location", loc)
+        else:
+            self.send_response(int(mode))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    def log_message(self, *a):
+        pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(s.server_address[1], flush=True)
+s.serve_forever()
+PYEOF
+cat > "$HOME/web.sh" <<'SHEOF'
+#!/bin/sh
+mode=$1; shift
+log=$(mktemp)
+python3 -u "$HOME/web.py" "$mode" >"$log" 2>&1 &
+pid=$!
+cpid=
+trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
+trap 'exit 143' INT TERM HUP
+i=0; port=
+while [ -z "$port" ] && [ "$i" -lt 300 ]; do port=$(grep -E '^[0-9]+$' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || { kill -0 "$pid" 2>/dev/null || break; sleep 0.1; }; done
+[ -n "$port" ] || { echo "web: server did not start; its output:" >&2; cat "$log" >&2; exit 3; }
+export CPB_INSTALL_LATEST_URL="http://127.0.0.1:$port/ramazanpolat/claude-playbooks/releases/latest"
+"$@" & cpid=$!
+wait "$cpid"
+SHEOF
+chmod +x "$HOME/web.sh"''',
   # Sums fixtures, each a release whose asset is the installed binary:
   # dlcut/v4.0.0-rc3, a corrupted asset whose SHA256SUMS lists it first and
   # then LICENSE; dlconf, two different hashes for the asset (the right one
@@ -199,31 +244,49 @@ command = '''if "$HOME/serve.sh" dlbad env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_IN
 contains = "mismatch-refused"
 
 # The latest-release lookup, through this checkout's install.sh, so a change
-# to it is tested before it is published: a rate limit is named as one, any other
-# failure keeps a network message with the status, a failed transfer is no
-# answer, and a GITHUB_TOKEN authenticates only GitHub's own API, never
-# through curl's argv and never across a redirect.
+# to it is tested before it is published. First github.com's redirect, with
+# no API request and no token; GitHub's API only when that names no tag;
+# a pinned version asks neither. When both lookups fail, one message names
+# both causes and the pinned line, and nothing is installed: a rate limit
+# is named as one, any other failure keeps a network message with the
+# status, and a failed transfer is no answer. A GITHUB_TOKEN authenticates
+# only GitHub's own API, never through curl's argv and never across a
+# redirect.
 [[verify.commands]]
-# 403 and 429 are a rate limit, not the network; nothing is installed.
-command = '''for c in 403 429; do if "$HOME/api.sh" $c env CPB_INSTALL_DIR="$HOME/rl$c" sh "$WORKSPACE_DIR/install.sh" > "$HOME/rl$c.out" 2>&1; then echo "installed-on-$c"; exit 1; fi; grep -qF "GitHub rate-limited this request (HTTP $c; unauthenticated requests share your IP): set CPB_INSTALL_VERSION=<tag> to skip the lookup, or retry later." "$HOME/rl$c.out" && ! grep -q "internet connection" "$HOME/rl$c.out" && [ -z "$(ls -A "$HOME/rl$c" 2>/dev/null)" ] || { echo "wrong-$c"; cat "$HOME/rl$c.out"; exit 1; }; done; echo rate-limit-named'''
+# The redirect names the release: installed with the API answering 403,
+# which is never asked; the redirect is asked once, with no token.
+command = '''rm -f "$HOME/api.log" "$HOME/web.log"; GITHUB_TOKEN=arena-not-a-token "$HOME/serve.sh" dllic "$HOME/web.sh" 302 "$HOME/api.sh" 403 env CPB_INSTALL_DIR="$HOME/rd/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/rd.out" 2>&1 || { echo install-failed; cat "$HOME/rd.out"; exit 1; }; grep -q "Installing cpb from cpb-[a-z]*-[a-z0-9]* v4.0.0-rc3 " "$HOME/rd.out" && grep -qF "Checksum verified (sha256)." "$HOME/rd.out" && test -x "$HOME/rd/bin/cpb" && [ ! -s "$HOME/api.log" ] && [ "$(grep -c . "$HOME/web.log")" = 1 ] && grep -q "^/ramazanpolat/claude-playbooks/releases/latest	-$" "$HOME/web.log" && echo redirect-first || { echo redirect-wrong; cat "$HOME/rd.out" "$HOME/web.log" "$HOME/api.log" 2>/dev/null; exit 1; }'''
+contains = "redirect-first"
+
+[[verify.commands]]
+# A pinned version asks neither the redirect nor the API.
+command = '''rm -f "$HOME/api.log" "$HOME/web.log"; "$HOME/serve.sh" dllic "$HOME/web.sh" 302 "$HOME/api.sh" 403 env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/pin/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/pin.out" 2>&1 || { echo install-failed; cat "$HOME/pin.out"; exit 1; }; test -x "$HOME/pin/bin/cpb" && [ ! -s "$HOME/api.log" ] && [ ! -s "$HOME/web.log" ] && ! grep -q "Fetching latest release" "$HOME/pin.out" && echo pinned-asks-nothing || { echo pinned-asked; cat "$HOME/pin.out" "$HOME/web.log" "$HOME/api.log" 2>/dev/null; exit 1; }'''
+contains = "pinned-asks-nothing"
+
+[[verify.commands]]
+# No tag from the redirect (an error, or a redirect that names no tag) and
+# a rate limit from the API: one message with both causes and the pinned
+# line, not the network; nothing is installed.
+command = '''for w in 404 notag; do for c in 403 429; do if "$HOME/web.sh" $w "$HOME/api.sh" $c env CPB_INSTALL_DIR="$HOME/rl$w$c" sh "$WORKSPACE_DIR/install.sh" > "$HOME/rl$w$c.out" 2>&1; then echo "installed-on-$w-$c"; exit 1; fi; grep -q "^Error: could not find the latest release: http://127.0.0.1:[0-9]*/ramazanpolat/claude-playbooks/releases/latest" "$HOME/rl$w$c.out" && grep -qF "GitHub's API rate-limited the lookup (HTTP $c; unauthenticated requests share your IP)" "$HOME/rl$w$c.out" && grep -qF "Nothing was installed." "$HOME/rl$w$c.out" && grep -qF "| CPB_INSTALL_VERSION=<tag> sh" "$HOME/rl$w$c.out" && ! grep -q "internet connection" "$HOME/rl$w$c.out" && [ -z "$(ls -A "$HOME/rl$w$c" 2>/dev/null)" ] || { echo "wrong-$w-$c"; cat "$HOME/rl$w$c.out"; exit 1; }; done; done; echo rate-limit-named'''
 contains = "rate-limit-named"
 
 [[verify.commands]]
-# The lookup is asked once: a rate limit is reported, never retried.
-command = '''for c in 403 429; do rm -f "$HOME/api.log"; "$HOME/api.sh" $c env CPB_INSTALL_DIR="$HOME/rlonce$c" sh "$WORKSPACE_DIR/install.sh" > /dev/null 2>&1; n=$(grep -c . "$HOME/api.log"); [ "$n" = 1 ] || { echo "asked-$n-times-on-$c"; exit 1; }; done; echo rate-limit-asked-once'''
+# The API is asked once: a rate limit is reported, never retried.
+command = '''for c in 403 429; do rm -f "$HOME/api.log"; "$HOME/web.sh" 404 "$HOME/api.sh" $c env CPB_INSTALL_DIR="$HOME/rlonce$c" sh "$WORKSPACE_DIR/install.sh" > /dev/null 2>&1; n=$(grep -c . "$HOME/api.log"); [ "$n" = 1 ] || { echo "asked-$n-times-on-$c"; exit 1; }; done; echo rate-limit-asked-once'''
 contains = "rate-limit-asked-once"
 
 [[verify.commands]]
 # Another status keeps a network message, with the status. No answer at
 # all says so after curl's own reason, and so does a 200 cut short, whose
 # partial body names a tag: nothing is installed.
-command = '''if "$HOME/api.sh" 500 env CPB_INSTALL_DIR="$HOME/e500" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e500.out" 2>&1; then echo installed-on-500; exit 1; fi; grep -q "could not determine the latest release (HTTP 500 from http://127.0.0.1:[0-9]*). Check your internet connection" "$HOME/e500.out" || { echo wrong-500; cat "$HOME/e500.out"; exit 1; }; if CPB_INSTALL_API_BASE=http://127.0.0.1:9 CPB_INSTALL_DIR="$HOME/e000" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e000.out" 2>&1; then echo installed-unreachable; exit 1; fi; grep -qF "could not get an answer from http://127.0.0.1:9 to find the latest release" "$HOME/e000.out" && grep -q "^curl: (" "$HOME/e000.out" || { echo wrong-000; cat "$HOME/e000.out"; exit 1; }; if "$HOME/api.sh" partial env CPB_INSTALL_DIR="$HOME/ecut" sh "$WORKSPACE_DIR/install.sh" > "$HOME/ecut.out" 2>&1; then echo installed-on-a-cut-transfer; exit 1; fi; grep -q "could not get an answer from http://127.0.0.1:[0-9]*" "$HOME/ecut.out" && ! grep -q "Installing cpb" "$HOME/ecut.out" && [ -z "$(ls -A "$HOME/ecut" 2>/dev/null)" ] && echo network-named || { echo wrong-cut; cat "$HOME/ecut.out"; exit 1; }'''
+command = '''if "$HOME/web.sh" 404 "$HOME/api.sh" 500 env CPB_INSTALL_DIR="$HOME/e500" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e500.out" 2>&1; then echo installed-on-500; exit 1; fi; grep -q "and HTTP 500 from http://127.0.0.1:[0-9]*. Check your internet connection" "$HOME/e500.out" || { echo wrong-500; cat "$HOME/e500.out"; exit 1; }; if CPB_INSTALL_LATEST_URL=http://127.0.0.1:9/r/releases/latest CPB_INSTALL_API_BASE=http://127.0.0.1:9 CPB_INSTALL_DIR="$HOME/e000" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e000.out" 2>&1; then echo installed-unreachable; exit 1; fi; grep -qF "no answer from http://127.0.0.1:9/r/releases/latest, and no answer from http://127.0.0.1:9 either" "$HOME/e000.out" && grep -q "^curl: (" "$HOME/e000.out" || { echo wrong-000; cat "$HOME/e000.out"; exit 1; }; if "$HOME/web.sh" 404 "$HOME/api.sh" partial env CPB_INSTALL_DIR="$HOME/ecut" sh "$WORKSPACE_DIR/install.sh" > "$HOME/ecut.out" 2>&1; then echo installed-on-a-cut-transfer; exit 1; fi; grep -q "no answer from http://127.0.0.1:[0-9]* either" "$HOME/ecut.out" && ! grep -q "Installing cpb" "$HOME/ecut.out" && [ -z "$(ls -A "$HOME/ecut" 2>/dev/null)" ] && echo network-named || { echo wrong-cut; cat "$HOME/ecut.out"; exit 1; }'''
 contains = "network-named"
 
 [[verify.commands]]
-# A 200 answer's tag is the one installed (the download is the loopback
-# release whose asset does not match its sums, so it stops there).
-command = '''if "$HOME/serve.sh" dlbad "$HOME/api.sh" 200 env CPB_INSTALL_DIR="$HOME/ok200" sh "$WORKSPACE_DIR/install.sh" > "$HOME/ok200.out" 2>&1; then echo installed-a-mismatch; exit 1; fi; grep -q "Installing cpb from cpb-[a-z]*-[a-z0-9]* v4.0.0-rc3 " "$HOME/ok200.out" && grep -q "checksum mismatch for cpb-" "$HOME/ok200.out" && echo tag-from-api || { cat "$HOME/ok200.out"; exit 1; }'''
+# When the redirect names no tag, a 200 answer's tag from the API is the one
+# installed (the download is the loopback release whose asset does not
+# match its sums, so it stops there).
+command = '''for w in 404 notag; do if "$HOME/serve.sh" dlbad "$HOME/web.sh" $w "$HOME/api.sh" 200 env CPB_INSTALL_DIR="$HOME/ok$w" sh "$WORKSPACE_DIR/install.sh" > "$HOME/ok$w.out" 2>&1; then echo installed-a-mismatch; exit 1; fi; grep -q "Installing cpb from cpb-[a-z]*-[a-z0-9]* v4.0.0-rc3 " "$HOME/ok$w.out" && grep -q "checksum mismatch for cpb-" "$HOME/ok$w.out" || { cat "$HOME/ok$w.out"; exit 1; }; done; echo tag-from-api'''
 contains = "tag-from-api"
 
 [[verify.commands]]
@@ -232,7 +295,7 @@ contains = "tag-from-api"
 # redirect followed; that exact line, replayed into the real curl, sends
 # the header. A value with characters a token does not have is not sent,
 # and is never printed.
-command = '''rm -f "$HOME/api.log"; GITHUB_TOKEN=arena-not-a-token "$HOME/api.sh" 403 env CPB_INSTALL_DIR="$HOME/tk" sh "$WORKSPACE_DIR/install.sh" > /dev/null 2>&1; grep -q "^/repos/.*/releases/latest	-$" "$HOME/api.log" && ! grep -q arena-not-a-token "$HOME/api.log" || { echo token-sent-elsewhere; cat "$HOME/api.log"; exit 1; }; GITHUB_TOKEN=arena-not-a-token PATH="$HOME/stubcurl:$PATH" CPB_INSTALL_DIR="$HOME/tk2" sh "$WORKSPACE_DIR/install.sh" > "$HOME/tk2.out" 2>&1 < /dev/null; ! grep -q arena-not-a-token "$HOME/curl.args" && ! grep -q '^-[A-Za-z]*L' "$HOME/curl.args" && grep -qx 'header = "Authorization: Bearer arena-not-a-token"' "$HOME/curl.stdin" && grep -qx "https://api.github.com/repos/ramazanpolat/claude-playbooks/releases/latest" "$HOME/curl.args" && ! grep -q arena-not-a-token "$HOME/tk2.out" || { echo token-wrong; cat "$HOME/curl.args" "$HOME/tk2.out"; exit 1; }; rm -f "$HOME/api.log"; "$HOME/api.sh" 200 sh -c 'curl -sS -K - -o /dev/null "$CPB_INSTALL_API_BASE/x" < "$HOME/curl.stdin"'; grep -q "	Bearer arena-not-a-token$" "$HOME/api.log" || { echo config-line-not-sent; cat "$HOME/api.log"; exit 1; }; GITHUB_TOKEN='arena"bad' PATH="$HOME/stubcurl:$PATH" CPB_INSTALL_DIR="$HOME/tk3" sh "$WORKSPACE_DIR/install.sh" > "$HOME/tk3.out" 2>&1 < /dev/null; grep -q "Note: GITHUB_TOKEN has characters a GitHub token does not; the lookup runs without it." "$HOME/tk3.out" && ! grep -q 'arena"bad' "$HOME/tk3.out" "$HOME/curl.args" "$HOME/curl.stdin" && echo token-on-stdin || { echo bad-token-wrong; cat "$HOME/tk3.out"; exit 1; }'''
+command = '''rm -f "$HOME/api.log"; GITHUB_TOKEN=arena-not-a-token "$HOME/web.sh" 404 "$HOME/api.sh" 403 env CPB_INSTALL_DIR="$HOME/tk" sh "$WORKSPACE_DIR/install.sh" > /dev/null 2>&1; grep -q "^/repos/.*/releases/latest	-$" "$HOME/api.log" && ! grep -q arena-not-a-token "$HOME/api.log" "$HOME/web.log" || { echo token-sent-elsewhere; cat "$HOME/api.log" "$HOME/web.log"; exit 1; }; GITHUB_TOKEN=arena-not-a-token PATH="$HOME/stubcurl:$PATH" CPB_INSTALL_DIR="$HOME/tk2" sh "$WORKSPACE_DIR/install.sh" > "$HOME/tk2.out" 2>&1 < /dev/null; ! grep -q arena-not-a-token "$HOME/curl.args" && ! grep -q '^-[A-Za-z]*L' "$HOME/curl.args" && grep -qx 'header = "Authorization: Bearer arena-not-a-token"' "$HOME/curl.stdin" && grep -qx "https://api.github.com/repos/ramazanpolat/claude-playbooks/releases/latest" "$HOME/curl.args" && ! grep -q arena-not-a-token "$HOME/tk2.out" || { echo token-wrong; cat "$HOME/curl.args" "$HOME/tk2.out"; exit 1; }; rm -f "$HOME/api.log"; "$HOME/api.sh" 200 sh -c 'curl -sS -K - -o /dev/null "$CPB_INSTALL_API_BASE/x" < "$HOME/curl.stdin"'; grep -q "	Bearer arena-not-a-token$" "$HOME/api.log" || { echo config-line-not-sent; cat "$HOME/api.log"; exit 1; }; GITHUB_TOKEN='arena"bad' PATH="$HOME/stubcurl:$PATH" CPB_INSTALL_DIR="$HOME/tk3" sh "$WORKSPACE_DIR/install.sh" > "$HOME/tk3.out" 2>&1 < /dev/null; grep -q "Note: GITHUB_TOKEN has characters a GitHub token does not; the lookup runs without it." "$HOME/tk3.out" && ! grep -q 'arena"bad' "$HOME/tk3.out" "$HOME/curl.args" "$HOME/curl.stdin" && echo token-on-stdin || { echo bad-token-wrong; cat "$HOME/tk3.out"; exit 1; }'''
 contains = "token-on-stdin"
 
 [[verify.commands]]

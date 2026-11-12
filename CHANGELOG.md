@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Installing and updating behind a shared address.** `install.sh` and
+  `cpb self-update` find the newest release from github.com's latest-release
+  redirect, read and not followed, instead of GitHub's API, whose limit for
+  unauthenticated callers is per IP and runs out behind an office network, a
+  company VPN or a CI fleet (HTTP 403). The API is asked only when the
+  redirect does not answer, or, for `self-update`, when Latest is of another
+  major version than the running one. When every lookup fails, nothing is
+  installed and one message names each cause and the line that needs no
+  lookup: `CPB_INSTALL_VERSION=<tag>` for the script, and the new
+  `CPB_UPDATE_VERSION=<tag> cpb self-update`. A token is never sent to the
+  redirect. The release workflow now marks Latest only the highest release
+  (it was GitHub's `legacy` rule), so a hotfix to an older version never
+  becomes the release both read.
+
 ### Added
 
 - **A default secret helper for `cpb:<name>` references.** With no secret

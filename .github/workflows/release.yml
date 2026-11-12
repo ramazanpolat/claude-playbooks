@@ -157,21 +157,58 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # One release job at a time across tag runs: each decides Latest from
+    # the releases already published, so two tags pushed together never
+    # both decide from a list that holds neither. A third tag run arriving
+    # while one waits cancels the waiting one (GitHub keeps one pending job
+    # per group); re-run that one.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     steps:
+      # For release-refs.sh, which decides Latest. Nothing here pushes, so
+      # the checkout keeps no credentials.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
 
+      # Latest is the highest release, never merely the newest by date: a
+      # hotfix to an older major or minor published later stays off it.
+      # install.sh and cpb self-update read Latest from github.com's
+      # redirect, without GitHub's API, and rely on that. A tag with a
+      # suffix (a release candidate) is never Latest.
+      # The rule lives in .github/scripts/release-refs.sh (latest), tested by
+      # release-refs_test.sh in CI. The whole list is written to a file
+      # before it is read, so the lookup never depends on how the reader
+      # consumes it; a failed list stops the job before anything is
+      # published (bash -e), never guessing true.
+      - name: Is this the highest release?
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          list="$RUNNER_TEMP/releases.txt"
+          gh api "repos/$REPO/releases?per_page=100" --paginate --jq '.[] | select(.draft | not) | select(.prerelease | not) | .tag_name' > "$list"
+          make=$(sh .github/scripts/release-refs.sh latest "$TAG" < "$list")
+          echo "make=$make" >> "$GITHUB_OUTPUT"
+          echo "$TAG becomes Latest: $make"
+
       # A release candidate (vX.Y.Z-rcN) is a pre-release and never the
       # Latest release. Run phase 2 on its commit before the tag
       # (`gentar/mirror.sh dispatch <sha>`), or the first run of this
       # workflow on it stops at arena-gate; then re-run it once arena/phase2
-      # is success, and it publishes. A final release keeps GitHub's default.
+      # is success, and it publishes.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-rc') }}
-          make_latest: ${{ contains(github.ref_name, '-rc') && 'false' || 'legacy' }}
+          make_latest: ${{ steps.latest.outputs.make }}
