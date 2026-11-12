@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -561,6 +562,33 @@ func TestAncestorMessagesAndPrivateGroup(t *testing.T) {
 	} {
 		if got := privateGroupIn(group, passwd, c.uid); got != c.want {
 			t.Errorf("%s: %d, want %d", c.who, got, c.want)
+		}
+	}
+}
+
+// $USER never names the user: the account is the one /etc/passwd gives
+// this process's uid, whatever USER says, and with no such account there
+// is no private group even when USER names an account that has one.
+func TestPrivateGroupIgnoresUSER(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, s string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	uid := os.Getuid()
+	group := write("group", "me:x:7001:\nother:x:7002:\n")
+	none := write("passwd-none", fmt.Sprintf("other:x:%d:7002::/home/other:/bin/sh\n", uid+1))
+	mine := write("passwd-mine", fmt.Sprintf("me:x:%d:7001::/home/me:/bin/sh\nother:x:%d:7002::/home/other:/bin/sh\n", uid, uid+1))
+	for _, user := range []string{"", "other", "me"} {
+		t.Setenv("USER", user)
+		if got := privateGroupFrom(none, group); got != -1 {
+			t.Errorf("no account for this uid, USER=%q: %d, want -1", user, got)
+		}
+		if got := privateGroupFrom(mine, group); got != 7001 {
+			t.Errorf("this uid's account, USER=%q: %d, want 7001", user, got)
 		}
 	}
 }

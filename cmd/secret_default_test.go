@@ -778,4 +778,15 @@ func TestPlaybookCannotDeclareSecretStoreVariables(t *testing.T) {
 			t.Errorf("%s: %v", line, err)
 		}
 	}
+	// The secret helper is the person's own, from their shell or DEFAULTS.
+	for _, line := range []string{
+		"ALTER PLAYBOOK p SET VAR " + envset.SecretHelperEnv + "='/usr/local/bin/h' AS PLAINTEXT",
+		"ALTER PLAYBOOK p SET VAR " + envset.SecretHelperEnv + " FROM 'keychain:h'",
+		"ALTER PLAYBOOK p BLOCK VAR " + envset.SecretHelperEnv,
+		"CREATE ENV e SET " + envset.SecretHelperEnv + "='/usr/local/bin/h' AS PLAINTEXT",
+	} {
+		if err := stmtErr(t, line); err == nil || !strings.Contains(err.Error(), "own shell") {
+			t.Errorf("%s: %v", line, err)
+		}
+	}
 }

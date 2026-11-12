@@ -238,7 +238,15 @@ var ReservedEnvKeys = map[string]bool{
 	"CLAUDE_CONFIG_DIR":         true,
 	config.ConfigDirOverrideEnv: true,
 	SecretFileStoreEnv:          true,
+	SecretHelperEnv:             true,
 }
+
+// SecretHelperEnv names the secret helper for one process, over the
+// DEFAULTS setting. It is the person's own: from their shell it reaches
+// the session, so a cpb started inside it uses their helper. It is
+// reserved: declared in a playbook, a recipe or an env set, it would pick
+// the helper that every cpb inside the session hands its references to.
+const SecretHelperEnv = "CPB_SECRET_HELPER"
 
 // SecretFileStoreEnv and SecretStoreEnvPrefix are cpb's own secret-store
 // variables: the file store opt-in, read only from the environment of the
@@ -264,6 +272,9 @@ func IsReservedEnvKey(key string) bool {
 func reservedKeyError(key string) error {
 	if key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix) {
 		return fmt.Errorf("%s is cpb's own secret-store setting and cannot be declared: set %s=1 in the environment of the one machine that needs it, never in a playbook", key, SecretFileStoreEnv)
+	}
+	if key == SecretHelperEnv {
+		return fmt.Errorf("%s is yours to set and cannot be declared in a playbook, a recipe or an env set: set it in your own shell, or use ALTER DEFAULTS SET secret_helper", key)
 	}
 	return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
 }

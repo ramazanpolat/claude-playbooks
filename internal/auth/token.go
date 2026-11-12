@@ -117,18 +117,21 @@ func suppliesToken(menv *manifest.Env) bool {
 // replace any inherited value, unset entries are dropped. The token variable
 // is excluded from BOTH directions here because resolveToken has already
 // folded it into the token decision and PrepareLaunchEnv places it itself.
+// A reserved key is never applied, in either direction, whatever put it in
+// the block: what the environment holds for it stays (CPB_SECRET_HELPER,
+// the person's own), and bindOwnEnv decides the rest.
 func applyManifestEnv(environ []string, menv *manifest.Env) []string {
 	if menv.Empty() {
 		return environ
 	}
 	keys := make([]string, 0, len(menv.Set)+len(menv.Block))
 	for key := range menv.Set {
-		if key != OAuthTokenEnv {
+		if key != OAuthTokenEnv && !manifest.IsReservedEnvKey(key) {
 			keys = append(keys, key)
 		}
 	}
 	for _, key := range menv.Block {
-		if key != OAuthTokenEnv {
+		if key != OAuthTokenEnv && !manifest.IsReservedEnvKey(key) {
 			keys = append(keys, key)
 		}
 	}

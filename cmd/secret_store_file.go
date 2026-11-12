@@ -128,17 +128,21 @@ func ownedPrivate(path string, st *unix.Stat_t, dir bool) error {
 // in. -1 when there is none, or it cannot be told from /etc/passwd and
 // /etc/group (an account or a group kept only in a directory service such
 // as LDAP reads as shared). A test replaces it.
-var privateGroup = sync.OnceValue(func() int {
-	passwd, err := os.ReadFile("/etc/passwd")
+var privateGroup = sync.OnceValue(func() int { return privateGroupFrom("/etc/passwd", "/etc/group") })
+
+// privateGroupFrom is privateGroup read from these files, for this
+// process's uid. Nothing in the environment, such as $USER, takes part.
+func privateGroupFrom(passwdPath, groupPath string) int {
+	passwd, err := os.ReadFile(passwdPath)
 	if err != nil {
 		return -1
 	}
-	group, err := os.ReadFile("/etc/group")
+	group, err := os.ReadFile(groupPath)
 	if err != nil {
 		return -1
 	}
 	return privateGroupIn(group, passwd, os.Getuid())
-})
+}
 
 // privateGroupIn is the user's private group: the primary group of uid's
 // account in passwdFile, named as that account, with no member listed in

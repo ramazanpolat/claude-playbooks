@@ -52,7 +52,12 @@
   launch sets; a helper process that cpb did not start takes no opt-in
   from its own environment. A configured secret helper that is cpb's own
   binary is refused, at `ALTER DEFAULTS SET`, at checks and at launch, with
-  a line to unset it so the default helper is used. `cpb ask` shows the
+  a line to unset it so the default helper is used. `CPB_SECRET_HELPER` is
+  yours alone: a playbook, a recipe, an env set, `--env` or `--env-file`
+  that declares it is refused (a `.playbook` that already does no longer
+  loads, and the error names the file), and a cpb started inside a session
+  uses the helper from your own shell, or with none the default one.
+  `cpb ask` shows the
   line saying a token was read from the file, and `cpb play --dry-run`'s
   line on where a value would be kept comes from the same check as its
   report. When a keyring
