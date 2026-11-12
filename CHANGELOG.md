@@ -75,7 +75,12 @@
   reads: in a block list it has no effect; as a value or a reference it
   refuses a launch that would use it, naming the file and the `UNSET` that
   removes it. A cpb started inside a session runs in that session's
-  environment, so store secrets from your own shell.
+  environment, so store secrets from your own shell. A settings file whose
+  `env` sets any reserved key (these names, `CLAUDE_CONFIG_DIR`,
+  `CPB_CONFIG_DIR`) now refuses the launch: the playbook's `settings.json`,
+  the working folder's `.claude/settings.json` and `settings.local.json`,
+  and `--settings`. The fix is one line: remove that key from the file's
+  `env`.
   `cpb ask` shows the
   line saying a token was read from the file, and `cpb play --dry-run`'s
   line on where a value would be kept comes from the same check as its
