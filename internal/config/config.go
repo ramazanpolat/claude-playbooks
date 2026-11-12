@@ -151,11 +151,16 @@ func WithoutConfigDirOverride(env []string) []string {
 	return out
 }
 
+// PlaybooksDirEnv names the registry for one process, over the default
+// ~/.claude-playbooks. A reserved key: only the person's own environment
+// sets it, never a layer (manifest.ReservedEnvKeys).
+const PlaybooksDirEnv = "CPB_PLAYBOOKS_DIR"
+
 func ResolvePlaybooksDir() string {
 	if PlaybooksDir != "" {
 		return PlaybooksDir
 	}
-	if v := os.Getenv("CPB_PLAYBOOKS_DIR"); v != "" {
+	if v := os.Getenv(PlaybooksDirEnv); v != "" {
 		return v
 	}
 	home, _ := os.UserHomeDir()

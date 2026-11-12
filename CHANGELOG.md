@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`CPB_PLAYBOOKS_DIR` is a reserved key.** A playbook, a recipe, an env
+  set, `--env`, `--env-file` or a settings file's `env` that declares it is
+  refused: set it in your own shell. What your own environment holds still
+  reaches a session, so a cpb started inside it uses your registry. A
+  `.playbook` or env set that already sets it still reads and refuses a
+  launch, naming the file and the fix (`cpb ALTER PLAYBOOK <name> UNSET VAR
+  CPB_PLAYBOOKS_DIR`, or `cpb ALTER ENV <name> UNSET CPB_PLAYBOOKS_DIR`); in
+  a block list it has no effect.
+
 ### Fixed
 
 - **Installing and updating behind a shared address.** `install.sh` and

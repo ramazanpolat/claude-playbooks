@@ -90,18 +90,41 @@ func (e *ResolveError) Is(target error) bool { return target == ErrSet }
 // launch that would use it is refused, naming the file and the statement
 // that removes the key.
 type ReservedError struct {
-	File  string // the .playbook or env set file
-	Key   string
-	Field string // where in the file: env.set, env.refs, set or refs
-	Fix   string // the statement that removes it
+	File   string // the .playbook or env set file
+	Prefix string // its table's prefix for a field: "env." in a .playbook, "" in an env set
+	Found  []manifest.Declared
+	Fix    string // what removes them all
 }
 
 func (e *ReservedError) Error() string {
-	msg := fmt.Sprintf("%s: %s is in %s, and a reserved key cannot come from a playbook or an env set; nothing was launched. Remove it with: %s", e.File, e.Key, e.Field, e.Fix)
-	if hint := manifest.ReservedHint(e.Key); hint != "" {
-		msg += " (and " + hint + ")"
+	where := make([]string, 0, len(e.Found))
+	var hints []string
+	seen := map[string]bool{}
+	for _, d := range e.Found {
+		where = append(where, d.Key+" is in "+e.Prefix+d.Field)
+		if h := manifest.ReservedHint(d.Key); h != "" && !seen[h] {
+			seen[h] = true
+			hints = append(hints, h)
+		}
+	}
+	what, them := "a reserved key", "it"
+	if len(e.Found) > 1 {
+		what, them = "reserved keys", "them"
+	}
+	msg := fmt.Sprintf("%s: %s, and %s cannot come from a playbook or an env set; nothing was launched. Remove %s with: %s", e.File, strings.Join(where, ", "), what, them, e.Fix)
+	if len(hints) > 0 {
+		msg += " (and " + strings.Join(hints, "; ") + ")"
 	}
 	return msg
+}
+
+// Keys is the reserved keys found, in order.
+func (e *ReservedError) Keys() []string {
+	out := make([]string, 0, len(e.Found))
+	for _, d := range e.Found {
+		out = append(out, d.Key)
+	}
+	return out
 }
 
 func (e *ReservedError) Is(target error) bool { return target == ErrSet }
@@ -402,8 +425,10 @@ func Expand(dir string, e *manifest.Env) (*manifest.Env, error) {
 		if p == nil {
 			return nil, &MissingError{Name: name, Dir: dir}
 		}
-		if key, field := manifest.DeclaredReserved(p.Env()); key != "" {
-			return nil, &ReservedError{File: path(dir, name), Key: key, Field: field, Fix: "cpb ALTER ENV " + name + " UNSET " + key}
+		if found := manifest.DeclaredReservedAll(p.Env()); len(found) > 0 {
+			r := &ReservedError{File: path(dir, name), Found: found}
+			r.Fix = "cpb ALTER ENV " + name + " UNSET " + strings.Join(r.Keys(), " ")
+			return nil, r
 		}
 		layers = append(layers, p.Env())
 	}

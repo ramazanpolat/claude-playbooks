@@ -293,6 +293,12 @@ func (r Report) NeedsAttention() string {
 // any file content: the TOML parser quotes the offending text, which in a
 // profile may be a credential value.
 func sanitizeProfileError(err error) string {
+	// A reserved key in a playbook or an env set: the message names the
+	// file, the key and the fix, and never a value.
+	var reserved *envset.ReservedError
+	if errors.As(err, &reserved) {
+		return reserved.Error()
+	}
 	var missing *envset.MissingError
 	if errors.As(err, &missing) {
 		return missing.Error() // names the profile and the directory only

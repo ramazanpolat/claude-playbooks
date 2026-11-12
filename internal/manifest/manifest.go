@@ -239,6 +239,7 @@ var ReservedEnvKeys = map[string]bool{
 	config.ConfigDirOverrideEnv: true,
 	SecretFileStoreEnv:          true,
 	SecretHelperEnv:             true,
+	config.PlaybooksDirEnv:      true,
 }
 
 // SecretHelperEnv names the secret helper for one process, over the
@@ -268,7 +269,7 @@ func reservedKeyError(key string) error {
 	if key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix) {
 		return fmt.Errorf("%s is cpb's own secret-store setting and cannot be declared: %s, never in a playbook", key, ReservedHint(key))
 	}
-	if key == SecretHelperEnv {
+	if key == SecretHelperEnv || key == config.PlaybooksDirEnv {
 		return fmt.Errorf("%s is yours to set and cannot be declared in a playbook, a recipe or an env set: %s", key, ReservedHint(key))
 	}
 	return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
@@ -282,6 +283,8 @@ func ReservedHint(key string) string {
 		return "set " + SecretFileStoreEnv + "=1 in the environment of the one machine that needs it"
 	case key == SecretHelperEnv:
 		return "set it in your own shell, or use ALTER DEFAULTS SET secret_helper"
+	case key == config.PlaybooksDirEnv:
+		return "set it in your own shell"
 	}
 	return ""
 }
@@ -292,9 +295,25 @@ func ReservedHint(key string) string {
 // read, so it can be shown and repaired, and a launch that would use it is
 // refused (envset.ReservedError).
 func DeclaredReserved(e *Env) (key, field string) {
-	if e == nil {
-		return "", ""
+	if all := DeclaredReservedAll(e); len(all) > 0 {
+		return all[0].Key, all[0].Field
 	}
+	return "", ""
+}
+
+// Declared is a reserved key a layer sets or references, and which.
+type Declared struct {
+	Key   string
+	Field string // "set" or "refs"
+}
+
+// DeclaredReservedAll is every reserved key e sets or references: those it
+// sets first, then those it references, each by name.
+func DeclaredReservedAll(e *Env) []Declared {
+	if e == nil {
+		return nil
+	}
+	var out []Declared
 	for _, f := range []struct {
 		name string
 		keys map[string]string
@@ -305,12 +324,12 @@ func DeclaredReserved(e *Env) (key, field string) {
 				names = append(names, k)
 			}
 		}
-		if len(names) > 0 {
-			sort.Strings(names)
-			return names[0], f.name
+		sort.Strings(names)
+		for _, k := range names {
+			out = append(out, Declared{Key: k, Field: f.name})
 		}
 	}
-	return "", ""
+	return out
 }
 
 // WithoutReserved is keys without the reserved ones. A reserved key in a
@@ -339,10 +358,10 @@ func ValidateEnvName(key string) error {
 }
 
 // ReadableReserved reports a reserved key that an earlier release let a
-// layer declare: the secret helper and the secret-store names. A file such
-// a release wrote may hold one.
+// layer declare: the secret helper, the secret-store names and the
+// registry. A file such a release wrote may hold one.
 func ReadableReserved(key string) bool {
-	return key == SecretHelperEnv || key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix)
+	return key == SecretHelperEnv || key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix) || key == config.PlaybooksDirEnv
 }
 
 // ValidateStoredEnvKey is ValidateEnvKey for a name in a file cpb reads,
