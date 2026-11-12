@@ -18,7 +18,10 @@ review    claude-home  30641  ttys012  interactive  limit 7d  39m  35m     claud
   launched: cpb keeps a record of each launch while it runs, since Claude
   Code's own file does not say. `-` for a session started some other way.
 - **STATUS** reads `limit 5h` or `limit 7d` while the session is stopped at
-  a usage limit (from its transcript), until the limit resets.
+  a usage limit (from its transcript), until the limit resets. Only a
+  session whose own request was refused is marked: one that has not sent
+  anything since its account hit the limit shows its usual status, even if
+  its screen already shows the limit.
 
 - `--json` gives every field, `resume` included: the exact command that
   resumes that session.

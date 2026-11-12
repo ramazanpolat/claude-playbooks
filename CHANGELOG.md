@@ -35,7 +35,10 @@
 - **`SHOW SESSIONS` shows who is stopped at a usage limit.** While a
   session's transcript ends at Claude Code's limit error and the limit has
   not reset, `STATUS` reads `limit 5h` or `limit 7d` and `--json` has
-  `at_limit` (`window`, `resets_at`). No status line is needed.
+  `at_limit` (`window`, `resets_at`). No status line is needed. Only a
+  session whose own request was refused is marked: one that has not sent
+  anything since its account hit the limit is not, since Claude Code writes
+  nothing in its transcript then.
 - **`SELECT … FROM SESSIONS`** has the two new columns, `account` and
   `at_limit`, after `tty`; the TUI's Sessions view and a playbook's
   Sessions tab show both.
