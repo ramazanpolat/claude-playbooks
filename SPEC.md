@@ -4229,14 +4229,16 @@ cpb self-update --major    # allow a new major version (read its release notes f
 cpb self-update --force    # reinstall even if already on the newest
 ```
 
-**Which release.** It reads the repository's release list from the GitHub API (`/repos/<repo>/releases?per_page=100`, following the `Link` header's `rel="next"`, at most 10 pages), never `/releases/latest`, which names a single release that may be of a higher major version.
+**Which release.** With `CPB_UPDATE_VERSION=<tag>` set, that release, and nothing is looked up (it must be a release tag; `--major` for another major; never a downgrade). Otherwise it asks as little as it can:
+1. **github.com's redirect first.** `https://github.com/<repo>/releases/latest` redirects to `.../releases/tag/<tag>`, read and not followed, with no token; it is not under the GitHub API's per-IP limit, which a shared address (an office, a company VPN, a CI fleet) exhausts. The release workflow marks Latest only the highest release, so that tag is the newest of all. It is the one chosen when it is in the running version's major, or with `--major`, or when the running build has no major: then GitHub's API is not asked.
+2. **Otherwise the release list** from the GitHub API (`/repos/<repo>/releases?per_page=100`, following the `Link` header's `rel="next"`, at most 10 pages): when Latest is of another major (the newest of the running major may be older), or when the redirect names no release.
 - **Only releases count:** a release that is a draft or a pre-release is skipped, and so is any tag that is not exactly `vMAJOR.MINOR.PATCH` (`v4.0.0-rc1` is never installed, flagged or not).
 - **By number, not by date:** the highest release in the running version's major is installed. A hotfix to an older major published after a newer one is still found.
 - **The running version's major** comes from its own version, `vMAJOR.MINOR.PATCH` with an optional pre-release suffix: `v4.0.0-rc2` is major 4, and moves to `v4.0.0` once that is released.
 - **A higher major** is named in one line, and nothing more happens: ``v5.0.0 is available, a new major version: run `cpb self-update --major` (read its release notes first)``. `--major` installs the highest release of any major.
 - **Never a downgrade:** a running version newer than every release of its major (a build of an unreleased version) stays, `--force` included.
 - **A build that is not a release** (version `dev`) has no major version. It refuses without `--major`, saying so; `--check` says so and installs nothing.
-- **Fails closed:** if the list cannot be fetched or read (a rate limit, the network, malformed JSON, a `next` link outside the API base, more than 10 pages), it says why, exits non-zero and installs nothing. There is no fallback to `/releases/latest`.
+- **Fails closed:** if the list is needed and cannot be fetched or read (a rate limit, the network, malformed JSON, a `next` link outside the API base, more than 10 pages), it says why, exits non-zero and installs nothing. The message names each cause (the API's 403 or 429 as a rate limit, `unauthenticated requests share your IP`), the releases page, and the line that needs no lookup, `CPB_UPDATE_VERSION=<tag> cpb self-update`; when Latest is a new major it also names `cpb self-update --major` for it.
 
 It then downloads the asset for the running OS/architecture (`cpb-<goos>-<goarch>`), checks it against the release's `SHA256SUMS`, verifies it by running `--version` against the downloaded file, and atomically replaces the current executable (it stages a temp file in the executable's own directory and `rename`s it into place, so the swap is atomic and never a partial write). Symlinks are resolved first, so a `cpb` reached through a link (a package manager's, say) updates the real binary and leaves the link intact.
 
@@ -4506,8 +4508,9 @@ These have no flag equivalent:
 | `CPB_CLICKHOUSE` | The `clickhouse` binary `SELECT` pipes a query to, instead of `clickhouse` or `ch` on `PATH` (see *SELECT*). |
 | `XDG_STATE_HOME` | Parent of the launcher receipt directory (`<XDG_STATE_HOME>/cpb/launchers`). Default `~/.local/state`. |
 | `CPB_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam. |
-| `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `self-update` makes, and on `install.sh`'s latest-release lookup, raising the anonymous rate limit. Only to GitHub's own API: never to an overridden API base. |
-| `CPB_UPDATE_REPO`, `CPB_UPDATE_API_BASE`, `CPB_UPDATE_DOWNLOAD_BASE` | Redirect self-update at another repository, API, or asset host. Test seams. |
+| `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `self-update` makes, and on `install.sh`'s API lookup, raising the anonymous rate limit. Only to GitHub's own API: never to an overridden API base, and never on the redirect lookup at github.com. |
+| `CPB_UPDATE_VERSION` | The release `self-update` installs, with no lookup at all (a `vMAJOR.MINOR.PATCH` tag; `--major` for another major; never a downgrade). For a network whose GitHub API requests are rate-limited. |
+| `CPB_UPDATE_REPO`, `CPB_UPDATE_API_BASE`, `CPB_UPDATE_LATEST_URL`, `CPB_UPDATE_DOWNLOAD_BASE` | Redirect self-update at another repository, API, latest-release page, or asset host. Test seams. |
 | `CPB_SECRET_FILE_STORE` | `1` in cpb's own environment lets the Linux file store keep `cpb:<name>` values where `secret-tool` is installed but fails outright (a bus cpb does not know); never where it is slow or holds the name locked. Set it in the environment of the one machine that needs it, never in a playbook: a **reserved key**, refused in a manifest, an env set, `--env` and `--env-file`, and dropped from every helper's and launched program's environment (*Secrets*, the file store). `CPB_SECRET_STORE_*` are reserved the same way: cpb's hand-over to its default helper. |
 
 A variable marked *test seam* exists so the suites can run without network or a real release.
@@ -4607,21 +4610,35 @@ where the previous one stood.
 
 ### `install.sh`
 
-Resolves the release tag from `$CPB_INSTALL_VERSION` when set, else the `tag_name` of the
-latest release from the GitHub API. A lookup that fails says why, and installs nothing:
+Resolves the release tag from `$CPB_INSTALL_VERSION` when set, with no lookup
+at all. Otherwise:
+
+1. **github.com's redirect first.** `https://github.com/<repo>/releases/latest`
+   answers with a redirect to `.../releases/tag/<tag>`; the script reads the
+   tag from it and does not follow it. That page is not under the GitHub API's
+   limit for unauthenticated callers, which is per IP and which a shared
+   address (an office, a company VPN, a campus, a CI fleet) exhausts soon. No
+   token is sent there. The release workflow marks Latest only the highest
+   release, so this is the newest one.
+2. **GitHub's API only when the redirect names no release** (no answer, another
+   status, a target that is not a release tag): the `tag_name` of
+   `/repos/<repo>/releases/latest`.
+
+Nothing is fetched before the tag is known. When both lookups fail, one
+message names both causes, says nothing was installed, and gives the line that
+needs neither: `curl -fsSL …/install.sh | CPB_INSTALL_VERSION=<tag> sh`, with
+the releases page for the tags. The API's part of the cause:
 
 - **HTTP 403 or 429**, GitHub's answer to an unauthenticated caller over its
-  rate limit, which a shared IP (an office, a campus, a CI fleet) reaches soon:
-  `GitHub rate-limited this request (HTTP <code>; unauthenticated requests share
-  your IP): set CPB_INSTALL_VERSION=<tag> to skip the lookup, or retry later.`
-- **Any other status:** `could not determine the latest release (HTTP <code>
-  from <API base>)`, with the hint to check the connection or set
-  `CPB_INSTALL_VERSION`.
+  rate limit: `GitHub's API rate-limited the lookup (HTTP <code>;
+  unauthenticated requests share your IP)`, never the network.
+- **Any other status:** `HTTP <code> from <API base>`, with the hint to check
+  the connection.
 - **No complete answer** (no connection, or a transfer cut short, even after a
-  status arrived): `could not get an answer from <API base>`, with the same
-  hint, after curl's own reason.
+  status arrived): `no answer from <API base> either`, with the same hint,
+  after curl's own reason.
 
-With `GITHUB_TOKEN` set, the lookup on `https://api.github.com` is
+With `GITHUB_TOKEN` set, the API lookup on `https://api.github.com` is
 authenticated:
 
 - The token reaches curl on its standard input as a config line, never on its
@@ -4702,12 +4719,14 @@ Read by the two shell scripts only; the Go binary reads none of them.
 | `CPB_INSTALL_DIR` | `install.sh` | Install directory, overriding the writability probe |
 | `CPB_INSTALL_DEFAULT_DIR` | `install.sh` | The directory that probe tests. Default `/usr/local/bin` |
 | `CPB_INSTALL_URL` | `install.sh` | Exact asset URL; suppresses checksum verification with a warning |
-| `CPB_INSTALL_API_BASE` | both | Where the latest release is looked up. Default `https://api.github.com` |
+| `CPB_INSTALL_LATEST_URL` | `install.sh` | The page whose redirect names the latest release. Default `https://github.com/<repo>/releases/latest` |
+| `CPB_INSTALL_API_BASE` | both | Where the latest release is looked up through the API (for `install.sh`, when the redirect names none). Default `https://api.github.com` |
 | `CPB_INSTALL_REPO`, `CPB_INSTALL_ASSET_PREFIX`, `CPB_INSTALL_DOWNLOAD_BASE` | both | Redirect at another repository, asset name (default `cpb`), or asset host |
 
 `CPB_INSTALL_REPO`, `CPB_INSTALL_ASSET_PREFIX`, `CPB_INSTALL_DOWNLOAD_BASE`,
-`CPB_INSTALL_URL`, `CPB_INSTALL_API_BASE` and `CPB_INSTALL_DEFAULT_DIR` exist so
-the install suites can run against a local fixture server.
+`CPB_INSTALL_URL`, `CPB_INSTALL_LATEST_URL`, `CPB_INSTALL_API_BASE` and
+`CPB_INSTALL_DEFAULT_DIR` exist so the install suites can run against a local
+fixture server.
 
 ## Output
 

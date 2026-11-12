@@ -654,3 +654,176 @@ func TestSelfUpdateFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// redirectAPIServer is github.com's latest-release page and GitHub's API in
+// one: /releases/latest answers redirect (a status, or 302 to
+// .../releases/tag/<tag> when tag is set); the release list answers
+// apiStatus, with list as its body on 200; any tag's asset is served. It
+// counts the requests to each and keeps the redirect's Authorization.
+type redirectAPI struct {
+	srv                 *httptest.Server
+	redirectHits, lists int
+	redirectAuth        string
+}
+
+func redirectAPIServer(t *testing.T, tag string, redirect, apiStatus int, list string) *redirectAPI {
+	t.Helper()
+	ra := &redirectAPI{}
+	asset := fmt.Sprintf("cpb-%s-%s", runtime.GOOS, runtime.GOARCH)
+	ra.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			ra.redirectHits++
+			ra.redirectAuth = r.Header.Get("Authorization")
+			repo := strings.TrimSuffix(r.URL.Path, "/releases/latest")
+			if redirect == http.StatusFound && tag != "" {
+				http.Redirect(w, r, repo+"/releases/tag/"+tag, http.StatusFound)
+				return
+			}
+			if redirect == http.StatusFound {
+				http.Redirect(w, r, repo+"/releases", http.StatusFound)
+				return
+			}
+			w.WriteHeader(redirect)
+		case strings.HasSuffix(r.URL.Path, "/releases"):
+			ra.lists++
+			w.WriteHeader(apiStatus)
+			if apiStatus == http.StatusOK {
+				fmt.Fprint(w, list)
+			} else {
+				fmt.Fprint(w, `{"message":"API rate limit exceeded"}`)
+			}
+		case strings.HasSuffix(r.URL.Path, "/"+asset):
+			fmt.Fprintf(w, "#!/bin/sh\necho \"cpb version %s\"\n", filepath.Base(filepath.Dir(r.URL.Path)))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ra.srv.Close)
+	return ra
+}
+
+func redirectConfig(exe string, ra *redirectAPI) selfUpdateConfig {
+	cfg := baseConfig(exe, ra.srv)
+	cfg.latestURL = ra.srv.URL + "/ramazanpolat/claude-playbooks/releases/latest"
+	cfg.token = "not-a-token"
+	return cfg
+}
+
+// The redirect names a release in the running major: it is installed, and
+// GitHub's API (answering 403 here) is never asked; the redirect gets no
+// token. --check reports it the same way.
+func TestSelfUpdateRedirectInsideMajorNeedsNoAPI(t *testing.T) {
+	ra := redirectAPIServer(t, "v4.5.0", http.StatusFound, http.StatusForbidden, "")
+	exe := newExecutable(t)
+	cfg := redirectConfig(exe, ra)
+	cfg.currentVersion = "v4.1.0"
+	var out bytes.Buffer
+	if err := selfUpdate(&out, cfg); err != nil || !strings.Contains(installed(t, exe), "v4.5.0") {
+		t.Fatalf("%v %q\n%s", err, installed(t, exe), out.String())
+	}
+	if ra.lists != 0 || ra.redirectHits != 1 || ra.redirectAuth != "" {
+		t.Fatalf("lists %d, redirects %d, redirect auth %q", ra.lists, ra.redirectHits, ra.redirectAuth)
+	}
+	exe2 := newExecutable(t)
+	cfg = redirectConfig(exe2, ra)
+	cfg.currentVersion, cfg.checkOnly = "v4.1.0", true
+	out.Reset()
+	if err := selfUpdate(&out, cfg); err != nil || !strings.Contains(out.String(), "An update is available: v4.1.0 -> v4.5.0") || ra.lists != 0 || installed(t, exe2) != "OLD-BINARY" {
+		t.Fatalf("--check: %v lists %d\n%s", err, ra.lists, out.String())
+	}
+}
+
+// The redirect names a new major version and the API answers 403: nothing
+// is installed, and the error names the cause, the pinned form and --major.
+func TestSelfUpdateRedirectOutsideMajorRateLimited(t *testing.T) {
+	ra := redirectAPIServer(t, "v5.0.0", http.StatusFound, http.StatusForbidden, "")
+	exe := newExecutable(t)
+	cfg := redirectConfig(exe, ra)
+	cfg.currentVersion = "v4.1.0"
+	var out bytes.Buffer
+	err := selfUpdate(&out, cfg)
+	for _, want := range []string{"nothing is installed", "the newest release is v5.0.0, a new major version", "rate-limited the release list (HTTP 403; unauthenticated requests share your IP)", "CPB_UPDATE_VERSION=<tag> cpb self-update", "`cpb self-update --major`", "https://github.com/ramazanpolat/claude-playbooks/releases"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if installed(t, exe) != "OLD-BINARY" || ra.lists != 1 {
+		t.Fatalf("installed %q, lists %d", installed(t, exe), ra.lists)
+	}
+}
+
+// --major takes the redirect's release across majors, with no API request.
+func TestSelfUpdateRedirectMajorNeedsNoAPI(t *testing.T) {
+	ra := redirectAPIServer(t, "v5.0.0", http.StatusFound, http.StatusForbidden, "")
+	exe := newExecutable(t)
+	cfg := redirectConfig(exe, ra)
+	cfg.currentVersion, cfg.major = "v4.1.0", true
+	var out bytes.Buffer
+	if err := selfUpdate(&out, cfg); err != nil || !strings.Contains(installed(t, exe), "v5.0.0") || ra.lists != 0 {
+		t.Fatalf("%v %q lists %d\n%s", err, installed(t, exe), ra.lists, out.String())
+	}
+}
+
+// A redirect that names no release (an error, or no tag in it) falls back
+// to the API's list; when that fails as well, the error names both and the
+// pinned form, and nothing is installed.
+func TestSelfUpdateRedirectFailsFallsBackToTheList(t *testing.T) {
+	for _, redirect := range []int{http.StatusNotFound, http.StatusFound} {
+		ra := redirectAPIServer(t, "", redirect, http.StatusOK, majorList)
+		exe := newExecutable(t)
+		cfg := redirectConfig(exe, ra)
+		cfg.currentVersion = "v4.1.0"
+		var out bytes.Buffer
+		if err := selfUpdate(&out, cfg); err != nil || !strings.Contains(installed(t, exe), "v4.3.1") || ra.lists != 1 {
+			t.Fatalf("redirect %d: %v %q lists %d\n%s", redirect, err, installed(t, exe), ra.lists, out.String())
+		}
+	}
+	ra := redirectAPIServer(t, "", http.StatusNotFound, http.StatusTooManyRequests, "")
+	exe := newExecutable(t)
+	cfg := redirectConfig(exe, ra)
+	cfg.currentVersion = "v4.1.0"
+	var out bytes.Buffer
+	err := selfUpdate(&out, cfg)
+	for _, want := range []string{"nothing is installed", "answered 404 Not Found without naming a release", "rate-limited the release list (HTTP 429", "CPB_UPDATE_VERSION=<tag> cpb self-update"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if installed(t, exe) != "OLD-BINARY" {
+		t.Fatal("installed after both lookups failed")
+	}
+}
+
+// CPB_UPDATE_VERSION names the release: nothing is looked up, and the usual
+// rules hold (a release tag only, --major for a new major, never a
+// downgrade).
+func TestSelfUpdatePinnedAsksNothing(t *testing.T) {
+	ra := redirectAPIServer(t, "v4.9.0", http.StatusFound, http.StatusOK, majorList)
+	exe := newExecutable(t)
+	cfg := redirectConfig(exe, ra)
+	cfg.currentVersion, cfg.pinned = "v4.1.0", "v4.3.0"
+	var out bytes.Buffer
+	if err := selfUpdate(&out, cfg); err != nil || !strings.Contains(installed(t, exe), "v4.3.0") || ra.lists != 0 || ra.redirectHits != 0 || !strings.Contains(out.String(), "CPB_UPDATE_VERSION") {
+		t.Fatalf("%v %q lists %d redirects %d\n%s", err, installed(t, exe), ra.lists, ra.redirectHits, out.String())
+	}
+	for pin, want := range map[string]string{"v4.4.0-rc1": "is not a release", "latest": "is not a release", "v5.0.0": "a new major version: add --major"} {
+		exe := newExecutable(t)
+		cfg := redirectConfig(exe, ra)
+		cfg.currentVersion, cfg.pinned = "v4.1.0", pin
+		err := selfUpdate(&out, cfg)
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "nothing is installed") || installed(t, exe) != "OLD-BINARY" {
+			t.Errorf("pinned %s: %v", pin, err)
+		}
+	}
+	exe = newExecutable(t)
+	cfg = redirectConfig(exe, ra)
+	cfg.currentVersion, cfg.pinned = "v4.5.0", "v4.3.0"
+	out.Reset()
+	if err := selfUpdate(&out, cfg); err != nil || installed(t, exe) != "OLD-BINARY" || !strings.Contains(out.String(), "nothing to install") {
+		t.Fatalf("a pinned downgrade: %v\n%s", err, out.String())
+	}
+	if ra.lists != 0 || ra.redirectHits != 0 {
+		t.Fatalf("a pinned run looked something up: lists %d redirects %d", ra.lists, ra.redirectHits)
+	}
+}

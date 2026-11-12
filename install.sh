@@ -1,14 +1,18 @@
 #!/bin/sh
 set -e
 
-# Every knob is a CPB_INSTALL_* variable: CPB_INSTALL_VERSION (a tag),
-# CPB_INSTALL_DIR, CPB_INSTALL_DEFAULT_DIR, CPB_INSTALL_REPO,
-# CPB_INSTALL_ASSET_PREFIX, CPB_INSTALL_DOWNLOAD_BASE, CPB_INSTALL_URL,
-# CPB_INSTALL_API_BASE (where the latest release is looked up). A
-# GITHUB_TOKEN in the environment authenticates that lookup on GitHub's own
-# API, never on another base.
+# Every knob is a CPB_INSTALL_* variable: CPB_INSTALL_VERSION (a tag: no
+# lookup at all), CPB_INSTALL_DIR, CPB_INSTALL_DEFAULT_DIR,
+# CPB_INSTALL_REPO, CPB_INSTALL_ASSET_PREFIX, CPB_INSTALL_DOWNLOAD_BASE,
+# CPB_INSTALL_URL, CPB_INSTALL_LATEST_URL (the page whose redirect names the
+# latest release) and CPB_INSTALL_API_BASE (where the latest release is
+# looked up when that redirect does not answer). A GITHUB_TOKEN in the
+# environment authenticates the API lookup on GitHub's own API, never on
+# another base, and never the redirect.
 REPO="${CPB_INSTALL_REPO:-ramazanpolat/claude-playbooks}"
+LATEST_URL="${CPB_INSTALL_LATEST_URL:-https://github.com/${REPO}/releases/latest}"
 API_BASE="${CPB_INSTALL_API_BASE:-https://api.github.com}"
+RELEASES_PAGE="https://github.com/${REPO}/releases"
 ASSET_PREFIX="${CPB_INSTALL_ASSET_PREFIX:-cpb}"
 DEFAULT_INSTALL_DIR="${CPB_INSTALL_DEFAULT_DIR:-/usr/local/bin}"
 
@@ -29,15 +33,44 @@ esac
 
 ASSET="${ASSET_PREFIX}-${OS}-${ARCH}"
 
+# PIN is the line that skips every lookup, for the messages below.
+PIN="curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | CPB_INSTALL_VERSION=<tag> sh"
+
 if [ -n "${CPB_INSTALL_VERSION:-}" ]; then
   LATEST="$CPB_INSTALL_VERSION"
 else
-  # Fetch latest release tag. The status decides the message: GitHub
-  # answers an unauthenticated request over its rate limit with 403 or
-  # 429, and a shared IP (an office, a campus, a CI fleet) reaches it soon.
-  # A curl that fails (no answer, a transfer cut short) is no answer, even
-  # when it wrote a status first.
   echo "Fetching latest release..."
+  LATEST=""
+  # First without GitHub's API: github.com answers .../releases/latest with
+  # a redirect to .../releases/tag/<tag>, which is read and not followed.
+  # The API's limit for unauthenticated callers is per IP, and an office, a
+  # VPN or a CI fleet shares one; this page is not under that limit. No
+  # token is ever sent here. The answer is a few hundred bytes, so it gets
+  # the 60 seconds cpb self-update allows each request: one that hangs
+  # falls through to the API below instead of holding the install. The
+  # downloads keep no limit, as a slow link must still finish them.
+  OUT=$(curl -sS --max-time 60 -o /dev/null -w '%{http_code} %{redirect_url}' "$LATEST_URL" 2>/dev/null) || OUT="000 "
+  CODE=${OUT%% *}
+  TARGET=${OUT#* }
+  case "$CODE:$TARGET" in
+    30[1278]:*/releases/tag/?*)
+      TAG=${TARGET##*/releases/tag/}
+      case "$TAG" in
+        *[!A-Za-z0-9._+-]*) REDIRECT_WHY="${LATEST_URL} redirected to ${TARGET}, which is not a release tag" ;;
+        *) LATEST=$TAG ;;
+      esac
+      ;;
+    000:*) REDIRECT_WHY="no answer from ${LATEST_URL}" ;;
+    *) REDIRECT_WHY="${LATEST_URL} answered HTTP ${CODE} without naming a release" ;;
+  esac
+fi
+
+if [ -z "$LATEST" ]; then
+  # Then GitHub's API. The status decides the message: GitHub answers an
+  # unauthenticated request over its rate limit with 403 or 429. A curl
+  # that fails (no answer, a transfer cut short) is no answer, even when it
+  # wrote a status first. Either way nothing has been fetched yet, so a
+  # failure here leaves nothing behind.
   API_URL="${API_BASE}/repos/${REPO}/releases/latest"
   BODY=$(mktemp "${TMPDIR:-/tmp}/cpb-latest.XXXXXX")
   trap 'rm -f "$BODY"' EXIT
@@ -63,27 +96,20 @@ else
   case "$CODE" in
     200)
       LATEST=$(grep '"tag_name"' "$BODY" | head -1 | cut -d'"' -f4)
+      [ -n "$LATEST" ] || API_WHY="no tag_name in the answer from ${API_BASE}"
       ;;
-    403|429)
-      echo "Error: GitHub rate-limited this request (HTTP $CODE; unauthenticated requests share your IP): set CPB_INSTALL_VERSION=<tag> to skip the lookup, or retry later."
-      exit 1
-      ;;
-    000)
-      echo "Error: could not get an answer from ${API_BASE} to find the latest release. Check your internet connection, or set CPB_INSTALL_VERSION=<tag> to skip the lookup."
-      exit 1
-      ;;
-    *)
-      echo "Error: could not determine the latest release (HTTP $CODE from ${API_BASE}). Check your internet connection, or set CPB_INSTALL_VERSION=<tag> to skip the lookup."
-      exit 1
-      ;;
+    403|429) API_WHY="GitHub's API rate-limited the lookup (HTTP $CODE; unauthenticated requests share your IP)" ;;
+    000) API_WHY="no answer from ${API_BASE} either. Check your internet connection" ;;
+    *) API_WHY="HTTP $CODE from ${API_BASE}. Check your internet connection" ;;
   esac
   rm -f "$BODY"
   trap - EXIT HUP INT TERM
-fi
-
-if [ -z "$LATEST" ]; then
-  echo "Error: could not determine the latest release (no tag_name in the answer from ${API_BASE}). Set CPB_INSTALL_VERSION=<tag> to skip the lookup."
-  exit 1
+  if [ -z "$LATEST" ]; then
+    echo "Error: could not find the latest release: ${REDIRECT_WHY}, and ${API_WHY}."
+    echo "Nothing was installed. Name the release instead, which needs neither lookup (the tags are at ${RELEASES_PAGE}):"
+    echo "  ${PIN}"
+    exit 1
+  fi
 fi
 
 # fetch URL FILE: a release download (the asset, SHA256SUMS, LICENSE,

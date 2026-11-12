@@ -25,17 +25,21 @@ cpb --version
 A download that fails for a moment (a 502 from GitHub, a dropped connection) is
 retried a few times before the script gives up.
 
-If the script says `GitHub rate-limited this request`, the latest-release lookup
-was refused. GitHub limits unauthenticated callers per IP, and an office,
-campus or CI network shares one. Name the release, which skips the lookup:
+The script finds the latest release from github.com's own redirect, not GitHub's
+API, so it works behind a shared address (an office, a company VPN, a campus or
+CI network), where the API's limit for unauthenticated callers, counted per IP,
+runs out soon. Only when that redirect does not answer does it ask the API. If
+both fail (the message names each cause), nothing is installed. Name the
+release instead, which needs no lookup at all; on a network you know is shared,
+you can always start this way:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | CPB_INSTALL_VERSION=v4.6.1 sh
 ```
 
 Where `GITHUB_TOKEN` is already in the environment (CI runners set one), the
-script authenticates the lookup with it. It goes only to `api.github.com`, and
-never on curl's command line.
+script authenticates its API lookup with it. It goes only to `api.github.com`,
+never to the redirect, and never on curl's command line.
 
 Want a different command name? Use a shell alias (`alias pb=cpb`) or
 a hard link (`ln "$(command -v cpb)" ~/.local/bin/pb` — works for
@@ -289,8 +293,16 @@ cpb self-update --force    # reinstall even if already on the newest
   `self-update` says so in one line and stays on your major version:
   ``v5.0.0 is available, a new major version: run `cpb self-update --major` (read its release notes first)``.
 - **Pre-releases are never installed**, and neither is an older version.
-- **If the release list cannot be read** (a rate limit, no network), it says
-  why and installs nothing. Set `GITHUB_TOKEN` to raise GitHub's rate limit.
+- **Behind a shared address** (an office, a company VPN), it first reads the
+  newest release from github.com's redirect, which GitHub's API limit does not
+  touch; when that release is in your major version, the API is not asked at
+  all. It asks the API only for an older release of your major (when a new
+  major is out) or when the redirect does not answer.
+- **If the release list is needed and cannot be read** (a rate limit, no
+  network), it says why and installs nothing. Name the release, which needs no
+  lookup: `CPB_UPDATE_VERSION=v4.6.1 cpb self-update` (the tags are on the
+  [releases page](https://github.com/ramazanpolat/claude-playbooks/releases));
+  or set `GITHUB_TOKEN` to raise GitHub's rate limit.
 
 It downloads the release asset for your OS/architecture, verifies it, and
 atomically replaces the running binary (resolving the `cpb` symlink so the real

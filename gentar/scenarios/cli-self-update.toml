@@ -51,11 +51,53 @@ i=0; port=
 while [ -z "$port" ] && [ "$i" -lt 300 ]; do port=$(sed -n 's/.* port \([0-9][0-9]*\).*/\1/p' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || { kill -0 "$pid" 2>/dev/null || break; sleep 0.1; }; done
 [ -n "$port" ] || { echo "serve: server did not start; its output:" >&2; cat "$log" >&2; exit 3; }
 export CPB_UPDATE_API_BASE="http://127.0.0.1:$port/$api"
+# The latest-release redirect (github.com's, first in self-update) answers
+# 404 here unless redir.sh set one, so the cases below read the list.
+export CPB_UPDATE_LATEST_URL="${CPB_UPDATE_LATEST_URL:-http://127.0.0.1:$port/no-redirect/releases/latest}"
 export CPB_UPDATE_DOWNLOAD_BASE="http://127.0.0.1:$port/$dl" CPB_INSTALL_DOWNLOAD_BASE="http://127.0.0.1:$port/$dl"
 "$@" & cpid=$!
 wait "$cpid"
 EOF
 chmod +x "$HOME/serve.sh"''',
+  # redir.sh TAG CMD...: a stand-in for github.com's latest-release page on
+  # a free loopback port, for the length of CMD: it redirects to
+  # .../releases/tag/TAG, with CPB_UPDATE_LATEST_URL pointed at it. Each
+  # request's path and Authorization header (or "-") go to ~/redir.log.
+  '''cat > "$HOME/redir.py" <<'PYEOF'
+import http.server, os, sys
+tag = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(os.path.expanduser("~/redir.log"), "a") as f:
+            f.write(self.path + "\t" + (self.headers.get("Authorization") or "-") + "\n")
+        repo = self.path.rsplit("/releases/latest", 1)[0]
+        self.send_response(302)
+        self.send_header("Location", repo + "/releases/tag/" + tag)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    def log_message(self, *a):
+        pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(s.server_address[1], flush=True)
+s.serve_forever()
+PYEOF
+cat > "$HOME/redir.sh" <<'SHEOF'
+#!/bin/sh
+tag=$1; shift
+log=$(mktemp)
+python3 -u "$HOME/redir.py" "$tag" >"$log" 2>&1 &
+pid=$!
+cpid=
+trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
+trap 'exit 143' INT TERM HUP
+i=0; port=
+while [ -z "$port" ] && [ "$i" -lt 300 ]; do port=$(grep -E '^[0-9]+$' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || { kill -0 "$pid" 2>/dev/null || break; sleep 0.1; }; done
+[ -n "$port" ] || { echo "redir: server did not start; its output:" >&2; cat "$log" >&2; exit 3; }
+export CPB_UPDATE_LATEST_URL="http://127.0.0.1:$port/ramazanpolat/claude-playbooks/releases/latest"
+"$@" & cpid=$!
+wait "$cpid"
+SHEOF
+chmod +x "$HOME/redir.sh"''',
   '''"$HOME/serve.sh" api dl env CPB_INSTALL_VERSION=v4.0.0 CPB_INSTALL_DIR="$HOME/.local/bin" sh "$WORKSPACE_DIR/install.sh" >/dev/null''',
 ]
 
@@ -95,6 +137,14 @@ contains = "updated-in-major"
 # A second run is a no-op, and still names v5.
 command = '''out=$("$HOME/serve.sh" api dl cpb self-update) && echo "$out" | grep -qF 'Already up to date.' && echo "$out" | grep -qF 'v5.0.0 is available' && echo up-to-date'''
 contains = "up-to-date"
+
+[[verify.commands]]
+# The redirect names the running major's newest (v4.0.1): no release list
+# is read (here a broken one, which would fail the update), no token goes
+# to the redirect, and the answer is the same. A pinned update
+# (CPB_UPDATE_VERSION) asks neither.
+command = '''rm -f "$HOME/redir.log"; out=$(GITHUB_TOKEN=arena-not-a-token "$HOME/redir.sh" v4.0.1 "$HOME/serve.sh" api-bad dl cpb self-update 2>&1) && echo "$out" | grep -qF 'Already up to date.' && [ "$(grep -c . "$HOME/redir.log")" = 1 ] && grep -q "	-$" "$HOME/redir.log" && rm -f "$HOME/redir.log" && out=$("$HOME/redir.sh" v4.0.1 "$HOME/serve.sh" api-bad dl env CPB_UPDATE_VERSION=v4.0.1 cpb self-update 2>&1) && echo "$out" | grep -qF 'nothing was looked up' && [ ! -s "$HOME/redir.log" ] && echo redirect-no-list || { echo "$out"; cat "$HOME/redir.log" 2>/dev/null; exit 1; }'''
+contains = "redirect-no-list"
 
 [[verify.commands]]
 # --major takes the new major.
