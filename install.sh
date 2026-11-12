@@ -45,8 +45,11 @@ else
   # a redirect to .../releases/tag/<tag>, which is read and not followed.
   # The API's limit for unauthenticated callers is per IP, and an office, a
   # VPN or a CI fleet shares one; this page is not under that limit. No
-  # token is ever sent here.
-  OUT=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "$LATEST_URL" 2>/dev/null) || OUT="000 "
+  # token is ever sent here. The answer is a few hundred bytes, so it gets
+  # the 60 seconds cpb self-update allows each request: one that hangs
+  # falls through to the API below instead of holding the install. The
+  # downloads keep no limit, as a slow link must still finish them.
+  OUT=$(curl -sS --max-time 60 -o /dev/null -w '%{http_code} %{redirect_url}' "$LATEST_URL" 2>/dev/null) || OUT="000 "
   CODE=${OUT%% *}
   TARGET=${OUT#* }
   case "$CODE:$TARGET" in

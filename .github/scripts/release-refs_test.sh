@@ -107,4 +107,22 @@ latest_is true  v4.7.0     v5.0.0-rc1 v4.6.1    # a pre-release above it does no
 latest_is false v4.7.0-rc1 v4.6.1               # a release candidate is never Latest
 latest_is true  v1.0.0                          # the first release
 
+# latest reads the whole list before it decides: release.yml runs the lookup
+# under pipefail, and a reader that leaves early kills the program writing
+# the list (SIGPIPE), which fails the step and publishes nothing. A slow
+# writer stands in for a long or slow list: its second line comes after the
+# decision, and the pipeline must still end at 0.
+latest_drains() { # latest_drains <want> <tag> <first line> <second line>
+  got=$(REFS=$refs TAG=$2 A=$3 B=$4 bash -c 'set -e -o pipefail
+    { printf "%s\n" "$A"; sleep 1; printf "%s\n" "$B"; } | sh "$REFS" latest "$TAG"') && rc=0 || rc=$?
+  if [ "$rc" = 0 ] && [ "$got" = "$1" ]; then
+    echo "ok:   latest $2 reads a slow list [$3 $4] to the end -> $got"
+  else
+    echo "FAIL: latest $2 over a slow list [$3 $4] -> '$got', pipeline exit $rc (want $1, exit 0)"; fail=1
+  fi
+}
+latest_drains false v4.7.0-rc1 v4.6.1 v4.6.0    # a release candidate
+latest_drains false v4.6.2     v4.7.0 v4.6.1    # a higher release on the first line
+latest_drains true  v4.7.0     v4.6.1 v4.6.0    # Latest
+
 exit $fail

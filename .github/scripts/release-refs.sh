@@ -100,18 +100,25 @@ npx-check)
   ;;
 latest)
   tag=${2:?usage: release-refs.sh latest <tag>  (the published release tags on stdin)}
+  # The whole list is read before anything is decided. Leaving early would
+  # close the pipe on the program writing it, which then dies writing the
+  # rest (SIGPIPE) and fails a pipeline that runs under pipefail.
+  list=$(cat)
   if ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
     echo false
     exit 0
   fi
+  make=true
   while IFS= read -r t; do
     printf '%s\n' "$t" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || continue
     if newer "${t#v}" "${tag#v}"; then
-      echo false
-      exit 0
+      make=false
+      break
     fi
-  done
-  echo true
+  done <<EOF
+$list
+EOF
+  echo "$make"
   ;;
 *)
   echo "usage: release-refs.sh gate <tag> <sha> | npx-check <version> | latest <tag>" >&2

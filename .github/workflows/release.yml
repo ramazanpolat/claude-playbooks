@@ -157,9 +157,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # One release job at a time across tag runs: each decides Latest from
+    # the releases already published, so two tags pushed together never
+    # both decide from a list that holds neither. A third tag run arriving
+    # while one waits cancels the waiting one (GitHub keeps one pending job
+    # per group); re-run that one.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     steps:
-      # For release-refs.sh, which decides Latest.
+      # For release-refs.sh, which decides Latest. Nothing here pushes, so
+      # the checkout keeps no credentials.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:
@@ -172,8 +183,10 @@ jobs:
       # redirect, without GitHub's API, and rely on that. A tag with a
       # suffix (a release candidate) is never Latest.
       # The rule lives in .github/scripts/release-refs.sh (latest), tested by
-      # release-refs_test.sh in CI. A failed release list stops the job
-      # before anything is published (pipefail), never guessing true.
+      # release-refs_test.sh in CI. The whole list is written to a file
+      # before it is read, so the lookup never depends on how the reader
+      # consumes it; a failed list stops the job before anything is
+      # published (bash -e), never guessing true.
       - name: Is this the highest release?
         id: latest
         env:
@@ -181,9 +194,9 @@ jobs:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
-          set -o pipefail
-          make=$(gh api "repos/$REPO/releases?per_page=100" --paginate --jq '.[] | select(.draft | not) | select(.prerelease | not) | .tag_name' \
-            | sh .github/scripts/release-refs.sh latest "$TAG")
+          list="$RUNNER_TEMP/releases.txt"
+          gh api "repos/$REPO/releases?per_page=100" --paginate --jq '.[] | select(.draft | not) | select(.prerelease | not) | .tag_name' > "$list"
+          make=$(sh .github/scripts/release-refs.sh latest "$TAG" < "$list")
           echo "make=$make" >> "$GITHUB_OUTPUT"
           echo "$TAG becomes Latest: $make"
 
