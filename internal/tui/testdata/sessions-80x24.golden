@@ -1,8 +1,8 @@
  cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  PLAYBOOK  PID    TTY      KIND  AGE  ACTIVE  MODEL            CWD
-▸ alpha     59735  ttys039  int   9h   54s     claude-opus-5-5  ~/DEV/app
-  router    21452  -        bg    2d   28m     glm-5.3          ~/DEV/app
+  PLAYBOOK  ACCOUNT      PID    TTY      STATUS    AGE  CWD
+▸ alpha     claude-work  59735  ttys039  limit 7d  9h   ~/DEV/app
+  router    router       21452  -        idle      2d   ~/DEV/app
 
 
 

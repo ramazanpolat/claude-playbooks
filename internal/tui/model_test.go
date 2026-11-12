@@ -52,8 +52,8 @@ const fixturePlaybooks = `[
 ]`
 
 const fixtureSessions = `[
- {"playbook":"alpha","config_dir":"/home/me/.claude-playbooks/alpha","pid":59735,"session_id":"bfb2d226-403f-46da-8216-e39b2a71dae9","cwd":"/home/me/DEV/app","kind":"interactive","status":"busy","name":"release","claude_version":"2.1.283","started_at":"2026-09-28T03:00:00.000Z","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","launcher":"al","resume":"cd '/home/me/DEV/app' && al --resume bfb2d226-403f-46da-8216-e39b2a71dae9","tty":"ttys039"},
- {"playbook":"router","config_dir":"/home/me/.claude-playbooks/router","pid":21452,"session_id":"01e9cca2-4fe7-4330-ad02-4c417cf4a13e","cwd":"/home/me/DEV/app","kind":"bg","status":"idle","name":null,"claude_version":"2.1.283","started_at":"2026-09-26T12:00:00.000Z","last_active":"2026-09-28T11:32:00.000Z","model":"glm-5.3","launcher":"rt","resume":"cd '/home/me/DEV/app' && rt --resume 01e9cca2-4fe7-4330-ad02-4c417cf4a13e","tty":null}
+ {"playbook":"alpha","config_dir":"/home/me/.claude-playbooks/alpha","pid":59735,"session_id":"bfb2d226-403f-46da-8216-e39b2a71dae9","cwd":"/home/me/DEV/app","kind":"interactive","status":"busy","name":"release","claude_version":"2.1.283","started_at":"2026-09-28T03:00:00.000Z","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","launcher":"al","resume":"cd '/home/me/DEV/app' && al --resume bfb2d226-403f-46da-8216-e39b2a71dae9","tty":"ttys039","account":"claude-work","at_limit":{"window":"seven_day","resets_at":"2026-10-01T12:00:00.000Z"}},
+ {"playbook":"router","config_dir":"/home/me/.claude-playbooks/router","pid":21452,"session_id":"01e9cca2-4fe7-4330-ad02-4c417cf4a13e","cwd":"/home/me/DEV/app","kind":"bg","status":"idle","name":null,"claude_version":"2.1.283","started_at":"2026-09-26T12:00:00.000Z","last_active":"2026-09-28T11:32:00.000Z","model":"glm-5.3","launcher":"rt","resume":"cd '/home/me/DEV/app' && rt --resume 01e9cca2-4fe7-4330-ad02-4c417cf4a13e","tty":null,"account":"router","at_limit":null}
 ]`
 
 const fixtureEnvs = `[

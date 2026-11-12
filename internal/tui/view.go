@@ -336,13 +336,13 @@ func (m Model) listBody() []string {
 	case vSessions:
 		rows := [][]string{}
 		for _, s := range m.sessionRows() {
-			rows = append(rows, []string{s.Playbook, strconv.Itoa(s.PID), orDash(deref(s.TTY)), kindShort(s.Kind), orDash(deref(s.Status)),
+			rows = append(rows, []string{s.Playbook, orDash(deref(s.Account)), strconv.Itoa(s.PID), orDash(deref(s.TTY)), kindShort(s.Kind), orDash(deref(s.StatusLine())),
 				m.age(s.StartedAt), m.age(deref(s.LastActive)), orDash(deref(s.Model)), m.short(s.Cwd)})
 		}
 		if len(rows) == 0 {
 			return []string{"", "  No live Claude Code sessions. Past sessions: <launcher> --resume."}
 		}
-		return m.table([]string{"PLAYBOOK", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "CWD"}, rows, 8, m.cursor[vSessions], h, 4, 3, 6, 7)
+		return m.table([]string{"PLAYBOOK", "ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "CWD"}, rows, 9, m.cursor[vSessions], h, 4, 7, 8, 5)
 	case vEnvs:
 		rows := [][]string{}
 		for _, e := range m.envRows() {
@@ -568,9 +568,9 @@ func (m Model) tabBody(p Playbook, tab string) []string {
 		}
 		rows := [][]string{}
 		for _, s := range live {
-			rows = append(rows, []string{strconv.Itoa(s.PID), orDash(deref(s.TTY)), kindShort(s.Kind), m.age(s.StartedAt), m.age(deref(s.LastActive)), orDash(deref(s.Model)), m.short(s.Cwd)})
+			rows = append(rows, []string{orDash(deref(s.Account)), strconv.Itoa(s.PID), orDash(deref(s.TTY)), kindShort(s.Kind), orDash(deref(s.StatusLine())), m.age(s.StartedAt), m.age(deref(s.LastActive)), orDash(deref(s.Model)), m.short(s.Cwd)})
 		}
-		return m.table([]string{"PID", "TTY", "KIND", "AGE", "ACTIVE", "MODEL", "CWD"}, rows, 6, -1, h, 2, 4, 5)
+		return m.table([]string{"ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "CWD"}, rows, 8, -1, h, 3, 6, 7, 4)
 	}
 	return nil
 }

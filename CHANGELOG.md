@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`SHOW SESSIONS` shows each session's account.** A launch through
+  `cpb run`, a launcher or `cpb start` keeps a small record of the account
+  it runs on while it runs (`.state/launches/<pid>.json` under the playbooks
+  root, mode 600, removed when the launch ends), since Claude Code's own
+  session file does not say. The table has an `ACCOUNT` column and `--json`
+  an `account` field; a session cpb did not launch shows none. A session
+  started by a secret helper that runs claude as its child is matched
+  through its parent, and a reused pid never borrows another launch's
+  account.
+- **`SHOW SESSIONS` shows who is stopped at a usage limit.** While a
+  session's transcript ends at Claude Code's limit error and the limit has
+  not reset, `STATUS` reads `limit 5h` or `limit 7d` and `--json` has
+  `at_limit` (`window`, `resets_at`). No status line is needed.
+- **`SELECT … FROM SESSIONS`** has the two new columns, `account` and
+  `at_limit`, after `tty`; the TUI's Sessions view and a playbook's
+  Sessions tab show both.
+
 ## [v4.7.0] -- 2026-11-12
 
 v4.7.0 lets cpb keep your secrets itself. A `cpb:<name>` reference needs no

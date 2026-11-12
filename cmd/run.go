@@ -54,13 +54,22 @@ var onLaunch func(*os.Process)
 
 // runAttached runs a session's command, telling onLaunch its process: a
 // host launch, or a sandbox backend's attach.
-func runAttached(c *exec.Cmd) error {
+func runAttached(c *exec.Cmd) error { return runRecorded(c, nil) }
+
+// runRecorded is runAttached for a host launch: rec, when given, is written
+// for the process once it starts and removed when it ends, so SHOW SESSIONS
+// can tell the session's account (launch_record.go). A sandbox's attach
+// records nothing: its sessions are not on the host.
+func runRecorded(c *exec.Cmd, rec *launchRecord) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
 	// A token run stays live for as long as this session does, even if
 	// cpb is killed first (internal/auth/own_login.go).
 	auth.SessionStarted(c.Process.Pid)
+	if rec != nil {
+		defer rec.record(launchRecordsRoot(), c.Process.Pid)()
+	}
 	if onLaunch != nil {
 		onLaunch(c.Process)
 	}
@@ -344,7 +353,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if exitLine {
 		before = transcriptStamps(sd.path)
 	}
-	err = preserveExitCode(runAttached(c))
+	err = preserveExitCode(runRecorded(c, newLaunchRecord(pb.Name, configDir, acct.sel)))
 	if exitLine {
 		printResumeLine(sd, before)
 	}

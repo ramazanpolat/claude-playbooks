@@ -553,12 +553,16 @@ func TestSessionTTY(t *testing.T) {
 	if rows[0]["tty"] != "pts/4" || rows[1]["tty"] != nil {
 		t.Fatalf("tty: %v / %v", rows[0]["tty"], rows[1]["tty"])
 	}
-	if !strings.Contains(out, "\"tty\": \"pts/4\"\n  }") || !strings.Contains(out, "\"tty\": null\n  }") {
-		t.Fatalf("tty is the last field of each object:\n%s", out)
+	// tty follows every earlier field; account and at_limit (v4.8.0) follow
+	// tty.
+	tail := "\n    \"account\": null,\n    \"at_limit\": null\n  }"
+	if !strings.Contains(out, "\"tty\": \"pts/4\","+tail) || !strings.Contains(out, "\"tty\": null,"+tail) {
+		t.Fatalf("tty, account and at_limit are the last fields of each object:\n%s", out)
 	}
 	cols, _ := describeTable("SESSIONS")
-	if last := cols[len(cols)-1]; last.Name != "tty" || last.Type != "Nullable(String)" {
-		t.Fatalf("last column: %+v", last)
+	if n := len(cols); n < 3 || cols[n-3].Name != "tty" || cols[n-3].Type != "Nullable(String)" ||
+		cols[n-2].Name != "account" || cols[n-2].Type != "Nullable(String)" || cols[n-1].Name != "at_limit" || cols[n-1].Type != "JSON" {
+		t.Fatalf("last columns: %+v", cols[len(cols)-3:])
 	}
 	if h := mustStmt(t, "SHOW SESSIONS"); !strings.Contains(h, "TTY") || !strings.Contains(h, "pts/4") {
 		t.Fatalf("human:\n%s", h)

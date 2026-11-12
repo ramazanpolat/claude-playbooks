@@ -50,3 +50,43 @@ cpb run worker --resume "$old"
 test -e "$p/.fake-claude/launch-env"
 # cpb never touches Claude Code's session files.
 cmp -s "$p/sessions/$pid.json" "$HOME/session.before"
+
+# Which account: a session cpb launched shows the account it runs on, from
+# the record cpb keeps while the launch runs. Here a stand-in claude writes
+# its own session file, as Claude Code does, and waits to be told to stop.
+# The sleep above was not launched by cpb, so it shows none.
+held=0e5c1a2b-0000-4000-8000-000000000003
+mkdir -p "$HOME/hold"
+cat > "$HOME/hold/claude" <<'EOF'
+#!/bin/sh
+d="$CLAUDE_CONFIG_DIR/sessions"
+mkdir -p "$d"
+if [ -r "/proc/$$/stat" ]; then
+  s=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}')
+else
+  s=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}')
+fi
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":%s000,"procStart":"%s","kind":"interactive","status":"busy"}\n' \
+  $$ "$HELD" "$PWD" "$(date +%s)" "$s" > "$d/$$.json"
+while [ ! -e "$HOME/hold/stop" ]; do sleep 0.1; done
+rm -f "$d/$$.json"
+EOF
+chmod +x "$HOME/hold/claude"
+HELD=$held PATH="$HOME/hold:$PATH" cpb run worker > /dev/null 2>&1 &
+run=$!
+i=0
+until cpb SHOW SESSIONS --json | python3 -c 'import json,sys; r={x["session_id"]: x for x in json.load(sys.stdin)}; sys.exit(0 if r.get(sys.argv[1], {}).get("account") == "machine" and r[sys.argv[2]]["account"] is None else 1)' "$held" "$live"; do
+  i=$((i + 1)); [ $i -lt 50 ] || { echo "no account for the launched session"; exit 1; }; sleep 0.1
+done
+cpb SHOW SESSIONS | grep -q "ACCOUNT"
+touch "$HOME/hold/stop"
+wait $run
+# The record is gone with the launch.
+test -z "$(ls "$HOME/.claude-playbooks/.state/launches" 2>/dev/null)"
+
+# Stopped at a limit: Claude Code writes a session that hits a usage limit
+# as an error line in its transcript; SHOW SESSIONS shows it until it resets.
+resets=$(( $(date +%s) + 3600 ))
+printf '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$resets" >> "$p/projects/$enc/$live.jsonl"
+cpb SHOW SESSIONS --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r[0]["at_limit"]["window"] == "seven_day", r'
+cpb SHOW SESSIONS | grep -q "limit 7d"

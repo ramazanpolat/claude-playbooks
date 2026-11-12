@@ -14,6 +14,11 @@ It reads no process's environment, and never changes the files.
 
 - **`SHOW SESSIONS`** lists each live session with:
   - its playbook, pid and working directory;
+  - the account it runs on, for a session cpb launched (cpb keeps a small
+    record of each launch while it runs, since Claude Code's file does not
+    say);
+  - `limit 5h` or `limit 7d` as its status while it is stopped at a usage
+    limit, from its transcript, until the limit resets;
   - its age and when it was last active (its transcript's time);
   - the model it last answered with;
   - the command that resumes it.

@@ -68,9 +68,9 @@ reads: cpb SHOW PLAYBOOK router --json · cpb EXPLAIN PLAYBOOK router --json
 ```
  cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  PLAYBOOK  PID    TTY      KIND  AGE  ACTIVE  MODEL            CWD
-▸ alpha     59735  ttys039  int   9h   54s     claude-opus-5-5  ~/DEV/app
-  router    21452  -        bg    2d   28m     glm-5.3          ~/DEV/app
+  PLAYBOOK  ACCOUNT      PID    TTY      STATUS    AGE  CWD
+▸ alpha     claude-work  59735  ttys039  limit 7d  9h   ~/DEV/app
+  router    router       21452  -        idle      2d   ~/DEV/app
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
@@ -78,8 +78,12 @@ reads: cpb SHOW PLAYBOOK router --json · cpb EXPLAIN PLAYBOOK router --json
 reads: cpb SHOW SESSIONS --json
 ```
 
-- **Where each one is running:** the pid, the terminal (TTY), how long it
-  has run, when it last did something, its model and its folder.
+- **Where each one is running:** the account it runs on (for a session cpb
+  launched), the pid, the terminal (TTY), how long it has run, when it last
+  did something, its model and its folder. A wider terminal shows every
+  column; a narrow one drops the kind, last activity and model first.
+- **Who is stopped:** STATUS reads `limit 5h` or `limit 7d` while a session
+  is stopped at a usage limit, until the limit resets.
 - **The list refreshes** every 5 seconds while it is on screen.
 - **`y` copies the command that resumes a session** once it ends, from any
   folder: `cd '<folder>' && <launcher> --resume <id>`. A running session is
