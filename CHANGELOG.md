@@ -12,6 +12,15 @@
   launch, naming the file and the fix (`cpb ALTER PLAYBOOK <name> UNSET VAR
   CPB_PLAYBOOKS_DIR`, or `cpb ALTER ENV <name> UNSET CPB_PLAYBOOKS_DIR`); in
   a block list it has no effect.
+- **`SHOW CREATE` leaves reserved keys out.** A playbook or env set that
+  still sets or references a reserved key (written by hand, or by an earlier
+  release) is exported without it, as a block-list entry already was, with a
+  comment naming the statement that removes it from the stored file; the
+  export applies, and for an env set applying it is the repair. A launch
+  refused for reserved keys names every one and gives one statement that
+  removes them all; for a playbook outside the registry (`cpb start <dir>`)
+  it says to delete them from the file. `cpb auth` and `cpb ask` show that
+  refusal as it is, instead of a generic "env set cannot be resolved".
 
 ### Fixed
 
