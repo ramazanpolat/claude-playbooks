@@ -127,7 +127,7 @@ func TestEnvSetWithReservedNamesStaysRepairable(t *testing.T) {
 // A settings file's env cannot carry a reserved key either: the playbook's
 // settings.json, the working folder's, and --settings.
 func TestSettingsEnvRefusesReservedKeys(t *testing.T) {
-	for _, key := range []string{envset.SecretHelperEnv, fileStoreOptInEnv, storeEnvPrefix + "DIR"} {
+	for _, key := range []string{envset.SecretHelperEnv, fileStoreOptInEnv, storeEnvPrefix + "DIR", config.PlaybooksDirEnv} {
 		data := []byte(`{"env": {"` + key + `": "1"}}`)
 		if err := settingsReserved("settings.json", data); err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "reserved") {
 			t.Errorf("%s: %v", key, err)
@@ -148,5 +148,34 @@ func TestSettingsEnvRefusesReservedKeys(t *testing.T) {
 	}
 	if err := reservedInSettingsArgs([]string{"--settings", `{"env": {"CPB_SECRET_FILE_STORE": "1"}}`}, "", false); err == nil || !strings.Contains(err.Error(), "CPB_SECRET_FILE_STORE") {
 		t.Fatalf("--settings: %v", err)
+	}
+}
+
+// A layer cannot point a session's cpb at another registry; a .playbook an
+// earlier release wrote with it still reads, refuses the launch, and UNSET
+// VAR repairs it.
+func TestPlaybookCannotDeclareThePlaybooksDir(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "p")
+	for _, line := range []string{
+		"ALTER PLAYBOOK p SET VAR " + config.PlaybooksDirEnv + "='/srv/registry' AS PLAINTEXT",
+		"ALTER PLAYBOOK p BLOCK VAR " + config.PlaybooksDirEnv,
+		"CREATE ENV e SET " + config.PlaybooksDirEnv + "='/srv/registry' AS PLAINTEXT",
+	} {
+		if err := stmtErr(t, line); err == nil || !strings.Contains(err.Error(), "own shell") {
+			t.Errorf("%s: %v", line, err)
+		}
+	}
+	file := filepath.Join(root, ".playbook")
+	if err := os.WriteFile(file, []byte("version = \"1.0.0\"\nname = \"p\"\n\n[env.set]\n"+config.PlaybooksDirEnv+" = \"/srv/registry\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.EffectiveBlock(root, nil); !errors.Is(err, envset.ErrSet) || !strings.Contains(err.Error(), "cpb ALTER PLAYBOOK p UNSET VAR "+config.PlaybooksDirEnv) {
+		t.Fatalf("launch with it in the file: %v", err)
+	}
+	mustStmt(t, "ALTER PLAYBOOK p UNSET VAR "+config.PlaybooksDirEnv)
+	if _, err := auth.EffectiveBlock(root, nil); err != nil {
+		t.Fatalf("after UNSET VAR: %v", err)
 	}
 }

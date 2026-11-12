@@ -88,3 +88,38 @@ func TestLaunchKeepsThePersonsSecretHelper(t *testing.T) {
 		t.Fatalf("a .playbook declaring it: the session got %s=%q", manifest.SecretHelperEnv, v)
 	}
 }
+
+// CPB_PLAYBOOKS_DIR is the person's own: a launch passes on what their
+// environment holds and nothing a layer sets or blocks, so a cpb started
+// inside the session reads the person's registry, or with none the
+// default one.
+func TestLaunchKeepsThePersonsPlaybooksDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	registry := t.TempDir()
+	t.Setenv(config.PlaybooksDirEnv, registry)
+	saved := config.PlaybooksDir
+	config.PlaybooksDir = ""
+	t.Cleanup(func() { config.PlaybooksDir = saved })
+	configDir := t.TempDir()
+	writeManifest(t, configDir, "")
+	for _, layer := range []*manifest.Env{
+		{Set: map[string]string{config.PlaybooksDirEnv: "/srv/elsewhere"}},
+		{Block: []string{config.PlaybooksDirEnv}},
+	} {
+		env, err := PrepareLaunchEnvFor(configDir, []*manifest.Env{layer}, "")
+		if err != nil {
+			t.Fatalf("launch: %v", err)
+		}
+		if v, ok := envValue(t, env, config.PlaybooksDirEnv); !ok || v != registry {
+			t.Errorf("a layer %+v: the session got %q (present %v), want the person's %q", layer, v, ok, registry)
+		}
+	}
+	writeManifest(t, configDir, "[env.set]\n"+config.PlaybooksDirEnv+" = \"/srv/elsewhere\"\n")
+	env, err := PrepareLaunchEnvFor(configDir, nil, "")
+	if !errors.Is(err, envset.ErrSet) || !strings.Contains(err.Error(), "UNSET VAR "+config.PlaybooksDirEnv) {
+		t.Fatalf("a .playbook declaring it: %v", err)
+	}
+	if v, _ := envValue(t, env, config.PlaybooksDirEnv); v == "/srv/elsewhere" {
+		t.Fatal("a .playbook declaring it: its value reached the session")
+	}
+}

@@ -239,6 +239,7 @@ var ReservedEnvKeys = map[string]bool{
 	config.ConfigDirOverrideEnv: true,
 	SecretFileStoreEnv:          true,
 	SecretHelperEnv:             true,
+	config.PlaybooksDirEnv:      true,
 }
 
 // SecretHelperEnv names the secret helper for one process, over the
@@ -268,7 +269,7 @@ func reservedKeyError(key string) error {
 	if key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix) {
 		return fmt.Errorf("%s is cpb's own secret-store setting and cannot be declared: %s, never in a playbook", key, ReservedHint(key))
 	}
-	if key == SecretHelperEnv {
+	if key == SecretHelperEnv || key == config.PlaybooksDirEnv {
 		return fmt.Errorf("%s is yours to set and cannot be declared in a playbook, a recipe or an env set: %s", key, ReservedHint(key))
 	}
 	return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
@@ -282,6 +283,8 @@ func ReservedHint(key string) string {
 		return "set " + SecretFileStoreEnv + "=1 in the environment of the one machine that needs it"
 	case key == SecretHelperEnv:
 		return "set it in your own shell, or use ALTER DEFAULTS SET secret_helper"
+	case key == config.PlaybooksDirEnv:
+		return "set it in your own shell"
 	}
 	return ""
 }
@@ -339,10 +342,10 @@ func ValidateEnvName(key string) error {
 }
 
 // ReadableReserved reports a reserved key that an earlier release let a
-// layer declare: the secret helper and the secret-store names. A file such
-// a release wrote may hold one.
+// layer declare: the secret helper, the secret-store names and the
+// registry. A file such a release wrote may hold one.
 func ReadableReserved(key string) bool {
-	return key == SecretHelperEnv || key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix)
+	return key == SecretHelperEnv || key == SecretFileStoreEnv || strings.HasPrefix(key, SecretStoreEnvPrefix) || key == config.PlaybooksDirEnv
 }
 
 // ValidateStoredEnvKey is ValidateEnvKey for a name in a file cpb reads,
