@@ -298,6 +298,8 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER PLAYBOOK k SET MODEL m"), "SET MODEL is a property now: SET model = '<model>'"},
 		{w("ALTER PLAYBOOK k UNSET MODEL"), "UNSET MODEL is gone: RESET model"},
 		{w("ALTER DEFAULTS SET VAR A=1"), "VAR is not a DEFAULTS property (secret_helper, failover, failover_accounts, failover_max_context, label_vars)"},
+		{w("ALTER DEFAULTS SET IF UNSET label_vars = A"), "SET IF UNSET is for playbook properties, not DEFAULTS: ALTER DEFAULTS SET <key> = '<value>' (secret_helper, failover, failover_accounts, failover_max_context, label_vars)"},
+		{[]string{"ALTER", "DEFAULTS", "SET", "IF", "UNSET", "failover_accounts", "=", "['a', 'b']"}, "SET IF UNSET is for playbook properties, not DEFAULTS"},
 		{w("ALTER DEFAULTS UNSET SECRET"), "UNSET SECRET HELPER is gone: RESET secret_helper"},
 		{w("ALTER DEFAULTS SET SECRET HELPER"), "SET SECRET HELPER is a property now: SET secret_helper = '<command>'"},
 		{[]string{"ALTER", "DEFAULTS", "SET", "secret_helper", "=", "helper --flag"}, "one command"},

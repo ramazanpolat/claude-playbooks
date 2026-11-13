@@ -99,7 +99,7 @@ func folderSettingsFiles(wd string) []string {
 // mainCheckoutOf reads a worktree's .git file (gitdir: <main>/.git/worktrees/<n>)
 // for the main checkout; "" when it does not say.
 func mainCheckoutOf(gitFile string) string {
-	b, err := os.ReadFile(gitFile)
+	b, err := settings.ReadFile(gitFile)
 	if err != nil {
 		return ""
 	}
@@ -123,7 +123,7 @@ func mainCheckoutOf(gitFile string) string {
 // setsStatusLine reports whether a settings file sets statusLine; err when
 // it cannot be read or parsed (then cpb cannot tell, and adds no step).
 func setsStatusLine(path string) (bool, error) {
-	b, err := os.ReadFile(path)
+	b, err := settings.ReadFile(path)
 	if absentPath(err) {
 		// None there, or .claude is a file: Claude Code reads no
 		// settings from it either.

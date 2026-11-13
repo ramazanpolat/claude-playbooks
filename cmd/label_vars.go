@@ -193,7 +193,7 @@ func explainLabelVars(pb *playbook.Playbook) []labelVarState {
 }
 
 // labelVarsShown is a stored label_vars list for a person: each name with
-// the launch label it gives.
+// the launch label it gives, or that it gives none.
 func labelVarsShown(names []string) string {
 	if len(names) == 0 {
 		return "none (label_vars)"
@@ -205,6 +205,10 @@ func labelVarsShown(names []string) string {
 			parts[i] = n // shown already (labelVarsShownList)
 		case !labelVarShowable(n):
 			parts[i] = labelVarShown(n)
+		case labelVarNameProblem(n) != "":
+			// A name a statement would refuse (a file edited by hand): a
+			// launch leaves it out, so it gives no label.
+			parts[i] = n + " (refused name, left out)"
 		default:
 			parts[i] = n + " as " + labelVarKey(n)
 		}

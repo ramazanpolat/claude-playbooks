@@ -174,3 +174,34 @@ func TestSessionLabelRegistryUnreadable(t *testing.T) {
 		t.Fatalf("exit: %v", err)
 	}
 }
+
+// A session cpb cannot confirm over keeps its labels through the sweep: one
+// whose file records no start time, on a pid that is alive. One whose pid
+// is gone loses them.
+func TestSweepKeepsAnUnconfirmedSessionsLabels(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	work := t.TempDir()
+	const gone = "33333333-3333-4333-8333-333333333333"
+	writeSessionFile(t, filepath.Join(root, "alpha"), 301, sidLive, work, "interactive", "", time.Now())
+	writeSessionFile(t, filepath.Join(root, "alpha"), 302, gone, work, "interactive", liveStart, time.Now())
+	fakeProcInfo(t, map[int]procInfo{301: {start: liveStart}})
+	long := time.Now().Add(-31 * 24 * time.Hour)
+	for _, sid := range []string{sidLive, gone} {
+		if _, err := updateSessionLabels(root, sid, map[string]string{"k": "v"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []string{labelsPath(root, sid), filepath.Join(labelsDir(root), "."+sid+".lock")} {
+			if err := os.Chtimes(p, long, long); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	sweepUsage(root, time.Now())
+	if readSessionLabels(root, sidLive)["k"] != "v" {
+		t.Fatal("swept the labels of a session not known to be over")
+	}
+	if _, err := os.Stat(labelsPath(root, gone)); !os.IsNotExist(err) {
+		t.Fatalf("kept the labels of a session whose process is gone: %v", err)
+	}
+}

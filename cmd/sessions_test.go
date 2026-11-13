@@ -601,3 +601,44 @@ func TestProcStatNegativeTTYNr(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// parsePs reads ps's table on every system, not only where ps runs: lstart
+// is five words in the C locale, a doubled space included; the tty column
+// is read only when asked for, and "?", "??" and "-" mean none.
+func TestParsePs(t *testing.T) {
+	out := []byte(`    1     0 Mon Nov  3 09:12:01 2026 ??
+  301     1 Thu Nov 13 21:35:19 2026 ttys004
+  302   301 Thu Nov 13 21:35:20 2026 -
+  303   302 Thu Nov 13 21:35:21 2026
+  304   303 Thu Nov 13 21:35:22 2026 ? extra
+  abc     1 Thu Nov 13 21:35:23 2026 ttys001
+  305   xyz Thu Nov 13 21:35:24 2026 ttys001
+  306     1 Thu Nov 13
+   -7     1 Thu Nov 13 21:35:25 2026 ttys001
+
+`)
+	withTTY := parsePs(out, true, nil)
+	want := map[int]procInfo{
+		1:   {start: "Mon Nov 3 09:12:01 2026", ppid: 0},
+		301: {start: "Thu Nov 13 21:35:19 2026", ppid: 1, tty: "ttys004"},
+		302: {start: "Thu Nov 13 21:35:20 2026", ppid: 301},
+		303: {start: "Thu Nov 13 21:35:21 2026", ppid: 302},
+	}
+	if len(withTTY) != len(want) {
+		t.Fatalf("with tty: %+v", withTTY)
+	}
+	for pid, w := range want {
+		if withTTY[pid] != w {
+			t.Errorf("with tty, %d: %+v, want %+v", pid, withTTY[pid], w)
+		}
+	}
+	// Without the tty column a line is exactly seven words.
+	table := parsePs(out, false, nil)
+	if len(table) != 1 || table[303] != want[303] {
+		t.Fatalf("without tty: %+v", table)
+	}
+	// keep limits it to the pids asked for.
+	if kept := parsePs(out, true, map[int]bool{301: true, 999: true}); len(kept) != 1 || kept[301] != want[301] {
+		t.Fatalf("kept: %+v", kept)
+	}
+}
