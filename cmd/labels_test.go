@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -236,7 +237,9 @@ func TestSessionLabelsLock(t *testing.T) {
 }
 
 // cpb session label finds the session it runs in from its ancestry: a
-// session file of an ancestor with a matching start time. A start time
+// session file of an ancestor with a matching start time. No launch record
+// is needed: a claude started without cpb in a playbook's directory counts,
+// as SHOW SESSIONS lists it. A start time
 // that does not match, or no session at all, is "not a cpb session",
 // with its own exit code.
 func TestSessionLabelFindsTheCallersSession(t *testing.T) {
@@ -496,5 +499,20 @@ func TestSandboxHostChecksLabels(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The one ps table cpb session label reads on macOS: every process's
+// parent and start time, in the form the session files record.
+func TestPsTable(t *testing.T) {
+	if _, err := exec.LookPath("ps"); err != nil {
+		t.Skip("no ps here")
+	}
+	info, ok := psTable()[os.Getpid()]
+	if !ok || info.ppid != os.Getppid() || len(strings.Fields(info.start)) != 5 {
+		t.Fatalf("this process: %+v %v", info, ok)
+	}
+	if runtime.GOOS != "linux" && !sameStart(info.start, procStartOf(os.Getpid())) {
+		t.Fatalf("start %q, ps -p says %q", info.start, procStartOf(os.Getpid()))
 	}
 }

@@ -224,6 +224,50 @@ func psStarts(pids []int) map[int]procInfo {
 	return out
 }
 
+// procWalker returns a reader of procInfo by pid for one walk up a
+// process's ancestry (cpb session label): on Linux /proc, one small file
+// per pid; elsewhere one ps table, read once on first use and without the
+// tty column, which costs a lookup per process. A missing pid is not
+// alive. It is a variable so tests can fake processes.
+var procWalker = func() func(pid int) (procInfo, bool) {
+	if runtime.GOOS == "linux" {
+		return func(pid int) (procInfo, bool) {
+			info, ok := procStatStarts([]int{pid})[pid]
+			return info, ok
+		}
+	}
+	var table map[int]procInfo
+	return func(pid int) (procInfo, bool) {
+		if table == nil {
+			table = psTable()
+		}
+		info, ok := table[pid]
+		return info, ok
+	}
+}
+
+// psTable is every process's parent and start time, from one ps call, in
+// the form psStarts reads (lstart in UTC with the C locale).
+func psTable() map[int]procInfo {
+	out := map[int]procInfo{}
+	c := exec.Command("ps", "-A", "-o", "pid=,ppid=,lstart=")
+	c.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
+	b, _ := c.Output()
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 7 {
+			continue
+		}
+		pid, err := strconv.Atoi(f[0])
+		if err != nil {
+			continue
+		}
+		ppid, _ := strconv.Atoi(f[1])
+		out[pid] = procInfo{start: strings.Join(f[2:7], " "), ppid: ppid}
+	}
+	return out
+}
+
 // pidDomain is this host's pid domain, as Claude Code writes it.
 var pidDomain = runtime.GOOS
 

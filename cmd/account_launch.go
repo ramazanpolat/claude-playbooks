@@ -341,7 +341,9 @@ func reservedInSettings(configDir, workdir string) error {
 	}
 	for _, f := range files {
 		data, err := os.ReadFile(f)
-		if errors.Is(err, os.ErrNotExist) {
+		if absentPath(err) {
+			// None there, or .claude is a file: Claude Code reads no
+			// settings from it either.
 			continue
 		}
 		if err != nil {
