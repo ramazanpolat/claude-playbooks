@@ -9,6 +9,8 @@
 #   your helper reads file: references and removed when the translator stops.
 #   The account reads it as file:translator-token, so a launch with the
 #   translator down stops before claude starts.
+# - One translator at a time: a second start while one runs refuses, and
+#   leaves the running one's token alone.
 #
 # Adjust: HELPER (a helper that resolves both references below), PROVIDER_KEY
 # (the reference of the provider's key in your secret store) and TOKENS (the
@@ -23,10 +25,23 @@ TOKENS="${CPB_SECRET_FILES:-$HOME/.config/cpb-secrets}"
 PORT=4100
 
 umask 077
-mkdir -p "$TOKENS"
+mkdir -p "$TOKENS" "$DIR"
+# One translator at a time: a second start leaves the running one's token
+# alone. A lock left by a start that was killed (its pid gone) is taken over.
+LOCK="$DIR/run.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  pid=$(cat "$LOCK/pid" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "the translator already runs (pid $pid)" >&2
+    exit 1
+  fi
+  rm -rf "$LOCK"
+  mkdir "$LOCK" || { echo "cannot take $LOCK" >&2; exit 1; }
+fi
+echo $$ > "$LOCK/pid"
+trap 'rm -f "$TOKENS/translator-token"; rm -rf "$LOCK"' EXIT
 token="sk-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 40)"
 printf '%s' "$token" > "$TOKENS/translator-token"
-trap 'rm -f "$TOKENS/translator-token"' EXIT
 
 # Nothing from the calling shell reaches the translator but HOME and PATH.
 # LITELLM_LOCAL_MODEL_COST_MAP keeps LiteLLM from fetching its price table.

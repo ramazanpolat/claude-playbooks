@@ -90,10 +90,21 @@ references from.
   `translator-token` in that folder (mode `600`) and removes it on exit.
 - It listens on `127.0.0.1` only, with nothing of your shell's environment
   but `HOME` and `PATH`.
+- One translator at a time: a second start while one runs refuses, and
+  leaves the running one's token alone.
 
 ## 4. The playbook and its account
 
+cpb resolves the account's `file:translator-token` through the same secret
+helper, so cpb must use it: cpb's built-in helper resolves only `cpb:`
+references. `cpb SHOW DEFAULTS` shows the one cpb uses; it is one per
+machine, so if you already have one, use it in `start.sh` too. Otherwise set
+it once (or set `CPB_SECRET_HELPER` in the shell you run cpb from);
+[example 30](../../examples/30-translated-gateway/playbook.cpb) uses the
+sample helper.
+
 ```bash
+cpb ALTER DEFAULTS SET secret_helper = 'my-secret-helper'
 cpb CREATE PLAYBOOK venice-agent SET launcher = '', login = 'isolated', failover = 'off'
 cpb CREATE ACCOUNT venice SET provider = 'gateway', base_url = 'http://127.0.0.1:4100', auth_token FROM 'file:translator-token', model = 'claude-sonnet-5-5', opus_model = 'claude-opus-5-5', sonnet_model = 'claude-sonnet-5-5', haiku_model = 'claude-haiku-5-5', access = 'listed', description = 'Venice.ai, pay per token, through the local translator'
 cpb ALTER PLAYBOOK venice-agent USE ACCOUNT venice
