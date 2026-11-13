@@ -82,7 +82,8 @@
   the source ships that is new or differs from the install's, as the
   update would write it: a link inside the source as the file or folder
   it names, folder and file modes, the manifest assembled with its mode,
-  a `.git` folder by the commit it holds; preserved files are left out.
+  and for a git URL a `.git` folder by the commit it holds. What the update
+  puts back is left out: preserved files and recorded skills.
   It says `up to date` only when the versions match and nothing would be
   replaced; the same version with other files says so.
 

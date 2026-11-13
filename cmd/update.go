@@ -238,7 +238,13 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 			var view string
 			var removeView func()
 			if view, removeView, cerr = overlayView(work); cerr == nil {
-				changes, cerr = updateChanges(view, root, preserve)
+				var skills []string
+				for n, r := range live.Skills {
+					if r != nil {
+						skills = append(skills, n)
+					}
+				}
+				changes, cerr = newUpdateCompare(root, preserve, skills, isGitURL(pb.Manifest.Source.Repository)).updateChanges(view)
 				removeView()
 			}
 		}
@@ -450,39 +456,106 @@ func overlayView(work string) (string, func(), error) {
 	return view, remove, nil
 }
 
+// updateCompare is how a dry run compares the staged tree, as the overlay
+// would write it (overlayView), with the install root. What the update
+// puts back after the overlay is left out on both sides, as the update
+// itself finds it:
+//   - the preserved paths, by spelling and, in the install, by file
+//     identity (touchedEntry's rule: on a case-insensitive filesystem a
+//     shipped Settings.json is the preserved settings.json);
+//   - the folders a preserved path's restore creates when the source does
+//     not ship them, with nothing in them but what is put back;
+//   - skills/<name> for each [skills] record, which restoreSkills puts
+//     back over the source's skills/.
+//
+// No comparison follows a link or waits: a link is compared by its target,
+// a file or folder is opened without following and without blocking, and
+// anything else (a FIFO, a device) differs from what is not the same kind.
+type updateCompare struct {
+	root      string
+	skip      map[string]bool
+	preserved []os.FileInfo
+	ancestors map[string]bool
+	// gitURL: the staged tree is cpb's own fresh clone, whose .git is
+	// compared by the commit its HEAD names (gitHead). A local source's
+	// .git is compared as files, like any folder.
+	gitURL bool
+}
+
+// newUpdateCompare is the comparison for an install root, its preserved
+// paths, the names of its [skills] records and whether its source is a
+// git URL.
+func newUpdateCompare(root string, preserve, skills []string, gitURL bool) *updateCompare {
+	c := &updateCompare{root: root, skip: map[string]bool{}, ancestors: map[string]bool{}, gitURL: gitURL}
+	for _, p := range preserve {
+		p = filepath.ToSlash(p)
+		c.skip[p] = true
+		if fi, err := os.Lstat(filepath.Join(root, filepath.FromSlash(p))); err == nil {
+			c.preserved = append(c.preserved, fi)
+		}
+		for i := 0; i < len(p); i++ {
+			if p[i] == '/' {
+				c.ancestors[p[:i]] = true
+			}
+		}
+	}
+	for _, n := range skills {
+		c.skip["skills/"+n] = true
+	}
+	return c
+}
+
+// leftOut reports whether rel is put back by the update: a skipped path,
+// or an install entry that is one of the preserved ones under another
+// spelling.
+func (c *updateCompare) leftOut(rel string) bool {
+	if c.skip[rel] {
+		return true
+	}
+	if len(c.preserved) == 0 {
+		return false
+	}
+	fi, err := os.Lstat(filepath.Join(c.root, filepath.FromSlash(rel)))
+	if err != nil {
+		return false
+	}
+	for _, p := range c.preserved {
+		if os.SameFile(fi, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // updateChanges is what an update would replace in root: each top-level
 // entry of view, the staged tree as the overlay would write it
 // (overlayView), that is not yet in root ("new") or differs from root's
 // ("changed": its type, a file's bytes or mode, a folder's mode or
 // entries, the install's own extra entries counting, since the overlay
-// replaces the folder whole, or a link's target). The preserved paths are
-// left out on both sides: the update puts them back.
-func updateChanges(view, root string, preserve []string) ([]string, error) {
-	skip := map[string]bool{}
-	for _, p := range preserve {
-		skip[filepath.ToSlash(p)] = true
-	}
-	entries, err := os.ReadDir(view)
+// replaces the folder whole, or a link's target), what the update puts
+// back left out (updateCompare).
+func (c *updateCompare) updateChanges(view string) ([]string, error) {
+	entries, err := readDirNoFollow(view)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, e := range entries {
 		rel := e.Name()
-		if skip[rel] {
+		if c.leftOut(rel) {
 			continue
 		}
 		shown := rel
 		if e.IsDir() {
 			shown += "/"
 		}
-		if _, err := os.Lstat(filepath.Join(root, rel)); errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Lstat(filepath.Join(c.root, rel)); errors.Is(err, os.ErrNotExist) {
 			out = append(out, shown+" (new)")
 			continue
 		} else if err != nil {
 			return nil, err
 		}
-		same, err := sameTree(filepath.Join(view, rel), filepath.Join(root, rel), rel, skip)
+		same, err := c.sameTree(filepath.Join(view, rel), filepath.Join(c.root, rel), rel)
 		if err != nil {
 			return nil, err
 		}
@@ -494,11 +567,17 @@ func updateChanges(view, root string, preserve []string) ([]string, error) {
 }
 
 // sameTree reports whether a (as the overlay writes it) and b (installed)
-// are the same at rel, the paths in skip left out.
-func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
+// are the same at rel, what the update puts back left out.
+func (c *updateCompare) sameTree(a, b, rel string) (bool, error) {
 	ai, err := os.Lstat(a)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil // the install's own: the overlay removes it
+		// A folder the restore of a preserved path below it creates, when
+		// the source does not ship it; otherwise the install's own, which
+		// the overlay removes.
+		if c.ancestors[rel] {
+			return c.onlyPutBack(b, rel)
+		}
+		return false, nil
 	} else if err != nil {
 		return false, err
 	}
@@ -526,14 +605,14 @@ func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
 		}
 		// A git source's .git is a fresh clone's on every update: its
 		// bookkeeping differs each time, the commit it holds need not.
-		if rel == ".git" {
+		if rel == ".git" && c.gitURL {
 			if ha, hb := gitHead(a), gitHead(b); ha != "" && hb != "" {
 				return ha == hb, nil
 			}
 		}
 		names := map[string]bool{}
 		for _, dir := range []string{a, b} {
-			ents, err := os.ReadDir(dir)
+			ents, err := readDirNoFollow(dir)
 			if err != nil {
 				return false, err
 			}
@@ -543,10 +622,10 @@ func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
 		}
 		for n := range names {
 			r := rel + "/" + n
-			if skip[r] {
+			if c.leftOut(r) {
 				continue
 			}
-			same, err := sameTree(filepath.Join(a, n), filepath.Join(b, n), r, skip)
+			same, err := c.sameTree(filepath.Join(a, n), filepath.Join(b, n), r)
 			if err != nil || !same {
 				return false, err
 			}
@@ -557,21 +636,117 @@ func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
 		if ai.Size() != bi.Size() || ai.Mode().Perm() != bi.Mode().Perm() {
 			return false, nil
 		}
-		ab, err := os.ReadFile(a)
-		if err != nil {
+		ab, err := readRegular(a, -1)
+		if errors.Is(err, errNotComparable) {
+			return false, nil
+		} else if err != nil {
 			return false, err
 		}
-		bb, err := os.ReadFile(b)
+		bb, err := readRegular(b, -1)
+		if errors.Is(err, errNotComparable) {
+			return false, nil
+		}
 		return err == nil && bytes.Equal(ab, bb), err
 	}
+	// A FIFO, a device, a socket: never opened, so never the same.
 	return false, nil
+}
+
+// onlyPutBack reports whether b, an install folder the source does not
+// ship at rel, holds only what the update puts back: preserved paths, and
+// folders above them that hold only those. The update creates such a
+// folder anew for the restore, so its own mode is left out too.
+func (c *updateCompare) onlyPutBack(b, rel string) (bool, error) {
+	bi, err := os.Lstat(b)
+	if err != nil || !bi.IsDir() {
+		return false, nil
+	}
+	ents, err := readDirNoFollow(b)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range ents {
+		r := rel + "/" + e.Name()
+		if c.leftOut(r) {
+			continue
+		}
+		if !c.ancestors[r] {
+			return false, nil
+		}
+		if ok, err := c.onlyPutBack(filepath.Join(b, e.Name()), r); err != nil || !ok {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// errNotComparable is an entry a dry run does not read: a link where a
+// file or folder was found, a FIFO, a device, or a file over its cap.
+var errNotComparable = errors.New("not a regular file or folder, or too large to read")
+
+// openNoFollow opens path for reading without following a link at its
+// last step and without waiting (a FIFO opens at once), and keeps it only
+// when it is a folder (dir) or a regular file.
+func openNoFollow(path string, dir bool) (*os.File, error) {
+	flags := os.O_RDONLY | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+	if dir {
+		flags |= syscall.O_DIRECTORY
+	}
+	f, err := os.OpenFile(path, flags, 0)
+	if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
+		return nil, errNotComparable
+	} else if err != nil {
+		return nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if (dir && !fi.IsDir()) || (!dir && !fi.Mode().IsRegular()) {
+		f.Close()
+		return nil, errNotComparable
+	}
+	return f, nil
+}
+
+// readRegular reads a regular file reached without a link at its last
+// step, at most max bytes (none when max < 0).
+func readRegular(path string, max int64) ([]byte, error) {
+	f, err := openNoFollow(path, false)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if max < 0 {
+		return io.ReadAll(f)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err == nil && int64(len(b)) > max {
+		return nil, errNotComparable
+	}
+	return b, err
+}
+
+// readDirNoFollow lists a folder reached without a link at its last step.
+func readDirNoFollow(path string) ([]os.DirEntry, error) {
+	f, err := openNoFollow(path, true)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	ents, err := f.ReadDir(-1)
+	sort.Slice(ents, func(i, j int) bool { return ents[i].Name() < ents[j].Name() })
+	return ents, err
 }
 
 // gitHead is the commit a .git folder's HEAD names, read from its files
 // (HEAD, then the loose ref or packed-refs line it points to) without
-// running git in the install; "" when it cannot tell.
+// running git in the install; "" when it cannot tell. Each file is read
+// only when every step below dir is a real folder and the file a regular
+// one, opened without following a link and without waiting, within a cap.
 func gitHead(dir string) string {
-	b, err := os.ReadFile(filepath.Join(dir, "HEAD"))
+	b, err := readGitFile(dir, "HEAD", 4<<10)
 	if err != nil {
 		return ""
 	}
@@ -586,13 +761,17 @@ func gitHead(dir string) string {
 	if !gitRefName.MatchString(ref) || strings.Contains(ref, "..") {
 		return ""
 	}
-	if b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(ref))); err == nil {
+	b, err = readGitFile(dir, ref, 4<<10)
+	if err == nil {
 		if id := strings.TrimSpace(string(b)); gitObjectID.MatchString(id) {
 			return id
 		}
 		return ""
 	}
-	packed, err := os.ReadFile(filepath.Join(dir, "packed-refs"))
+	if !errors.Is(err, os.ErrNotExist) {
+		return "" // a link, a FIFO, a folder: cpb cannot tell
+	}
+	packed, err := readGitFile(dir, "packed-refs", gitPackedRefsMax)
 	if err != nil {
 		return ""
 	}
@@ -602,6 +781,29 @@ func gitHead(dir string) string {
 		}
 	}
 	return ""
+}
+
+// gitPackedRefsMax is the largest packed-refs gitHead reads; a larger one
+// leaves .git compared as files.
+const gitPackedRefsMax = 8 << 20
+
+// readGitFile reads rel (slash-separated) below dir: each folder on the way
+// a real one (a link refuses), the file a regular one opened without
+// following and without waiting, at most max bytes.
+func readGitFile(dir, rel string, max int64) ([]byte, error) {
+	p := dir
+	parts := strings.Split(rel, "/")
+	for _, part := range parts[:len(parts)-1] {
+		p = filepath.Join(p, part)
+		fi, err := os.Lstat(p)
+		if err != nil {
+			return nil, err
+		}
+		if !fi.IsDir() {
+			return nil, errNotComparable
+		}
+	}
+	return readRegular(filepath.Join(p, parts[len(parts)-1]), max)
 }
 
 var (
