@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
@@ -172,13 +173,29 @@ func accountClass(name string) string {
 // is killed.
 var failoverKillAfter = 10 * time.Second
 
-// failoverHandover is the switch whose launch on the new account is
-// running, nil otherwise.
-var failoverHandover *failoverSwitch
+// failoverHandover is the switch whose launch on the new account (or back
+// on the old one, when failoverBack) is running, nil otherwise.
+var (
+	failoverHandover *failoverSwitch
+	failoverBack     bool
+)
+
+// handoverClaudeStarted is set once the running launch's claude has
+// written its session file.
+var handoverClaudeStarted atomic.Bool
+
+// failoverTerm sends SIGTERM to the session's claude: through the launch's
+// own process handle when it is claude, else by pid. A variable for tests.
+var failoverTerm = func(child *os.Process, claudePID int) error {
+	if claudePID == child.Pid {
+		return child.Signal(syscall.SIGTERM)
+	}
+	return syscall.Kill(claudePID, syscall.SIGTERM)
+}
 
 // handoverSigs catches Ctrl-C between two claudes of a switch: from just
-// before cpb ends the old one until the next one starts (or cpb run
-// returns). The terminal is in its ordinary mode then, so a Ctrl-C would
+// before cpb ends the old one until the next one has written its session
+// file (or cpb run returns), so a secret helper's prompt is covered too. The terminal is in its ordinary mode then, so a Ctrl-C would
 // end cpb and leave the session ended; inside claude it is claude's.
 var (
 	handoverMu   sync.Mutex
@@ -216,19 +233,30 @@ func (sw *failoverSwitch) notRun(err error) bool {
 func (w *failoverWatch) watch(done <-chan struct{}, child *os.Process) *failoverSwitch {
 	t := time.NewTicker(failoverPoll)
 	defer t.Stop()
-	claudePID := 0
+	claudePID, confirmed := 0, false
 	for {
 		select {
 		case <-done:
 			return nil
 		case <-t.C:
 		}
-		if claudePID == 0 {
-			claudePID = sessionPIDOf(w.configDir, child.Pid)
-			if claudePID == 0 {
-				continue
+		if !confirmed {
+			pid, ok := sessionPIDOf(w.configDir, child.Pid)
+			if pid != 0 {
+				claudePID = pid
+			}
+			if ok {
+				// This launch's claude is running: a Ctrl-C is its own again.
+				confirmed = true
+				releaseHandover()
+				handoverClaudeStarted.Store(true)
 			}
 		}
+		if claudePID == 0 {
+			continue
+		}
+		// An unconfirmed session file still reaches check, which says once
+		// that it does not switch at this limit.
 		c := w.check(claudePID)
 		if c == nil || !w.act(c, claudePID, child) {
 			continue
@@ -312,7 +340,10 @@ func (w *failoverWatch) check(claudePID int) *failoverCandidate {
 	// The resume runs from the folder whose project directory holds the
 	// transcript, where Claude Code finds the session; the same checks a
 	// resume there makes come first.
-	folder := resumeFolder(path, append([]string{f.Cwd, w.launchDir}, tail.cwds...)...)
+	// The launch folder first: two folders can share one encoded name
+	// (my-app, my/app), and the launch's own is the one it ran from.
+	candidates := append(spellings(w.launchDir), spellings(f.Cwd)...)
+	folder := resumeFolder(path, append(candidates, tail.cwds...)...)
 	if folder == "" {
 		return decline("the folder the session's transcript belongs to is not known (its project directory matches none of the session's folders)")
 	}
@@ -372,16 +403,38 @@ func resumeFolder(transcript string, candidates ...string) string {
 	return ""
 }
 
-// hasControl reports whether s holds a control character.
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, unicode.IsControl) >= 0
+// spellings is p and p with symlinks resolved, when they differ: a
+// launch through a symlink, and Claude Code naming the resolved folder.
+func spellings(p string) []string {
+	if p == "" {
+		return nil
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
+		return []string{p, r}
+	}
+	return []string{p}
 }
 
-// printable is s with each control character shown as '?', for a line on
-// the terminal.
+// hidden reports whether c is a character cpb does not print as written:
+// a control character, a direction mark, embedding, override or isolate,
+// or a line or paragraph separator. Zero-width joiners and spaces stay:
+// folder names hold them, and a paste needs them.
+func hidden(c rune) bool {
+	return unicode.IsControl(c) || c == 0x200E || c == 0x200F || c >= 0x202A && c <= 0x202E || c >= 0x2066 && c <= 0x2069 ||
+		c == 0x2028 || c == 0x2029
+}
+
+// hasControl reports whether s holds a character a terminal does not show
+// as written (hidden).
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, hidden) >= 0
+}
+
+// printable is s with each character cpb does not print as written
+// (hidden) shown as '?', for a line on the terminal.
 func printable(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if hidden(r) {
 			return '?'
 		}
 		return r
@@ -408,13 +461,7 @@ func (w *failoverWatch) act(c *failoverCandidate, claudePID int, child *os.Proce
 		}
 	}
 	catchHandover()
-	var err error
-	if claudePID == child.Pid {
-		err = child.Signal(syscall.SIGTERM)
-	} else {
-		err = syscall.Kill(claudePID, syscall.SIGTERM)
-	}
-	if err != nil {
+	if err := failoverTerm(child, claudePID); err != nil {
 		releaseHandover()
 		w.episode.note("cpb: could not end the session to switch accounts: " + err.Error())
 		return false
@@ -501,14 +548,16 @@ func readSessionFileOf(configDir string, pid int) (sessionFile, bool) {
 
 // sessionPIDOf is the pid of the claude the launch started: the child
 // itself when it has a session file, else the child's own child that does
-// (a secret helper that does not exec). 0 while there is none yet.
-func sessionPIDOf(configDir string, child int) int {
-	if _, ok := readSessionFileOf(configDir, child); ok {
-		return child
+// (a secret helper that does not exec); 0 while there is none yet. It also
+// reports whether that file is confirmed, its start time matching its
+// process: a file a process before left on the pid is not.
+func sessionPIDOf(configDir string, child int) (int, bool) {
+	if f, ok := readSessionFileOf(configDir, child); ok {
+		return child, sameStart(procStartOf(child), f.ProcStart)
 	}
 	ents, err := os.ReadDir(filepath.Join(configDir, "sessions"))
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	var pids []int
 	for _, e := range ents {
@@ -517,11 +566,14 @@ func sessionPIDOf(configDir string, child int) int {
 		}
 	}
 	for pid, info := range procStarts(pids) {
-		if info.ppid == child {
-			return pid
+		if info.ppid != child {
+			continue
+		}
+		if f, ok := readSessionFileOf(configDir, pid); ok {
+			return pid, sameStart(info.start, f.ProcStart)
 		}
 	}
-	return 0
+	return 0, false
 }
 
 // continuePrompt is the prompt the resumed session gets: what moved, then
@@ -625,10 +677,27 @@ func absPath(p string) string {
 // settingsPath is a --settings value for a resume from another folder:
 // a file's path made absolute; JSON as it is.
 func settingsPath(v string) string {
-	if strings.HasPrefix(strings.TrimSpace(v), "{") {
+	if t := strings.TrimSpace(v); strings.HasPrefix(t, "{") || t == "~" || strings.HasPrefix(t, "~/") {
 		return v
 	}
 	return absPath(v)
+}
+
+// absSettingsArgs is args with each --settings file's path made absolute.
+func absSettingsArgs(args []string) []string {
+	out := append([]string(nil), args...)
+	for i := 0; i < len(out); i++ {
+		if out[i] == "--" {
+			break
+		}
+		if v, ok := strings.CutPrefix(out[i], "--settings="); ok {
+			out[i] = "--settings=" + settingsPath(v)
+		} else if out[i] == "--settings" && i+1 < len(out) {
+			out[i+1] = settingsPath(out[i+1])
+			i++
+		}
+	}
+	return out
 }
 
 // printFailoverSummary says, on stderr, what this process's failover did.
@@ -704,6 +773,9 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 	}
 	w := &failoverWatch{cfg: cfg, configDir: in.configDir, playbook: in.pb.Name, from: from,
 		fromClass: accountClass(from), launchDir: in.wd, episode: activeEpisode, since: failoverNow()}
+	// The pre-check reads a --settings file as the relaunch will: by its
+	// path from the launch folder, not from the session's.
+	checkArgs := absSettingsArgs(in.claudeArgs)
 	w.canRunOn = func(next, folder string) error {
 		var tk []launchToken
 		for _, t := range in.tokens {
@@ -716,7 +788,7 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 		if err != nil {
 			return err
 		}
-		a, err := planAccount(in.configDir, in.pb.Name, layers, folder, in.claudeArgs)
+		a, err := planAccount(in.configDir, in.pb.Name, layers, folder, checkArgs)
 		if err != nil {
 			return err
 		}

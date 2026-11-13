@@ -431,13 +431,21 @@ func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 // encodeProjectDir is Claude Code's directory name under projects/ for a
 // working directory: every character outside [A-Za-z0-9] becomes '-'.
 func encodeProjectDir(cwd string) string {
-	b := []byte(cwd)
-	for i, c := range b {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
-			b[i] = '-'
+	// Claude Code replaces each UTF-16 code unit that is not an ASCII
+	// letter or digit: one '-' per character, two for one outside the
+	// Basic Multilingual Plane (checked on Claude Code 2.1.234).
+	var b strings.Builder
+	for _, r := range cwd {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r > 0xFFFF:
+			b.WriteString("--")
+		default:
+			b.WriteByte('-')
 		}
 	}
-	return string(b)
+	return b.String()
 }
 
 // transcriptPath finds id's transcript in configDir: under the encoded cwd

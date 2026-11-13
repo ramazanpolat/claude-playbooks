@@ -65,8 +65,11 @@ func runRecorded(c *exec.Cmd, rec *launchRecord, watch *failoverWatch) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
-	// The next claude of a switch has started: a Ctrl-C is its own again.
-	releaseHandover()
+	// Without a watcher to see the next claude's session file, the launch's
+	// start ends the catch of a switch's Ctrl-C.
+	if watch == nil {
+		releaseHandover()
+	}
 	// A token run stays live for as long as this session does, even if
 	// cpb is killed first (internal/auth/own_login.go).
 	auth.SessionStarted(c.Process.Pid)
@@ -108,10 +111,11 @@ func (r *failoverRelaunch) Error() string { return r.sw.Error() }
 
 // runRun launches a playbook, and launches it again on another account
 // each time its session moves there (account failover). The resume runs
-// from the folder the session ran in. A launch on the new account that
-// never ran the session (refused, or its secret helper failing before
-// claude starts: the transcript is as it was) resumes the session on the
-// account it came from instead, so a switch never leaves it ended.
+// from the session's own folder. A launch on the new account that never
+// ran the session (refused, or its secret helper failing before claude
+// starts: the transcript is as it was) resumes the session on the account
+// it came from instead; when that does not run it either, cpb says nothing
+// runs the session and how to resume it by hand.
 func runRun(cmd *cobra.Command, args []string) error {
 	// A Ctrl-C between two claudes of a switch is caught (handoverSigs in
 	// failover.go); cpb run stops catching it when it returns, whatever
@@ -130,21 +134,37 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if sw.folder != "" {
 			_ = os.Chdir(sw.folder)
 		}
-		failoverHandover = sw
+		failoverHandover, failoverBack = sw, false
+		handoverClaudeStarted.Store(false)
 		err = runRunOnce(cmd, rl.args)
 		var again *failoverRelaunch
 		if !errors.As(err, &again) && sw.notRun(err) {
 			sw.Outcome = "failed"
-			fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, printable(firstLine(err.Error())), sw.From)
+			fmt.Fprint(os.Stderr, relaunchFailedLine(sw, err))
+			failoverBack = true
+			handoverClaudeStarted.Store(false)
 			err = runRunOnce(cmd, rl.back)
-			if !errors.As(err, &again) && sw.notRun(err) {
+			// A way back whose claude ran and then ended with an error
+			// reported as any launch does; one that never ran is stranded.
+			if !errors.As(err, &again) && sw.notRun(err) && !handoverClaudeStarted.Load() {
 				sw.stranded = true
 				printFailoverSummary()
-				fmt.Fprintf(os.Stderr, "cpb: could not resume it on %s either (%s); to resume it by hand:\n  %s\n", sw.From, printable(firstLine(err.Error())), resumeByHand(sw.folder, rl.back))
+				line, filled := resumeByHand(sw.folder, rl.back)
+				how := "to resume it by hand:"
+				if filled {
+					how = "to resume it by hand, replace each <...> with its value and remove the leading #, then run:"
+				}
+				fmt.Fprintf(os.Stderr, "cpb: could not resume it on %s either (%s); %s\n  %s\n", sw.From, printable(firstLine(err.Error())), how, line)
 			}
 		}
-		failoverHandover = nil
+		failoverHandover, failoverBack = nil, false
 	}
+}
+
+// relaunchFailedLine is what cpb says when the launch on the new account
+// did not run the session, its error shown with control characters as '?'.
+func relaunchFailedLine(sw *failoverSwitch, err error) string {
+	return fmt.Sprintf("cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, printable(firstLine(err.Error())), sw.From)
 }
 
 // pinPlaybooksDir makes a relative playbooks root absolute before a
@@ -158,31 +178,96 @@ func pinPlaybooksDir() {
 	}
 }
 
+// notShown stands for a value the by-hand line does not show.
+const notShown = "<a value with control characters, not shown>"
+
+// mustHide reports whether s holds a character a terminal does not show as
+// written, other than a newline or a tab (which single quotes keep).
+func mustHide(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return hidden(r) && r != '\n' && r != '\t' }) >= 0
+}
+
 // resumeByHand is the command line that resumes a session with args from
-// folder, quoted for a POSIX shell. An --env value is not shown: it may be
-// a credential.
-func resumeByHand(folder string, args []string) string {
-	words := []string{"cpb", "run"}
-	for _, a := range args {
-		if v, ok := strings.CutPrefix(a, "--env="); ok {
-			k, _, _ := strings.Cut(v, "=")
-			a = "--env=" + k + "=<your value>"
+// folder, quoted for any POSIX shell, and whether a value in it is not
+// shown: an --env value and an inline --settings JSON (either may hold a
+// credential), and a value with a character a terminal does not show as
+// written. A flag keeps its name; its value becomes a placeholder. A line
+// with a placeholder starts with "# " and stays one line (a value holding
+// a newline is then not shown either), so pasted as it is it runs nothing.
+func resumeByHand(folder string, args []string) (string, bool) {
+	line, filled := byHandLine(folder, args, false)
+	if filled {
+		// A marked line stays one line: the "# " covers only its first, so
+		// a value's newline would carry the rest to the shell.
+		line, _ = byHandLine(folder, args, true)
+		line = "# " + line
+	}
+	return line, filled
+}
+
+// byHandLine is resumeByHand's line, unmarked, and whether a value in it
+// is not shown; with oneLine, a value holding a newline is not shown
+// either.
+func byHandLine(folder string, args []string, oneLine bool) (string, bool) {
+	filled := false
+	hide := func(s string) bool { return mustHide(s) || oneLine && strings.Contains(s, "\n") }
+	word := func(s string) string {
+		if hide(s) {
+			filled = true
+			return shellWord(notShown)
 		}
-		words = append(words, shellWord(a))
+		return shellWord(s)
+	}
+	isJSON := func(v string) bool { return strings.HasPrefix(strings.TrimSpace(v), "{") }
+	words := []string{"cpb", "run"}
+	if config.PlaybooksDir != "" || os.Getenv(config.PlaybooksDirEnv) != "" {
+		words = append(words, "--playbooks-dir", word(config.ResolvePlaybooksDir()))
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, value, inline := strings.Cut(a, "=")
+		switch {
+		case inline && name == "--env":
+			k, _, _ := strings.Cut(value, "=")
+			if hide(k) {
+				k = notShown
+			}
+			words = append(words, shellWord("--env="+k+"=<your value>"))
+			filled = true
+		case inline && name == "--settings" && isJSON(value):
+			words = append(words, shellWord("--settings=<your settings JSON>"))
+			filled = true
+		case a == "--settings" && i+1 < len(args) && isJSON(args[i+1]):
+			words = append(words, a, shellWord("<your settings JSON>"))
+			filled = true
+			i++
+		case inline && strings.HasPrefix(name, "--") && hide(value):
+			words = append(words, shellWord(name+"="+notShown))
+			filled = true
+		default:
+			words = append(words, word(a))
+		}
 	}
 	line := strings.Join(words, " ")
 	if folder != "" {
-		line = "cd " + shellWord(folder) + " && " + line
+		line = "cd " + word(folder) + " && " + line
 	}
-	return printable(line)
+	return line, filled
 }
 
-// shellWord is s as one word for a POSIX shell.
+// shellWord is s as one word for any POSIX shell: as it is when it is
+// plain, else in single quotes, where a newline or a tab stands as itself.
+// A value with any other character a terminal does not show as written is
+// not shown (resumeByHand marks the line).
 func shellWord(s string) string {
-	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+	plain := s != "" && s[0] != '=' && s[0] != '~' && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@%+,", r))
-	}) < 0 {
+	}) < 0
+	if plain {
 		return s
+	}
+	if mustHide(s) {
+		return "'" + notShown + "'"
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -520,10 +605,9 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 			&failoverSwitch{From: sw.To, To: sw.From, sessionID: sw.sessionID, model: sw.model, folder: sw.folder, noPrompt: true})}
 	}
 	err = preserveExitCode(err)
-	if h := failoverHandover; h != nil && h.notRun(err) {
-		// The launch on the new account never ran the session: runRun
-		// resumes it on the account it came from, and that launch's end
-		// reports the switch as not made.
+	if h := failoverHandover; h != nil && h.notRun(err) && !(failoverBack && handoverClaudeStarted.Load()) {
+		// The launch never ran the session: runRun goes on (back to the
+		// account it came from, or says nothing runs it) and reports.
 		return err
 	}
 	printFailoverSummary()

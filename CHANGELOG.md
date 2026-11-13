@@ -77,6 +77,15 @@
   `at_limit`, after `tty`; the TUI's Sessions view and a playbook's
   Sessions tab show both.
 
+### Fixed
+
+- **cpb names a folder's project directory as Claude Code does:** one `-`
+  for each character outside ASCII letters and digits, two for one outside
+  the Basic Multilingual Plane. A session that ran in a folder whose name
+  has a non-ASCII character is found under its own folder, so `--resume
+  <id>` and `--continue` from there are checked as they are anywhere
+  else.
+
 ## [v4.7.0] -- 2026-11-12
 
 v4.7.0 lets cpb keep your secrets itself. A `cpb:<name>` reference needs no
