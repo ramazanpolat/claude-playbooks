@@ -1411,8 +1411,9 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     inline `--settings` JSON, and a value holding a control character
     (other than a newline or a tab), a direction mark, embedding, override
     or isolate (U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) or a line or
-    paragraph separator. Such a line starts with `# `, so pasted as it is
-    it runs nothing, and cpb says to replace each placeholder and remove
+    paragraph separator. Such a line starts with `# ` and stays one line
+    (a value holding a newline is then not shown either), so pasted as it
+    is it runs nothing, and cpb says to replace each placeholder and remove
     the `#` first. A way back whose claude ran and then
     ended with an error is reported as any launch: the session stayed on
     the old account. A launch on the new account that wrote to the

@@ -192,11 +192,27 @@ func mustHide(s string) bool {
 // shown: an --env value and an inline --settings JSON (either may hold a
 // credential), and a value with a character a terminal does not show as
 // written. A flag keeps its name; its value becomes a placeholder. A line
-// with a placeholder starts with "# ", so pasted as it is it runs nothing.
+// with a placeholder starts with "# " and stays one line (a value holding
+// a newline is then not shown either), so pasted as it is it runs nothing.
 func resumeByHand(folder string, args []string) (string, bool) {
+	line, filled := byHandLine(folder, args, false)
+	if filled {
+		// A marked line stays one line: the "# " covers only its first, so
+		// a value's newline would carry the rest to the shell.
+		line, _ = byHandLine(folder, args, true)
+		line = "# " + line
+	}
+	return line, filled
+}
+
+// byHandLine is resumeByHand's line, unmarked, and whether a value in it
+// is not shown; with oneLine, a value holding a newline is not shown
+// either.
+func byHandLine(folder string, args []string, oneLine bool) (string, bool) {
 	filled := false
+	hide := func(s string) bool { return mustHide(s) || oneLine && strings.Contains(s, "\n") }
 	word := func(s string) string {
-		if mustHide(s) {
+		if hide(s) {
 			filled = true
 			return shellWord(notShown)
 		}
@@ -213,7 +229,7 @@ func resumeByHand(folder string, args []string) (string, bool) {
 		switch {
 		case inline && name == "--env":
 			k, _, _ := strings.Cut(value, "=")
-			if mustHide(k) {
+			if hide(k) {
 				k = notShown
 			}
 			words = append(words, shellWord("--env="+k+"=<your value>"))
@@ -225,7 +241,7 @@ func resumeByHand(folder string, args []string) (string, bool) {
 			words = append(words, a, shellWord("<your settings JSON>"))
 			filled = true
 			i++
-		case inline && strings.HasPrefix(name, "--") && mustHide(value):
+		case inline && strings.HasPrefix(name, "--") && hide(value):
 			words = append(words, shellWord(name+"="+notShown))
 			filled = true
 		default:
@@ -235,9 +251,6 @@ func resumeByHand(folder string, args []string) (string, bool) {
 	line := strings.Join(words, " ")
 	if folder != "" {
 		line = "cd " + word(folder) + " && " + line
-	}
-	if filled {
-		line = "# " + line
 	}
 	return line, filled
 }

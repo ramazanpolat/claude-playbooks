@@ -613,13 +613,22 @@ func TestResumeByHand(t *testing.T) {
 	got, filled := resumeByHand("/w/my dir", []string{"--env=K=v", `--settings={"env":{"A":"b"}}`, "--settings", `{"x":1}`, "--account", "a", "alpha",
 		"--resume", sidLive, "--append-system-prompt", "one\ntwo", "--system-prompt", "bad\x1b[31m", "--agent=x\r", "--settings=s\u202e.json", "=x", "~y", "zw\u200dj"})
 	want := `# cd '/w/my dir' && cpb run --playbooks-dir /srv/pb '--env=K=<your value>' '--settings=<your settings JSON>' --settings '<your settings JSON>' --account a alpha --resume ` +
-		sidLive + " --append-system-prompt 'one\ntwo' --system-prompt '<a value with control characters, not shown>'" +
+		sidLive + " --append-system-prompt '<a value with control characters, not shown>' --system-prompt '<a value with control characters, not shown>'" +
 		" '--agent=<a value with control characters, not shown>' '--settings=<a value with control characters, not shown>' '=x' '~y' 'zw\u200dj'"
 	if got != want || !filled || strings.IndexFunc(got, func(r rune) bool { return hidden(r) && r != '\n' }) >= 0 {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
-	if line, filled := resumeByHand("/w", []string{"--account", "a", "alpha", "--resume", sidLive}); filled || strings.HasPrefix(line, "#") {
+	// Unmarked, a newline stands inside single quotes as itself.
+	if line, filled := resumeByHand("/w", []string{"--append-system-prompt", "one\ntwo", "--account", "a", "alpha", "--resume", sidLive}); filled ||
+		strings.HasPrefix(line, "#") || !strings.Contains(line, "'one\ntwo'") {
 		t.Fatalf("nothing hidden, yet marked: %q", line)
+	}
+	// Each way a value is hidden marks the line on its own: a separate
+	// word, an inline value.
+	for _, args := range [][]string{{"--system-prompt", "bad\x1b[31m", "alpha"}, {"--agent=x\r", "alpha"}} {
+		if line, filled := resumeByHand("/w", args); !filled || !strings.HasPrefix(line, "# ") || strings.Contains(line, "\n") {
+			t.Errorf("%q: %q %v", args, line, filled)
+		}
 	}
 	// Every word reads back as itself in the system's POSIX shell.
 	for _, v := range []string{"plain", "my dir", "it's", "one\ntwo\n", "tab\there", "=x", "~y", "$(echo no)", "`no`", "a\\b"} {
@@ -640,7 +649,10 @@ func TestResumeByHandPasteRunsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	folder := t.TempDir()
-	hiddenLine, filled := resumeByHand(folder, []string{"--env=K=v", "--account", "a", "alpha"})
+	second := filepath.Join(t.TempDir(), "second")
+	// A value shown in an unmarked line would keep its newlines; in a
+	// marked one it is not shown, so its second line never reaches a shell.
+	hiddenLine, filled := resumeByHand(folder, []string{"--env=K=v", "--append-system-prompt", "first\ntouch " + second + "\nthird", "--account", "a", "alpha"})
 	plainLine, plain := resumeByHand(folder, []string{"--account", "a", "alpha"})
 	if !filled || plain {
 		t.Fatalf("marks: %v %v", filled, plain)
@@ -653,13 +665,21 @@ func TestResumeByHandPasteRunsNothing(t *testing.T) {
 	}
 	for _, sh := range shells {
 		_ = os.Remove(marker)
-		c := exec.Command(sh[0], append(sh[1:], hiddenLine)...)
-		c.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
-		_ = c.Run()
+		// As one argument, and as pasted text on the shell's input.
+		for _, c := range []*exec.Cmd{exec.Command(sh[0], append(sh[1:], hiddenLine)...), exec.Command(sh[0])} {
+			if len(c.Args) == 1 {
+				c.Stdin = strings.NewReader(hiddenLine + "\n")
+			}
+			c.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
+			_ = c.Run()
+		}
 		if _, err := os.Stat(marker); err == nil {
 			t.Errorf("%s: the line with a hidden value ran cpb", sh[0])
 		}
-		c = exec.Command(sh[0], append(sh[1:], plainLine)...)
+		if _, err := os.Stat(second); err == nil {
+			t.Errorf("%s: a hidden value's second line ran", sh[0])
+		}
+		c := exec.Command(sh[0], append(sh[1:], plainLine)...)
 		c.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
 		_ = c.Run()
 		if _, err := os.Stat(marker); err != nil {
