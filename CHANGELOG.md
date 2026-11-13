@@ -25,8 +25,8 @@
     naming the key and never the value. Labels are never taken from the
     environment.
   - A launch whose playbooks root came from `--playbooks-dir` sets
-    `CPB_PLAYBOOKS_DIR` (absolute) in the session, so a cpb inside it uses
-    the same root.
+    `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
+    one, so a cpb inside it uses the same root.
   - Guide: `docs/guides/labels.md`; example `29-labels`.
 
 ## [v4.8.0] -- 2026-11-13

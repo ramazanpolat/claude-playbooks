@@ -281,7 +281,9 @@ func liveSessionByID(sessionID string) (sessionFile, error) {
 		return sessionFile{}, err
 	}
 	for _, s := range readSessionFiles(dirs) {
-		if s.f.SessionID == sessionID {
+		// Only a session confirmed live: not one recorded in another pid
+		// domain, nor one whose file records no start time (a reused pid).
+		if s.f.SessionID == sessionID && s.state == live {
 			return s.f, nil
 		}
 	}
@@ -299,13 +301,13 @@ func sortedLabelKeys(m map[string]string) []string {
 }
 
 // withPlaybooksRoot is env with the launch's playbooks root as
-// CPB_PLAYBOOKS_DIR (absolute) when the root came from --playbooks-dir:
-// a cpb inside the session (cpb session label, SHOW SESSIONS) then reads
-// the same root. A root from the environment is there already; the
-// default needs nothing. Layers can never set the variable (it is
-// reserved); this is cpb's own.
+// CPB_PLAYBOOKS_DIR (absolute) when the root came from --playbooks-dir,
+// replacing an inherited one the flag outranked: a cpb inside the session
+// (cpb session label, SHOW SESSIONS) then reads the same root. A root from
+// the environment is there already; the default needs nothing. Layers can
+// never set the variable (it is reserved); this is cpb's own.
 func withPlaybooksRoot(env []string) []string {
-	if config.PlaybooksDir == "" || os.Getenv(config.PlaybooksDirEnv) != "" {
+	if config.PlaybooksDir == "" {
 		return env
 	}
 	out := make([]string, 0, len(env)+1)

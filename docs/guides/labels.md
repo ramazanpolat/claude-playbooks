@@ -33,7 +33,8 @@ cpb session label --list --json       # {"session_id": "...", "labels": {...}}
 
   `cpb session label` finds the session it runs in from its own process
   ancestry: the nearest ancestor that is a Claude Code session of a
-  playbook. `--session <id>` names a live session instead.
+  playbook. `--session <id>` names a live session instead, one cpb can
+  confirm is running.
 
 The two never mix: a session label does not change a launch label of the
 same key, and every place that shows labels shows both, apart.
@@ -91,8 +92,9 @@ takes a label from the environment.
 ## Another playbooks root
 
 A session launched with `--playbooks-dir` gets `CPB_PLAYBOOKS_DIR` set to
-that root, so `cpb session label` and `SHOW SESSIONS` inside the session use
-the same one. A root you set in the environment is passed on as it is.
+that root, replacing one your shell exported, so `cpb session label` and
+`SHOW SESSIONS` inside the session use the same one. A root you set only in
+the environment is passed on as it is.
 
 ## Files
 
