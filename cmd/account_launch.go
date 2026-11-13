@@ -330,15 +330,14 @@ func quoteSQL(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") +
 
 // reservedInSettings refuses a settings file that would route or
 // authenticate the launch after cpb's account: the playbook's settings.json
-// and every folder-level settings file Claude Code reads for the working
-// folder (folderSettingsFiles: the folder's own, its repository root's, a
-// worktree's main checkout's), whose env Claude Code applies over the
-// environment it starts with, and whose apiKeyHelper outranks the Claude
-// login. One that cannot be read or parsed refuses too.
+// and the working folder's .claude/settings.json and settings.local.json,
+// whose env Claude Code applies over the environment it starts with, and
+// whose apiKeyHelper outranks the Claude login. One that cannot be read or
+// parsed refuses too.
 func reservedInSettings(configDir, workdir string) error {
 	files := []string{filepath.Join(configDir, "settings.json")}
 	if workdir != "" {
-		files = append(files, folderSettingsFiles(workdir)...)
+		files = append(files, filepath.Join(workdir, ".claude", "settings.json"), filepath.Join(workdir, ".claude", "settings.local.json"))
 	}
 	for _, f := range files {
 		data, err := os.ReadFile(f)

@@ -747,7 +747,7 @@ func TestUsageResetWindowOverAnOlderOne(t *testing.T) {
 }
 
 // SHOW CREATE leaves out a label no statement could set, and says so.
-func TestShowCreateAccountLeavesOutAnUnsafeLabel(t *testing.T) {
+func TestShowCreateAccountLeavesOutAHiddenCharacterLabel(t *testing.T) {
 	b := createAccountBlock(&account.Account{Name: "acc", Provider: account.Anthropic, Identity: "me\x1b]0;x\x07",
 		Auth: account.Auth{Kind: account.ClaudeToken, Ref: "keychain:ok/t"}})
 	if strings.Contains(b.text, "\x1b") || strings.Contains(b.text, "identity") && !strings.Contains(b.text, "its identity label is left out") {

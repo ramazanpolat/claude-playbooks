@@ -82,13 +82,9 @@
 
 ### Changed
 
-- **The reserved-key check of settings files reads every folder-level
-  file Claude Code reads** for the working folder: its own
-  `.claude/settings.json` and `settings.local.json`, and those of its
-  repository's root and of a worktree's main checkout.
 - **`SHOW CREATE ACCOUNT` leaves out an identity label no statement could
   set** (a hand-edited one holding a control or invisible character), with
-  a comment saying so, instead of printing it raw.
+  a comment line saying so.
 
 ### Fixed
 

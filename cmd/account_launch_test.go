@@ -296,25 +296,3 @@ func TestKeylessAccountLaunchHasACredential(t *testing.T) {
 		t.Fatalf("EXPLAIN names the fixed value:\n%s", ex)
 	}
 }
-
-// The reserved-key check reads every folder-level settings file Claude
-// Code reads for the working folder, the repository root's included.
-func TestReservedInSettingsRepositoryRoot(t *testing.T) {
-	repo := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sub := filepath.Join(repo, "app", "src")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".claude", "settings.json"), []byte(`{"apiKeyHelper":"x"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := reservedInSettings(t.TempDir(), sub); err == nil || !strings.Contains(err.Error(), filepath.Join(repo, ".claude", "settings.json")) {
-		t.Fatalf("the repository root's settings: %v", err)
-	}
-}
