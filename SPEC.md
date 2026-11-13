@@ -2075,7 +2075,8 @@ usage (*SHOW USAGE*). The playbook changes nothing.
   signal for one a signal ended; a SIGTERM, SIGINT or SIGHUP to the step
   goes on to it). The account, its usage key and the rest come from the
   launch record the id names, never from argv or the session's
-  environment; the step knows no identity.
+  environment. The step reads no login's identity; it reads stored
+  accounts' `identity` labels, to merge their entries in the `cpb` key.
 - **What it adds: the `cpb` key**, version 1. Names only: never an
   identity, never a credential.
 

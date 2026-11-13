@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -76,20 +77,6 @@ func TestUsageStaleWindowDoesNotReturn(t *testing.T) {
 	stepRecord(a, rateInput(sidB, 100, old, 10, seven)) // B, idle, re-renders
 	if got := latestFive(t, root, "work"); got != 3 {
 		t.Fatalf("the old window's figure came back: %v", got)
-	}
-}
-
-// An older figure never replaces a newer one.
-func TestUsageWriteLatestKeepsNewer(t *testing.T) {
-	root := t.TempDir()
-	rates := func(p float64) json.RawMessage {
-		return json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":%g,"resets_at":%d}}`, p, time.Now().Add(time.Hour).Unix()+int64(p)))
-	}
-	now := time.Now().UTC()
-	writeLatest(root, usageSnapshot{Key: "k", Account: "k", At: rfc3339(now), SessionID: stepSID, RateLimits: rates(50)})
-	writeLatest(root, usageSnapshot{Key: "k", Account: "k", At: rfc3339(now.Add(-time.Minute)), SessionID: stepSID, RateLimits: rates(10)})
-	if got := latestFive(t, root, "k"); got != 50 {
-		t.Fatalf("an older figure replaced a newer one: %v", got)
 	}
 }
 
@@ -474,7 +461,7 @@ func TestUsageFirstRenderKeepsTheNewerWindow(t *testing.T) {
 func TestUsageIdentityLabelShape(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	putAccount(t, account.Account{Name: "acc", Provider: account.Anthropic, Identity: "me\x1b]0;x\x07", Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
-	putAccount(t, account.Account{Name: "acc2", Provider: account.Anthropic, Identity: "me‮x", Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
+	putAccount(t, account.Account{Name: "acc2", Provider: account.Anthropic, Identity: "me\u202ex", Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
 	for _, r := range usageRows(root, nil, usageRowsOpts{now: time.Now()}) {
 		if r.identity != nil {
 			t.Fatalf("%s shows identity %q", r.name, *r.identity)
@@ -483,7 +470,7 @@ func TestUsageIdentityLabelShape(t *testing.T) {
 	if v := describeAccount(&account.Account{Name: "acc", Identity: "me\x1b[31m"}, nil, false); v.Identity != nil {
 		t.Fatalf("SHOW ACCOUNT shows %q", *v.Identity)
 	}
-	if err := stmtErr(t, "ALTER ACCOUNT acc SET identity = 'a​b'"); err == nil || !strings.Contains(err.Error(), "control or invisible") {
+	if err := stmtErr(t, "ALTER ACCOUNT acc SET identity = 'a\u200bb'"); err == nil || !strings.Contains(err.Error(), "control or invisible") {
 		t.Fatalf("set: %v", err)
 	}
 }
@@ -519,13 +506,33 @@ func TestStatuslineStepMainExitCodes(t *testing.T) {
 	if code := run("cat >/dev/null"); code != 0 {
 		t.Fatalf("success: %d", code)
 	}
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
-	}()
-	start := time.Now()
-	if code := run("cat >/dev/null; sleep 20"); code != 128+int(syscall.SIGTERM) || time.Since(start) > 10*time.Second {
-		t.Fatalf("a SIGTERM to the step: %d after %v", code, time.Since(start))
+	// A SIGTERM or SIGINT to the step ends every command of the original:
+	// the shell and the one it runs. Nothing is left running after.
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
+		dir := t.TempDir()
+		pidFile, mark := filepath.Join(dir, "pid"), filepath.Join(dir, "mark")
+		go func() {
+			time.Sleep(400 * time.Millisecond)
+			_ = syscall.Kill(os.Getpid(), sig)
+		}()
+		code := run("cat >/dev/null; echo $$ > " + pidFile + "; sleep 2; touch " + mark)
+		if code != 128+int(sig) {
+			t.Fatalf("%v to the step: exit %d", sig, code)
+		}
+		b, _ := os.ReadFile(pidFile)
+		group, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+		if group == 0 {
+			t.Fatalf("%v: the original did not start", sig)
+		}
+		gone := false
+		for i := 0; i < 100 && !gone; i++ {
+			gone = syscall.Kill(-group, 0) == syscall.ESRCH
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !gone {
+			_ = syscall.Kill(-group, syscall.SIGKILL)
+			t.Fatalf("%v: a command of the original is still running", sig)
+		}
 	}
 }
 
@@ -621,5 +628,99 @@ func TestUsageStoredFarResetDoesNotHoldBack(t *testing.T) {
 	stepRecord(a, rateInput(stepSID, 3, time.Now().Add(4*time.Hour).Unix(), 1, time.Now().Add(72*time.Hour).Unix()))
 	if got := latestFive(t, root, "work"); got != 3 {
 		t.Fatalf("held back: %v", got)
+	}
+}
+
+// The later-reset rule keeps a stored window only over a new window that
+// had already reset when it was seen: a live session's real figures with
+// an earlier reset replace a stored one.
+func TestUsageLaterResetOnlyOverAResetWindow(t *testing.T) {
+	far := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	seven := time.Now().Add(72 * time.Hour).Unix()
+	t.Run("a far reset seen a minute ago", func(t *testing.T) {
+		root, rec := stepFixture(t, "work", "work", nil)
+		putLatest(t, root, latestFigure{Key: "work", Account: "work", SeenAt: rfc3339(time.Now().Add(-time.Minute)),
+			RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":100,"resets_at":%d}}`, far))})
+		a := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+		reset := time.Now().Add(50 * time.Minute).Unix()
+		for _, p := range []float64{12, 13, 14} {
+			stepRecord(a, rateInput(stepSID, p, reset, 1, seven))
+			if got := latestFive(t, root, "work"); got != p {
+				t.Fatalf("after %v%%: %v", p, got)
+			}
+		}
+	})
+	t.Run("another login behind the key", func(t *testing.T) {
+		root, rec := stepFixture(t, "work", "work", nil)
+		putLatest(t, root, latestFigure{Key: "work", Account: "work", SeenAt: rfc3339(time.Now().Add(-time.Minute)),
+			RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":100,"resets_at":%d},"seven_day":{"used_percentage":100,"resets_at":%d}}`,
+				time.Now().Add(4*time.Hour).Unix(), time.Now().Add(6*24*time.Hour).Unix()))})
+		a := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+		stepRecord(a, rateInput(stepSID, 20, time.Now().Add(2*time.Hour).Unix(), 10, time.Now().Add(3*24*time.Hour).Unix()))
+		l := readLatestFigures(root)["work"]
+		five, seven, _ := windowsOf(l.RateLimits)
+		if five == nil || five.UsedPercentage != 20 || seven == nil || seven.UsedPercentage != 10 {
+			t.Fatalf("latest: %s", l.RateLimits)
+		}
+	})
+}
+
+// A stored figure stamped a little ahead of now does not drop a session's
+// real change: the windows decide.
+func TestUsageSlightlyAheadDoesNotWin(t *testing.T) {
+	root, rec := stepFixture(t, "work", "work", nil)
+	reset := time.Now().Add(time.Hour).Unix()
+	putLatest(t, root, latestFigure{Key: "work", Account: "work", SeenAt: rfc3339(time.Now().Add(30 * time.Second)),
+		RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":40,"resets_at":%d}}`, reset))})
+	a := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+	stepRecord(a, rateInput(stepSID, 50, reset, 1, time.Now().Add(72*time.Hour).Unix()))
+	if got := latestFive(t, root, "work"); got != 50 {
+		t.Fatalf("latest: %v", got)
+	}
+}
+
+// A playbooks root whose path holds a zero-width character records, and
+// SHOW USAGE has its row: folder fields hold control characters only to
+// the name rule.
+func TestUsageZeroWidthFolder(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pb\u200croot")
+	rec := launchRecord{V: launchRecordVersion, LaunchID: "0123456789abcdef", PID: os.Getpid(), ProcStart: "x", Playbook: "alpha",
+		ConfigDir: filepath.Join(root, "al\u200dpha"), Account: "work", Key: "work", LaunchedAt: rfc3339(time.Now())}
+	dir := launchRecordsDir(root)
+	if err := writeLaunchRecord(dir, filepath.Join(dir, rec.LaunchID+".json"), &rec); err != nil {
+		t.Fatal(err)
+	}
+	stepRecord(stepArgs{root: root, launch: rec.LaunchID, original: "true"},
+		rateInput(stepSID, 7, time.Now().Add(time.Hour).Unix(), 1, time.Now().Add(72*time.Hour).Unix()))
+	if _, ok := readLatestFigures(root)["work"]; !ok {
+		t.Fatal("no figure for a root with a zero-width character")
+	}
+	if rows := usageRows(root, readLatestFigures(root), usageRowsOpts{now: time.Now()}); len(rows) != 1 || rows[0].name != "work" {
+		t.Fatalf("rows: %+v", rows)
+	}
+}
+
+// An ALTER that does not set the label is not refused for the one stored;
+// a label too long is refused for its length.
+func TestAccountIdentityCheckedWhenSet(t *testing.T) {
+	sandboxDefaultRoot(t)
+	putAccount(t, account.Account{Name: "acc", Provider: account.Anthropic, Identity: "me\x1b[31m", Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
+	mustStmt(t, "ALTER ACCOUNT acc SET model = claude-opus-5-5")
+	if err := stmtErr(t, "ALTER ACCOUNT acc SET identity = "+strings.Repeat("a", 600)); err == nil || !strings.Contains(err.Error(), "at most 512") {
+		t.Fatalf("a long label: %v", err)
+	}
+}
+
+// A stored figure stamped far ahead (a clock that was ahead) is no figure:
+// even for the same window, a session's lower real use replaces it.
+func TestUsageFarAheadStoredIsAbsent(t *testing.T) {
+	root, rec := stepFixture(t, "work", "work", nil)
+	reset := time.Now().Add(time.Hour).Unix()
+	putLatest(t, root, latestFigure{Key: "work", Account: "work", SeenAt: rfc3339(time.Now().Add(30 * 24 * time.Hour)),
+		RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":99,"resets_at":%d}}`, reset))})
+	a := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+	stepRecord(a, rateInput(stepSID, 50, reset, 1, time.Now().Add(72*time.Hour).Unix()))
+	if got := latestFive(t, root, "work"); got != 50 {
+		t.Fatalf("latest: %v", got)
 	}
 }

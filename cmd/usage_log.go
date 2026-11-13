@@ -370,19 +370,13 @@ func writeLatest(root string, s usageSnapshot) {
 	}
 	path := latestPath(root, s.Key)
 	rates := s.RateLimits
-	at, err := time.Parse(time.RFC3339Nano, s.At)
-	if err != nil {
-		return
-	}
+	at, _ := time.Parse(time.RFC3339Nano, s.At)
 	// A figure there that claims to be seen later than now (a clock that
 	// was ahead) is no figure: it never holds back a real one.
 	if old, ok := readLatest(path); ok {
 		oldAt, _ := time.Parse(time.RFC3339Nano, old.SeenAt)
 		if !oldAt.After(at.Add(time.Minute)) {
-			if oldAt.After(at) {
-				return
-			}
-			rates = keepNewerWindow(old.RateLimits, oldAt, rates)
+			rates = keepNewerWindow(old.RateLimits, oldAt, rates, at)
 		}
 	}
 	b, err := json.Marshal(latestFigure{V: usageVersion, Key: s.Key, Account: s.Account,
@@ -413,12 +407,20 @@ func writeLatest(root string, s usageSnapshot) {
 	}
 }
 
-// keepNewerWindow is now's rate limits, with each window of old's kept
-// where old's is the newer: it resets later (a session's first render may
-// carry a window that has already reset), or at the same time with a
-// higher use. old's reset counts only up to its seen time plus the
-// window's length.
-func keepNewerWindow(old json.RawMessage, oldSeen time.Time, now json.RawMessage) json.RawMessage {
+// pathShown reports whether a field holding a folder path (or a playbook,
+// which for cpb start is a folder) can be printed: valid UTF-8 and no
+// control character. Folder names may hold zero-width characters.
+func pathShown(p string) bool {
+	return utf8.ValidString(p) && !hasControl(p)
+}
+
+// keepNewerWindow is now's rate limits (seen at nowSeen), with each window
+// of old's kept where old's is the newer: now's window had already reset
+// when now was seen (a session's first render may carry such a window)
+// and old's resets later, or both reset at the same time and old's use is
+// higher. old's reset counts only up to its seen time plus the window's
+// length.
+func keepNewerWindow(old json.RawMessage, oldSeen time.Time, now json.RawMessage, nowSeen time.Time) json.RawMessage {
 	var o, n map[string]json.RawMessage
 	if json.Unmarshal(old, &o) != nil || json.Unmarshal(now, &n) != nil {
 		return now
@@ -429,7 +431,8 @@ func keepNewerWindow(old json.RawMessage, oldSeen time.Time, now json.RawMessage
 			continue
 		}
 		oldReset := min(ow.ResetsAt, oldSeen.Add(length).Unix())
-		if oldReset > nw.ResetsAt || (ow.ResetsAt == nw.ResetsAt && ow.UsedPercentage > nw.UsedPercentage) {
+		stale := nw.ResetsAt <= nowSeen.Unix() && oldReset > nw.ResetsAt
+		if stale || (ow.ResetsAt == nw.ResetsAt && ow.UsedPercentage > nw.UsedPercentage) {
 			n[k] = o[k]
 		}
 	}
@@ -453,7 +456,7 @@ func readLatest(path string) (latestFigure, bool) {
 	}
 	var l latestFigure
 	if json.Unmarshal(b, &l) != nil || l.V != usageVersion || !validRecordedAccount(l.Key) || !validRecordedAccount(l.Account) ||
-		(l.Playbook != "" && !validRecordedAccount(l.Playbook)) || (l.ConfigDir != "" && !validRecordedAccount(l.ConfigDir)) ||
+		!pathShown(l.Playbook) || !pathShown(l.ConfigDir) ||
 		(l.SessionID != "" && !grammar.ValidSessionID(l.SessionID)) {
 		return latestFigure{}, false
 	}

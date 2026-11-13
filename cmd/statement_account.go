@@ -68,10 +68,22 @@ func accountStatement(r *stmtRun, st *grammar.Stmt) error {
 		c.Headers = maps.Clone(a.Headers) // the copy may not share what the statement changes
 		old = &c
 	}
-	lines := applyAccountClauses(a, st.Clauses)
-	if a.Identity != "" && !validRecordedAccount(a.Identity) {
-		return fmt.Errorf("account %q: identity %q holds a control or invisible character", st.Name, a.Identity)
+	// A label is checked when the statement sets it, never for one already
+	// stored that the statement leaves as it is.
+	for _, c := range st.Clauses {
+		for _, v := range c.Settings {
+			if v.Key != "identity" || v.Value == "" {
+				continue
+			}
+			if len(v.Value) > 512 {
+				return fmt.Errorf("account %q: identity is %d bytes; at most 512", st.Name, len(v.Value))
+			}
+			if !validRecordedAccount(v.Value) {
+				return fmt.Errorf("account %q: identity %q holds a control or invisible character", st.Name, v.Value)
+			}
+		}
 	}
+	lines := applyAccountClauses(a, st.Clauses)
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("account %s: %w", st.Name, err)
 	}

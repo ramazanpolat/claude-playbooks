@@ -230,10 +230,14 @@ func execOriginal(original string, data []byte) error {
 // stepRun runs the original as a child fed data, with the step's output
 // and error, and returns its exit as a shell reports it (128 plus the
 // signal for one a signal ended). A SIGTERM, SIGINT or SIGHUP to the step
-// goes on to the child, so no original outlives it. A variable for tests.
+// goes on to the child's whole process group, so no command of the
+// original outlives it. A variable for tests.
 var stepRun = func(argv0 string, argv, env []string, data []byte) error {
 	c := exec.Command(argv0, argv[1:]...)
 	c.Env, c.Stdin, c.Stdout, c.Stderr = env, bytes.NewReader(data), os.Stdout, os.Stderr
+	// Its own process group: a signal goes to every command of the
+	// original, not only to the shell running them.
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer signal.Stop(sigs)
@@ -246,7 +250,9 @@ var stepRun = func(argv0 string, argv, env []string, data []byte) error {
 		for {
 			select {
 			case s := <-sigs:
-				_ = c.Process.Signal(s)
+				if sig, ok := s.(syscall.Signal); ok {
+					_ = syscall.Kill(-c.Process.Pid, sig)
+				}
 			case <-done:
 				return
 			}
