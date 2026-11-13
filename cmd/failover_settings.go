@@ -159,6 +159,18 @@ const (
 // DEFAULTS'. The accounts and the cap are DEFAULTS'.
 func failoverConfigFor(root string, m *manifest.Manifest, flagOn, flagOff bool) (failoverConfig, error) {
 	var cfg failoverConfig
+	if flagOff {
+		// Off for this launch: nothing else is read, so a setting that
+		// cannot be read does not stop it.
+		return cfg, nil
+	}
+	if m != nil {
+		switch m.Failover {
+		case "", failoverInherited, failoverOn, failoverOff:
+		default:
+			return cfg, fmt.Errorf("the playbook's %s has failover = %q; it takes 'inherited', 'on' or 'off' (ALTER PLAYBOOK … SET failover = '…')", manifest.FileName, m.Failover)
+		}
+	}
 	d, err := readFailoverDefaults(root)
 	if err != nil {
 		return cfg, err
@@ -315,6 +327,8 @@ func explainFailover(pb *playbook.Playbook) failoverExplainJSON {
 		v.MaxContext = &n
 	}
 	switch {
+	case pb.Manifest != nil && pb.Manifest.Sandbox != nil && pb.Manifest.Sandbox.Always:
+		v.On, v.From = false, "sandbox"
 	case pb.Manifest != nil && (pb.Manifest.Failover == failoverOn || pb.Manifest.Failover == failoverOff):
 		v.On, v.From = pb.Manifest.Failover == failoverOn, "playbook"
 	case d.Failover != "":
@@ -346,6 +360,12 @@ func failoverFromWords(from string) string {
 		return "the playbook's failover"
 	case "DEFAULTS":
 		return "DEFAULTS"
+	case "sandbox":
+		return "a sandboxed launch's session runs where cpb cannot watch it"
 	}
 	return "the default"
 }
+
+// errFailoverSandbox refuses --failover on a sandboxed launch: its session
+// runs where the launch cannot watch it.
+var errFailoverSandbox = errors.New("--failover is for a launch on this machine: a sandboxed launch's session runs where cpb cannot watch it")

@@ -465,6 +465,9 @@ type transcriptTail struct {
 type quotaStop struct {
 	window   string
 	resetsAt time.Time
+	// at is when Claude Code wrote the line (its timestamp); zero when the
+	// line has none.
+	at time.Time
 }
 
 // limitWindow is the shape of a window name cpb shows: Claude Code's own
@@ -523,6 +526,7 @@ func readTranscriptTail(path string) transcriptTail {
 			Cwd        json.RawMessage `json:"cwd"`
 			AITitle    json.RawMessage `json:"aiTitle"`
 			IsAPIError json.RawMessage `json:"isApiErrorMessage"`
+			Timestamp  json.RawMessage `json:"timestamp"`
 			Error      json.RawMessage `json:"error"`
 			Quota      json.RawMessage `json:"quotaLimits"`
 			Message    json.RawMessage `json:"message"`
@@ -542,6 +546,11 @@ func readTranscriptTail(path string) transcriptTail {
 			var isErr bool
 			apiErr := json.Unmarshal(line.IsAPIError, &isErr) == nil && isErr
 			t.limit = quotaStopOf(apiErr, rawString(line.Error), line.Quota)
+			if t.limit != nil {
+				if at, err := time.Parse(time.RFC3339Nano, rawString(line.Timestamp)); err == nil {
+					t.limit.at = at
+				}
+			}
 			var msg struct {
 				Model json.RawMessage `json:"model"`
 				Usage json.RawMessage `json:"usage"`

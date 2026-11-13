@@ -1323,15 +1323,30 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   (`'on'`, `'off'`), else DEFAULTS' `failover`; off by default. A session
   launched without it is never touched: only the cpb that launched a session
   watches it. Not for `cpb start`, `cpb play`, a sandboxed launch or one
-  with `CPB_CONFIG_DIR` (`--failover` there is refused).
+  with `CPB_CONFIG_DIR` (`--failover` there is refused). `--no-failover`
+  reads no setting, so one that cannot be read does not stop the launch.
+  A launch that passes claude a flag a resume would not keep (any but the
+  carried ones below, `--model`, `--resume`, `--continue`, `--fork-session`
+  and the first prompt) has failover off and says so; `--failover` there,
+  or with no account listed, is refused.
 - **When.** The launch looks at its own session every 10 seconds and moves it
   only when all of these hold:
   - Claude Code's session file says `idle`: no turn, and no background shell,
-    subagent or monitor (those show `busy` or `shell`);
+    subagent or monitor (those show `busy` or `shell`); the session is an
+    interactive one, and its id has a session id's shape;
   - the transcript ends at Claude Code's limit line (*Stopped at a limit*),
-    and that limit resets more than 30 minutes from now: a sooner one is left
-    to Claude Code, which continues by itself at the reset;
-  - the transcript has not changed for 2 minutes.
+    written after this launch started (a limit the launch before ran into
+    is not acted on again), and that limit resets more than 30 minutes from
+    now: a sooner one is left to Claude Code, which continues by itself at
+    the reset;
+  - the transcript has not changed for 2 minutes;
+  - a resume would not be refused: the folder the session ran in is there,
+    the playbook holds its transcript, and it is not live in another process.
+  Just before it ends anything, cpb checks again that it is the same
+  session, still idle, in the same process (its start time), with the
+  transcript unchanged, and that the process is the launch's own (claude,
+  or the child of the launch's secret helper). A switch that does not
+  happen leaves the next poll free to decide again.
 - **Where to.** The first account of DEFAULTS' `failover_accounts`, in order,
   that:
   - is not the one the session runs on, and was not tried in this episode
@@ -1340,17 +1355,22 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     `at_limit`). Otherwise a refused request costs nothing: the next poll
     sees the new limit and moves on;
   - is the same kind as the session's account (a Claude login or token, or
-    the same provider), unless listed as `'<account> (any provider)'`;
+    the same provider at the same address), unless listed as
+    `'<account> (any provider)'`;
   - the playbook may run on, with every refusal a launch on it would give
     checked first, before anything changes (the account, the login guards,
     the secret helper of its references, its headers).
   At most 3 switches per session in 5 hours. When no account is left, cpb
   says so once and leaves the session as it is.
 - **What moves.** cpb ends claude with SIGTERM (Claude Code removes its
-  session file, the transcript stays, a playbook's SessionEnd hook runs) and
-  runs the same launch again with `--account <next>` and `--resume <id>`,
-  keeping `--failover` and `--no-sandbox` when the launch had them:
-  - the session's last model (`--model`), and only claude's flags a resume can
+  session file, the transcript stays, a playbook's SessionEnd hook runs; one
+  that has not ended 10 seconds later is killed) and runs the same launch
+  again, from the folder the session ran in, with `--account <next>` and
+  `--resume <id>`, keeping `--failover` and `--no-sandbox` when the launch
+  had them. A Ctrl-C between the two claudes is caught, not passed on:
+  - the session's last model (`--model`), when it has a model id's shape and
+    the new account is the same kind (another kind maps its own models);
+    and only claude's flags a resume can
     carry safely (`--permission-mode`, `--effort`, `--fallback-model`,
     `--agent`, `--append-system-prompt`, `--system-prompt`, `--settings`,
     `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`,
@@ -1362,10 +1382,11 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     again on <b> with no cache.]`. The prompt the limit refused is in the
     transcript, so the model answers it.
   - Text typed in the input box and not sent is lost.
-  - A launch on the new account that ends with an error within 10 seconds
-    (refused, or its secret helper failing before claude runs) resumes the
-    session on the account it came from, with no prompt, and says so: a
-    switch never leaves the session ended.
+  - A launch on the new account that ends with an error before the session
+    ran (the transcript is as it was: refused, or its secret helper failing
+    before claude runs) resumes the session on the account it came from,
+    with no prompt, and says it did not move; that switch's `outcome` is
+    `'failed'`. A switch never leaves the session ended.
 - **Cost.** The new account reads the whole context again with no cache.
   `failover_max_context` (tokens) is an optional cap above which cpb does
   not switch and says why; there is none by default. Under a cap, a context
@@ -1374,7 +1395,7 @@ cpb run --failover reviewer                          -- one launch; --no-failove
 - **What it says.** A line on stderr at each switch, the switches and any
   "did not switch" reason at the end, the first line of the continue
   prompt in the session itself, and `switches` in the launch record (*SHOW
-  SESSIONS*). It never acts on a session it did not launch, and touches no
+  SESSIONS*), each with its `outcome`, `'moved'` or `'failed'`. It never acts on a session it did not launch, and touches no
   credential beyond what `--account` does.
 - **Without a restart.** An account whose credential is a `helper` gets its
   key from the helper again while the session runs (Claude Code re-runs an

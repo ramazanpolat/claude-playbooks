@@ -24,7 +24,8 @@ Failover: on (DEFAULTS); at a usage limit, the session moves to claude-work, cla
   - Only the ones the playbook may run on are used: its `USE ACCOUNT` list,
     or any account with `access = 'any'`.
   - A Claude login or token moves only to another Claude login or token, and
-    a gateway only to a gateway. To cross, list the account as
+    a gateway only to a gateway at the same address. To cross, list the
+    account as
     `'router (any provider)'`.
 
 ## When it moves a session
@@ -33,14 +34,18 @@ The launch looks at its own session every 10 seconds. It moves it only when
 all of these hold:
 - Claude Code says the session is idle: no turn running, no background
   shell, agent or monitor;
-- its last answer is Claude Code's usage-limit error, and the limit resets
-  more than 30 minutes from now. A sooner reset is left to Claude Code, which
-  continues by itself at the reset;
-- nothing has been written to the session for two minutes.
+- its last answer is Claude Code's usage-limit error, hit since this launch
+  started, and the limit resets more than 30 minutes from now. A sooner
+  reset is left to Claude Code, which continues by itself at the reset;
+- nothing has been written to the session for two minutes;
+- a resume of it would work: its folder is there and it runs nowhere else.
+
+Just before it acts, cpb checks all of it once more.
 
 Then cpb:
 1. ends that claude. Your playbook's SessionEnd hook runs as on any exit;
-2. starts the same launch on the next account with `--resume <id>`;
+2. starts the same launch on the next account with `--resume <id>`, from the
+   folder the session ran in;
 3. sends Claude Code's own continue prompt, after a first line that says
    what moved:
 
@@ -61,6 +66,13 @@ it up.
   size. There is no cap by default.
 - **Unsent text.** Text typed into the input box and not sent is lost when
   the session moves.
+- **Flags.** A resume keeps the permission mode, effort, agent, system
+  prompts and settings, and the session's model. A launch that gives claude
+  any other flag, such as a tool list, `-p` or `--add-dir`, is not moved: cpb
+  says so when it starts, and `--failover` with such a flag is refused.
+- **If the new account fails.** When the launch on the next account never
+  runs the session (its helper fails, say), cpb resumes it on the account
+  it came from, and the summary says it did not move.
 - **Only its own sessions.** A launch watches only the session it started.
   A session started some other way is never touched.
 - **What you see.** A line on stderr when a session moves, a summary when the

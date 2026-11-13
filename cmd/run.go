@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -81,7 +82,7 @@ func runRecorded(c *exec.Cmd, rec *launchRecord, watch *failoverWatch) error {
 	// switch instead of claude's exit.
 	done := make(chan struct{})
 	result := make(chan *failoverSwitch, 1)
-	go func() { result <- watch.watch(done, c.Process.Pid) }()
+	go func() { result <- watch.watch(done, c.Process) }()
 	err := c.Wait()
 	close(done)
 	if sw := <-result; sw != nil {
@@ -104,10 +105,11 @@ type failoverRelaunch struct {
 func (r *failoverRelaunch) Error() string { return r.sw.Error() }
 
 // runRun launches a playbook, and launches it again on another account
-// each time its session moves there (account failover). A launch on the new
-// account that fails at once (refused, or its secret helper failing before
-// claude runs) resumes the session on the account it came from instead, so
-// a switch never leaves it ended.
+// each time its session moves there (account failover). The resume runs
+// from the folder the session ran in. A launch on the new account that
+// never ran the session (refused, or its secret helper failing before
+// claude starts: the transcript is as it was) resumes the session on the
+// account it came from instead, so a switch never leaves it ended.
 func runRun(cmd *cobra.Command, args []string) error {
 	err := runRunOnce(cmd, args)
 	for {
@@ -116,17 +118,36 @@ func runRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		sw := rl.sw
+		// A Ctrl-C between the two claudes, with the terminal back in its
+		// ordinary mode, must not end cpb and leave the session ended. The
+		// signal is caught, not ignored, so the next claude gets its own.
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, os.Interrupt)
 		fmt.Fprintf(os.Stderr, "cpb: account %s hit its %s limit (resets %s); resuming this session on %s\n",
 			sw.From, windowWords(sw.Window), sw.resetsAt.Local().Format("Mon 2 Jan 15:04"), sw.To)
-		started := failoverNow()
-		err = runRunOnce(cmd, rl.args)
-		var again *failoverRelaunch
-		if err == nil || errors.As(err, &again) || failoverNow().Sub(started) >= failoverStartGrace {
-			continue
+		if sw.folder != "" {
+			_ = os.Chdir(sw.folder)
 		}
-		fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, firstLine(err.Error()), sw.From)
-		err = runRunOnce(cmd, rl.back)
+		failoverHandover = sw
+		err = runRunOnce(cmd, rl.args)
+		failoverHandover = nil
+		var again *failoverRelaunch
+		if !errors.As(err, &again) && sw.notRun(err) {
+			sw.Outcome = "failed"
+			fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, firstLine(err.Error()), sw.From)
+			err = runRunOnce(cmd, rl.back)
+		}
+		signal.Stop(sigs)
 	}
+}
+
+// fileSize is a file's size, -1 when it cannot be read.
+func fileSize(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return -1
+	}
+	return fi.Size()
 }
 
 func runRunOnce(cmd *cobra.Command, args []string) error {
@@ -201,6 +222,9 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 		if sopts.disabled {
 			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
 		}
+		if failoverFlag {
+			return errFailoverSandbox
+		}
 		if override {
 			return errConfigDirOverrideSandbox()
 		}
@@ -237,6 +261,9 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 	if sandboxed {
 		if override {
 			return errConfigDirOverrideSandbox()
+		}
+		if failoverFlag {
+			return errFailoverSandbox
 		}
 		resumeNote(claudeArgs)
 		if host := sandboxHost(sbm, &sopts); host != "" {
@@ -370,6 +397,16 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 	if err := guardResume(sd, claudeArgs); err != nil {
 		return err
 	}
+	// Account failover: decided before anything is changed, so a refusal
+	// (a setting that cannot be read, a flag a resume would not keep) costs
+	// nothing.
+	watch, err := failoverWatchFor(failoverWatchInput{
+		pb: pb, configDir: configDir, tokens: tokens, claudeArgs: claudeArgs, wd: wd, from: acct.sel.Name,
+		flagOn: failoverFlag, flagOff: noFailoverFlag, skip: override || playSessionRunning,
+	})
+	if err != nil {
+		return err
+	}
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
@@ -414,13 +451,6 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 		before = transcriptStamps(sd.path)
 	}
 	rec := newLaunchRecord(pb.Name, configDir, acct.sel)
-	watch, werr := failoverWatchFor(failoverWatchInput{
-		pb: pb, configDir: configDir, tokens: tokens, claudeArgs: claudeArgs, wd: wd, from: acct.sel.Name,
-		flagOn: failoverFlag, flagOff: noFailoverFlag, skip: override || playSessionRunning,
-	})
-	if werr != nil {
-		return werr
-	}
 	if watch != nil {
 		rec.Switches = activeEpisode.switchesCopy()
 	}
@@ -438,9 +468,15 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 			switches = append(switches, "--no-sandbox")
 		}
 		return &failoverRelaunch{args: relaunchArgs(switches, tokens, pb.Name, claudeArgs, sw), sw: sw, back: relaunchArgs(switches, tokens, pb.Name, claudeArgs,
-			&failoverSwitch{From: sw.To, To: sw.From, sessionID: sw.sessionID, model: sw.model, noPrompt: true})}
+			&failoverSwitch{From: sw.To, To: sw.From, sessionID: sw.sessionID, model: sw.model, folder: sw.folder, noPrompt: true})}
 	}
 	err = preserveExitCode(err)
+	if h := failoverHandover; h != nil && h.notRun(err) {
+		// The launch on the new account never ran the session: runRun
+		// resumes it on the account it came from, and that launch's end
+		// reports the switch as not made.
+		return err
+	}
 	printFailoverSummary()
 	if exitLine {
 		printResumeLine(sd, before)

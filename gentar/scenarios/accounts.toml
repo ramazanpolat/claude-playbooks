@@ -136,8 +136,10 @@ contains = "sessions-account-ok"
 
 [[verify.commands]]
 # Account failover (v4.8.0), on a real process: a stand-in claude stops at a
-# weekly limit that resets in two hours and waits, its transcript old enough
-# that the quiet minutes have passed. The launch ends it and resumes the same
+# weekly limit that resets in two hours and waits, as Claude Code does (the
+# limit line with its time and folder, the session file with its status,
+# kind and start time), its transcript old enough that the quiet minutes
+# have passed. The launch ends it and resumes the same
 # session on the next listed account, through the secret helper, with that
 # account's token and the continue prompt; EXPLAIN says it would. No
 # resolved value is written in cpb's state; the setting is reset after.
@@ -151,10 +153,12 @@ if [ -n "$resumed" ]; then printf '%s\n' "$@" > "$HOME/fo.args"; printf '%s' "$C
 sid=0e5c1a2b-0000-4000-8000-0000000000f1
 enc=$(printf %s "$(pwd -P)" | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$CLAUDE_CONFIG_DIR/projects/$enc" "$CLAUDE_CONFIG_DIR/sessions"
 t="$CLAUDE_CONFIG_DIR/projects/$enc/$sid.jsonl"
-printf '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' $(( $(date +%s) + 7200 )) > "$t"
+if [ -r "/proc/$$/stat" ]; then st=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}'); else st=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}'); fi
+sleep 1
+printf '{"type":"assistant","cwd":"%s","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$(pwd -P)" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" $(( $(date +%s) + 7200 )) > "$t"
 touch -t 202001010000 "$t"
 sf="$CLAUDE_CONFIG_DIR/sessions/$$.json"
-printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"kind":"interactive","status":"idle"}' $$ "$sid" "$(pwd -P)" > "$sf"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"procStart":"%s","kind":"interactive","status":"idle"}' $$ "$sid" "$(pwd -P)" "$st" > "$sf"
 trap 'rm -f "$sf"; exit 143' TERM
 while :; do sleep 1; done
 EOF

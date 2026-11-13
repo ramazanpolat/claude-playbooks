@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -51,24 +53,30 @@ var (
 	failoverCap       = 3 // switches per session
 	failoverCapWindow = 5 * time.Hour
 	failoverNow       = time.Now
-	// failoverStartGrace: a launch on the new account that ends with an
-	// error sooner than this did not get to run the session.
-	failoverStartGrace = 10 * time.Second
 )
 
 // failoverSwitch is one switch the watcher decided on.
 type failoverSwitch struct {
-	From      string `json:"from"`
-	To        string `json:"to"`
-	At        string `json:"at"`
-	Window    string `json:"window"`
-	ResetsAt  string `json:"resets_at"`
-	Context   int64  `json:"context_tokens"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	At       string `json:"at"`
+	Window   string `json:"window"`
+	ResetsAt string `json:"resets_at"`
+	Context  int64  `json:"context_tokens"`
+	// Outcome is moved, or failed when the launch on To did not run and
+	// the session went back to From.
+	Outcome   string `json:"outcome"`
 	sessionID string
 	model     string
 	resetsAt  time.Time
+	// folder is where the session ran: the resume runs from there.
+	folder string
+	// transcript and size tell, after the launch on To, whether it ran:
+	// a session that starts writes to its transcript.
+	transcript string
+	size       int64
 	// noPrompt resumes with no prompt: the way back to the account the
-	// session came from, when the new one refused the launch.
+	// session came from, when the new one did not run.
 	noPrompt bool
 }
 
@@ -116,37 +124,56 @@ type failoverWatch struct {
 	playbook  string
 	from      string
 	fromClass string
+	// since is when the launch started: only a limit line written after it
+	// is this launch's own to act on; an older one was the launch before's.
+	since time.Time
 	// canRunOn checks, without changing anything, that the playbook may
-	// launch on an account: every refusal a launch on it would give.
-	canRunOn func(name string) error
+	// launch on an account from folder: every refusal a launch there gives.
+	canRunOn func(name, folder string) error
 	// fullAccounts lists the accounts known to be at a limit now.
 	fullAccounts func() map[string]bool
 	episode      *failoverEpisode
-	// handled is the reset of the limit already decided on, so a decision
-	// not to switch is made once per limit.
+	// handled is the reset of the limit already decided on: a decision not
+	// to switch is made once per limit; a switch marks it once it is done.
 	handled time.Time
 }
 
-// accountClass is the kind of allowance an account draws on: a Claude
-// login or token (one subscription kind), or its provider.
+// accountClass is the kind of allowance an account draws on: any Claude
+// login or token is one kind; any other account is its provider at its
+// address, so two gateways at different addresses are not one kind.
 func accountClass(name string) string {
 	if name == account.Machine {
 		return "claude"
 	}
 	a, err := account.Read(account.Dir(config.ResolvePlaybooksDir()), name)
 	if err != nil || a == nil {
-		return "unknown"
+		return "unknown " + name
 	}
 	if a.Auth.Kind == account.ClaudeLogin || a.Auth.Kind == account.ClaudeToken {
 		return "claude"
 	}
-	return a.Provider
+	return a.Provider + " " + strings.TrimRight(strings.ToLower(a.BaseURL), "/")
+}
+
+// failoverKillAfter is how long claude has to end after SIGTERM before it
+// is killed.
+var failoverKillAfter = 10 * time.Second
+
+// failoverHandover is the switch whose launch on the new account is
+// running, nil otherwise.
+var failoverHandover *failoverSwitch
+
+// notRun reports whether a launch on the new account that ended with err
+// never ran the session: it failed, and the transcript is as it was when
+// the switch was decided.
+func (sw *failoverSwitch) notRun(err error) bool {
+	return err != nil && fileSize(sw.transcript) == sw.size
 }
 
 // watch polls until done closes or it ends claude to switch, which it
 // returns. child is the process the launch started: claude itself, or a
 // secret helper that runs claude as its child.
-func (w *failoverWatch) watch(done <-chan struct{}, childPID int) *failoverSwitch {
+func (w *failoverWatch) watch(done <-chan struct{}, child *os.Process) *failoverSwitch {
 	t := time.NewTicker(failoverPoll)
 	defer t.Stop()
 	claudePID := 0
@@ -157,75 +184,162 @@ func (w *failoverWatch) watch(done <-chan struct{}, childPID int) *failoverSwitc
 		case <-t.C:
 		}
 		if claudePID == 0 {
-			claudePID = sessionPIDOf(w.configDir, childPID)
+			claudePID = sessionPIDOf(w.configDir, child.Pid)
 			if claudePID == 0 {
 				continue
 			}
 		}
-		if sw := w.check(claudePID); sw != nil {
-			// Once more, right before acting: a message may have come in.
-			if f, ok := readSessionFileOf(w.configDir, claudePID); !ok || f.Status != "idle" {
-				continue
-			}
-			if err := syscall.Kill(claudePID, syscall.SIGTERM); err != nil {
-				w.episode.note("cpb: could not end the session to switch accounts: " + err.Error())
-				continue
-			}
-			return sw
+		c := w.check(claudePID)
+		if c == nil || !w.act(c, claudePID, child) {
+			continue
 		}
+		go func(pid int) {
+			select {
+			case <-done:
+			case <-time.After(failoverKillAfter):
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}(claudePID)
+		return c.sw
 	}
 }
 
-// check decides, for one poll, whether to switch now.
-func (w *failoverWatch) check(claudePID int) *failoverSwitch {
+// failoverCandidate is a switch check decided on, not yet made: what act
+// confirms before it ends anything.
+type failoverCandidate struct {
+	sw        *failoverSwitch
+	mtime     time.Time
+	procStart string
+}
+
+// validModel is a model id cpb passes to a resume; any other is left out.
+var validModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]{0,127}$`)
+
+// check decides, for one poll, whether to switch now. It changes nothing
+// a later poll would decide differently on, except when it decides not to
+// switch at this limit.
+func (w *failoverWatch) check(claudePID int) *failoverCandidate {
 	f, ok := readSessionFileOf(w.configDir, claudePID)
-	if !ok || f.Status != "idle" {
+	if !ok || f.Status != "idle" || f.Kind != "interactive" || !grammar.ValidSessionID(f.SessionID) {
 		return nil
 	}
 	path := transcriptPath(w.configDir, f.Cwd, f.SessionID)
 	if path == "" {
 		return nil
 	}
-	fi, err := os.Stat(path)
+	tfi, err := os.Stat(path)
 	now := failoverNow()
-	if err != nil || now.Sub(fi.ModTime()) < failoverQuiet {
+	if err != nil || now.Sub(tfi.ModTime()) < failoverQuiet {
 		return nil
 	}
 	tail := readTranscriptTail(path)
 	l := tail.limit
-	if l == nil || l.resetsAt.Sub(now) <= failoverMinWait || l.resetsAt.Equal(w.handled) {
+	// Only a limit this launch's session ran into: a line written before the
+	// launch started was the launch before's, and is not acted on again.
+	if l == nil || l.at.IsZero() || !l.at.After(w.since) || l.resetsAt.Sub(now) <= failoverMinWait || l.resetsAt.Equal(w.handled) {
 		return nil
 	}
-	w.handled = l.resetsAt
 	limit := fmt.Sprintf("%s limit, resets %s", windowWords(l.window), l.resetsAt.Local().Format("Mon 2 Jan 15:04"))
-	if w.cfg.maxContext > 0 && tail.context == 0 {
-		w.episode.note(fmt.Sprintf("cpb: did not switch accounts at the %s: failover_max_context is set and the context's size is not in the transcript's last 256 KiB", limit))
-		return nil
-	}
-	if w.cfg.maxContext > 0 && tail.context > w.cfg.maxContext {
-		w.episode.note(fmt.Sprintf("cpb: did not switch accounts at the %s: the context, %s tokens, is above failover_max_context (%s)", limit, groupDigits(tail.context), groupDigits(w.cfg.maxContext)))
-		return nil
-	}
-	w.episode.mu.Lock()
-	w.episode.tried[w.from] = true
-	recent := w.episode.recent(now)
-	w.episode.mu.Unlock()
-	if recent >= failoverCap {
-		w.episode.note(fmt.Sprintf("cpb: did not switch accounts at the %s: %d switches in the last %d hours already", limit, recent, int(failoverCapWindow.Hours())))
-		return nil
-	}
-	to, why := w.pick()
-	if to == "" {
+	decline := func(why string) *failoverCandidate {
+		w.handled = l.resetsAt
 		w.episode.note(fmt.Sprintf("cpb: did not switch accounts at the %s: %s", limit, why))
 		return nil
 	}
-	return &failoverSwitch{From: w.from, To: to, At: now.UTC().Format(time.RFC3339), Window: l.window,
-		ResetsAt: rfc3339(l.resetsAt), Context: tail.context, sessionID: f.SessionID, model: tail.model, resetsAt: l.resetsAt}
+	if w.cfg.maxContext > 0 && tail.context == 0 {
+		return decline("failover_max_context is set and the context's size is not in the transcript's last 256 KiB")
+	}
+	if w.cfg.maxContext > 0 && tail.context > w.cfg.maxContext {
+		return decline(fmt.Sprintf("the context, %s tokens, is above failover_max_context (%s)", groupDigits(tail.context), groupDigits(w.cfg.maxContext)))
+	}
+	w.episode.mu.Lock()
+	recent := w.episode.recent(now)
+	w.episode.mu.Unlock()
+	if recent >= failoverCap {
+		return decline(fmt.Sprintf("%d switches in the last %d hours already", recent, int(failoverCapWindow.Hours())))
+	}
+	// The resume runs from the folder the session ran in, as Claude Code
+	// finds it; the same checks a resume there makes come first.
+	folder := transcriptCwd(path)
+	if folder == "" {
+		folder = f.Cwd
+	}
+	if err := w.resumeGuard(f.SessionID, folder, claudePID); err != nil {
+		return decline(err.Error())
+	}
+	to, why := w.pick(folder)
+	if to == "" {
+		return decline(why)
+	}
+	model := tail.model
+	if !validModel.MatchString(model) || accountClass(to) != w.fromClass {
+		// Another kind of account maps its own models.
+		model = ""
+	}
+	sw := &failoverSwitch{From: w.from, To: to, At: now.UTC().Format(time.RFC3339), Window: l.window, ResetsAt: rfc3339(l.resetsAt),
+		Context: tail.context, Outcome: "moved", sessionID: f.SessionID, model: model, resetsAt: l.resetsAt, folder: folder,
+		transcript: path, size: tfi.Size()}
+	return &failoverCandidate{sw: sw, mtime: tfi.ModTime(), procStart: f.ProcStart}
 }
 
-// pick is the first listed account the session can move to, or "" and why
-// there is none.
-func (w *failoverWatch) pick() (string, string) {
+// resumeGuard is what a resume of id from folder would refuse, checked
+// before anything is ended: a folder that is not there, a playbook that
+// holds no transcript of it, the session live in another process.
+func (w *failoverWatch) resumeGuard(id, folder string, own int) error {
+	if fi, err := os.Stat(folder); err != nil || !fi.IsDir() {
+		return fmt.Errorf("the folder the session ran in, %s, is not there", folder)
+	}
+	if transcriptPath(w.configDir, "", id) == "" {
+		return fmt.Errorf("the playbook holds no transcript of session %s", id)
+	}
+	dirs, err := knownSessionDirs()
+	if err != nil {
+		return err
+	}
+	if s := liveByID(dirs)[id]; s != nil && s.f.PID != own {
+		return fmt.Errorf("session %s is live in another process (pid %d)", id, s.f.PID)
+	}
+	return nil
+}
+
+// act ends claude for c, once more confirming it is still the case: the
+// same session, idle, the same process (its start time), the transcript
+// not written since, and the process the launch's own. Only then are the
+// limit and the accounts marked: a switch that did not happen leaves the
+// next poll free to decide again.
+func (w *failoverWatch) act(c *failoverCandidate, claudePID int, child *os.Process) bool {
+	f, ok := readSessionFileOf(w.configDir, claudePID)
+	if !ok || f.Status != "idle" || f.SessionID != c.sw.sessionID || f.ProcStart == "" || f.ProcStart != c.procStart ||
+		!sameStart(procStartOf(claudePID), f.ProcStart) {
+		return false
+	}
+	if fi, err := os.Stat(c.sw.transcript); err != nil || !fi.ModTime().Equal(c.mtime) {
+		return false
+	}
+	var err error
+	if claudePID == child.Pid {
+		err = child.Signal(syscall.SIGTERM)
+	} else {
+		if info, ok := procStarts([]int{claudePID})[claudePID]; !ok || info.ppid != child.Pid {
+			return false
+		}
+		err = syscall.Kill(claudePID, syscall.SIGTERM)
+	}
+	if err != nil {
+		w.episode.note("cpb: could not end the session to switch accounts: " + err.Error())
+		return false
+	}
+	w.handled = c.sw.resetsAt
+	w.episode.mu.Lock()
+	w.episode.tried[c.sw.From] = true
+	w.episode.tried[c.sw.To] = true
+	w.episode.mu.Unlock()
+	return true
+}
+
+// pick is the first listed account the session can move to from folder,
+// or "" and why there is none. It marks nothing: act does, once the switch
+// is made.
+func (w *failoverWatch) pick(folder string) (string, string) {
 	if len(w.cfg.accounts) == 0 {
 		return "", "no account is listed (ALTER DEFAULTS SET failover_accounts = [...])"
 	}
@@ -249,14 +363,11 @@ func (w *failoverWatch) pick() (string, string) {
 			continue
 		}
 		if w.canRunOn != nil {
-			if err := w.canRunOn(t.name); err != nil {
+			if err := w.canRunOn(t.name, folder); err != nil {
 				skipped = append(skipped, t.name+": "+firstLine(err.Error()))
 				continue
 			}
 		}
-		w.episode.mu.Lock()
-		w.episode.tried[t.name] = true
-		w.episode.mu.Unlock()
 		return t.name, ""
 	}
 	why := "every listed account was tried or is at its limit"
@@ -325,9 +436,17 @@ func sessionPIDOf(configDir string, child int) int {
 // continuePrompt is the prompt the resumed session gets: what moved, then
 // Claude Code's own continue text.
 func continuePrompt(sw *failoverSwitch) string {
-	return fmt.Sprintf("[cpb: this session moved from account %s (%s limit, resets %s) to %s; its context, about %s tokens, is read again on %s with no cache.]\n\n"+
+	return fmt.Sprintf("[cpb: this session moved from account %s (%s limit, resets %s) to %s; %s, is read again on %s with no cache.]\n\n"+
 		"You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.",
-		sw.From, windowWords(sw.Window), sw.resetsAt.Local().Format("Mon 2 Jan 15:04"), sw.To, groupDigits(sw.Context), sw.To)
+		sw.From, windowWords(sw.Window), sw.resetsAt.Local().Format("Mon 2 Jan 15:04"), sw.To, contextWords(sw.Context), sw.To)
+}
+
+// contextWords says a context's size, or that it is not known.
+func contextWords(n int64) string {
+	if n <= 0 {
+		return "its context, of a size cpb could not read"
+	}
+	return "its context, about " + groupDigits(n) + " tokens"
 }
 
 // carriedClaudeFlags are claude's flags a resume keeps, with whether each
@@ -396,8 +515,12 @@ func printFailoverSummary() {
 	defer e.mu.Unlock()
 	for _, s := range e.switches {
 		at, _ := time.Parse(time.RFC3339, s.At)
-		fmt.Fprintf(os.Stderr, "cpb: this session moved from %s to %s at %s (%s limit, %s tokens of context read again)\n",
-			s.From, s.To, at.Local().Format("15:04"), windowWords(s.Window), groupDigits(s.Context))
+		if s.Outcome == "failed" {
+			fmt.Fprintf(os.Stderr, "cpb: at %s this session could not move from %s to %s, and stayed on %s\n", at.Local().Format("15:04"), s.From, s.To, s.From)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "cpb: this session moved from %s to %s at %s (%s limit; %s, read again)\n",
+			s.From, s.To, at.Local().Format("15:04"), windowWords(s.Window), contextWords(s.Context))
 	}
 	for _, n := range e.notes {
 		fmt.Fprintln(os.Stderr, n)
@@ -433,13 +556,28 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 	if err != nil || !cfg.on {
 		return nil, err
 	}
+	if len(cfg.accounts) == 0 {
+		if in.flagOn {
+			return nil, fmt.Errorf("--failover: no account is listed to move a session to (ALTER DEFAULTS SET failover_accounts = [...])")
+		}
+		return nil, nil
+	}
+	// A resume keeps only some of claude's flags; a launch that passes any
+	// other (a restriction, -p) is not moved, rather than moved with less.
+	if flag := failoverBlockingFlag(in.claudeArgs); flag != "" {
+		if in.flagOn {
+			return nil, fmt.Errorf("--failover: this launch passes %s to claude, which a resume on another account would not keep", flag)
+		}
+		fmt.Fprintf(os.Stderr, "cpb: failover is off for this launch: it passes %s to claude, which a resume on another account would not keep\n", flag)
+		return nil, nil
+	}
 	from := in.from
 	if from == "" {
 		from = account.Machine
 	}
 	w := &failoverWatch{cfg: cfg, configDir: in.configDir, playbook: in.pb.Name, from: from,
-		fromClass: accountClass(from), episode: activeEpisode}
-	w.canRunOn = func(next string) error {
+		fromClass: accountClass(from), episode: activeEpisode, since: failoverNow()}
+	w.canRunOn = func(next, folder string) error {
 		var tk []launchToken
 		for _, t := range in.tokens {
 			if t.flag != "--account" {
@@ -451,7 +589,7 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 		if err != nil {
 			return err
 		}
-		a, err := planAccount(in.configDir, in.pb.Name, layers, in.wd, in.claudeArgs)
+		a, err := planAccount(in.configDir, in.pb.Name, layers, folder, in.claudeArgs)
 		if err != nil {
 			return err
 		}
@@ -459,7 +597,7 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 			return err
 		}
 		// Every other guard a launch runs before it changes anything, on
-		// the target's own layers: the secret helper for its references,
+		// the target's own layers: the secret helper of its references,
 		// its request headers, a token over the playbook's own login.
 		eff, err := auth.EffectiveBlock(in.configDir, a.layers)
 		if err != nil {
@@ -488,4 +626,39 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 		return out
 	}
 	return w, nil
+}
+
+// failoverBlockingFlag is the first of claude's flags in args that a
+// resume would not keep, "" when there is none: every flag must be one a
+// resume carries (carriedClaudeFlags), or the session's own (--resume,
+// --continue, --fork-session, --model, which the resume sets itself).
+func failoverBlockingFlag(args []string) string {
+	own := map[string]bool{"--model": true, "--continue": false, "-c": false, "--fork-session": false}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return ""
+		}
+		if !strings.HasPrefix(a, "-") {
+			continue // the first prompt: never sent again
+		}
+		flag, _, inline := strings.Cut(a, "=")
+		if flag == "--resume" || flag == "-r" {
+			if !inline && i+1 < len(args) && grammar.ValidSessionID(args[i+1]) {
+				i++
+			}
+			continue
+		}
+		takes, ok := carriedClaudeFlags[flag]
+		if !ok {
+			takes, ok = own[flag]
+		}
+		if !ok {
+			return flag
+		}
+		if takes && !inline {
+			i++
+		}
+	}
+	return ""
 }

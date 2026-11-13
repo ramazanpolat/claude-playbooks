@@ -4,10 +4,12 @@ cpb EXPLAIN PLAYBOOK scratch | grep -q "Failover: off (the playbook's failover)"
 cpb SHOW DEFAULTS | grep -q "Failover: *on; accounts acct-work, acct-personal"
 
 # A switch, on a real process. A stand-in claude stops at a weekly limit
-# that resets in two hours and waits, as Claude Code does; its transcript is
-# old, so the two quiet minutes have passed. The launch ends it and resumes
-# the same session on acct-personal, with that account's token and the
-# continue prompt; the stand-in records what the resume was given.
+# that resets in two hours and waits, as Claude Code does: the limit line
+# carries its time and folder, the session file its status, kind and start
+# time. The transcript's clock is set back, so the two quiet minutes have
+# passed. The launch ends it and resumes the same session on acct-personal,
+# with that account's token and the continue prompt; the stand-in records
+# what the resume was given.
 mkdir -p "$HOME/hold" "$HOME/work"
 cat > "$HOME/hold/claude" <<'EOF'
 #!/bin/sh
@@ -21,10 +23,12 @@ sid=0e5c1a2b-0000-4000-8000-0000000000f0
 enc=$(printf %s "$(pwd -P)" | sed 's/[^A-Za-z0-9]/-/g')
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$enc" "$CLAUDE_CONFIG_DIR/sessions"
 t="$CLAUDE_CONFIG_DIR/projects/$enc/$sid.jsonl"
-printf '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' $(( $(date +%s) + 7200 )) > "$t"
+if [ -r "/proc/$$/stat" ]; then st=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}'); else st=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}'); fi
+sleep 1
+printf '{"type":"assistant","cwd":"%s","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$(pwd -P)" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" $(( $(date +%s) + 7200 )) > "$t"
 touch -t 202001010000 "$t"
 sf="$CLAUDE_CONFIG_DIR/sessions/$$.json"
-printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"kind":"interactive","status":"idle"}' $$ "$sid" "$(pwd -P)" > "$sf"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"procStart":"%s","kind":"interactive","status":"idle"}' $$ "$sid" "$(pwd -P)" "$st" > "$sf"
 trap 'rm -f "$sf"; exit 143' TERM
 while :; do sleep 1; done
 EOF

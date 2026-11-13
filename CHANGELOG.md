@@ -7,15 +7,22 @@
 - **Account failover.** A session that stops at a usage limit can move to
   another account by itself.
   - The launch that started it ends that claude and resumes the same session
-    on the next account of `failover_accounts`, in the same terminal and
-    folder, with Claude Code's own continue prompt. The prompt's first line
-    says what moved.
-  - It acts only when the session is idle (no turn, no background shell,
-    agent or monitor), its transcript has been quiet for two minutes, and the
-    limit resets more than 30 minutes from now.
+    on the next account of `failover_accounts`, in the same terminal, from
+    the folder the session ran in, with Claude Code's own continue prompt.
+    The prompt's first line says what moved.
+  - It acts only on an interactive session that is idle (no turn, no
+    background shell, agent or monitor), at a limit hit since the launch
+    started that resets more than 30 minutes from now, with its transcript
+    quiet for two minutes, and only when a resume would not be refused. It
+    checks all of it again just before it ends claude, and ends only the
+    launch's own process.
   - Each account is tried once, at most three switches in five hours, and
-    only accounts the playbook may run on, of the same kind unless marked
-    `(any provider)`.
+    only accounts the playbook may run on, of the same kind (provider and
+    address) unless marked `(any provider)`.
+  - A launch whose claude flags a resume would not keep is not moved, and
+    says so. If the launch on the new account never runs the session, the
+    session resumes on the account it came from and the switch is reported
+    as not made.
   - Off by default: `ALTER DEFAULTS SET failover = 'on', failover_accounts =
     [...]`, a playbook's own `failover = 'on' | 'off'`, or `cpb run
     --failover` / `--no-failover` for one launch.
