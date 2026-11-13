@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -150,7 +149,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 			if !errors.As(err, &again) && sw.notRun(err) && !handoverClaudeStarted.Load() {
 				sw.stranded = true
 				printFailoverSummary()
-				fmt.Fprintf(os.Stderr, "cpb: could not resume it on %s either (%s); to resume it by hand:\n  %s\n", sw.From, printable(firstLine(err.Error())), resumeByHand(sw.folder, rl.back))
+				line, filled := resumeByHand(sw.folder, rl.back)
+				how := "to resume it by hand:"
+				if filled {
+					how = "to resume it by hand, replace each <...> with its value and remove the leading #, then run:"
+				}
+				fmt.Fprintf(os.Stderr, "cpb: could not resume it on %s either (%s); %s\n  %s\n", sw.From, printable(firstLine(err.Error())), how, line)
 			}
 		}
 		failoverHandover, failoverBack = nil, false
@@ -174,39 +178,74 @@ func pinPlaybooksDir() {
 	}
 }
 
+// notShown stands for a value the by-hand line does not show.
+const notShown = "<a value with control characters, not shown>"
+
+// mustHide reports whether s holds a character a terminal does not show as
+// written, other than a newline or a tab (which single quotes keep).
+func mustHide(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return hidden(r) && r != '\n' && r != '\t' }) >= 0
+}
+
 // resumeByHand is the command line that resumes a session with args from
-// folder, quoted for a POSIX shell. An --env value and an inline --settings
-// JSON are not shown: they may hold a credential.
-func resumeByHand(folder string, args []string) string {
+// folder, quoted for any POSIX shell, and whether a value in it is not
+// shown: an --env value and an inline --settings JSON (either may hold a
+// credential), and a value with a character a terminal does not show as
+// written. A flag keeps its name; its value becomes a placeholder. A line
+// with a placeholder starts with "# ", so pasted as it is it runs nothing.
+func resumeByHand(folder string, args []string) (string, bool) {
+	filled := false
+	word := func(s string) string {
+		if mustHide(s) {
+			filled = true
+			return shellWord(notShown)
+		}
+		return shellWord(s)
+	}
+	isJSON := func(v string) bool { return strings.HasPrefix(strings.TrimSpace(v), "{") }
 	words := []string{"cpb", "run"}
 	if config.PlaybooksDir != "" || os.Getenv(config.PlaybooksDirEnv) != "" {
-		words = append(words, "--playbooks-dir", shellWord(config.ResolvePlaybooksDir()))
+		words = append(words, "--playbooks-dir", word(config.ResolvePlaybooksDir()))
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if v, ok := strings.CutPrefix(a, "--env="); ok {
-			k, _, _ := strings.Cut(v, "=")
-			a = "--env=" + k + "=<your value>"
-		} else if v, ok := strings.CutPrefix(a, "--settings="); ok && strings.HasPrefix(strings.TrimSpace(v), "{") {
-			a = "--settings=<your settings JSON>"
-		} else if a == "--settings" && i+1 < len(args) && strings.HasPrefix(strings.TrimSpace(args[i+1]), "{") {
+		name, value, inline := strings.Cut(a, "=")
+		switch {
+		case inline && name == "--env":
+			k, _, _ := strings.Cut(value, "=")
+			if mustHide(k) {
+				k = notShown
+			}
+			words = append(words, shellWord("--env="+k+"=<your value>"))
+			filled = true
+		case inline && name == "--settings" && isJSON(value):
+			words = append(words, shellWord("--settings=<your settings JSON>"))
+			filled = true
+		case a == "--settings" && i+1 < len(args) && isJSON(args[i+1]):
 			words = append(words, a, shellWord("<your settings JSON>"))
+			filled = true
 			i++
-			continue
+		case inline && strings.HasPrefix(name, "--") && mustHide(value):
+			words = append(words, shellWord(name+"="+notShown))
+			filled = true
+		default:
+			words = append(words, word(a))
 		}
-		words = append(words, shellWord(a))
 	}
 	line := strings.Join(words, " ")
 	if folder != "" {
-		line = "cd " + shellWord(folder) + " && " + line
+		line = "cd " + word(folder) + " && " + line
 	}
-	return line
+	if filled {
+		line = "# " + line
+	}
+	return line, filled
 }
 
 // shellWord is s as one word for any POSIX shell: as it is when it is
 // plain, else in single quotes, where a newline or a tab stands as itself.
-// A value with any other control character is not shown: no POSIX quoting
-// spells it without putting it raw on the terminal.
+// A value with any other character a terminal does not show as written is
+// not shown (resumeByHand marks the line).
 func shellWord(s string) string {
 	plain := s != "" && s[0] != '=' && s[0] != '~' && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@%+,", r))
@@ -214,8 +253,8 @@ func shellWord(s string) string {
 	if plain {
 		return s
 	}
-	if strings.IndexFunc(s, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\t' }) >= 0 {
-		return "'<a value with control characters, not shown>'"
+	if mustHide(s) {
+		return "'" + notShown + "'"
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

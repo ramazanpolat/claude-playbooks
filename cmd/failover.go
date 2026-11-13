@@ -233,22 +233,30 @@ func (sw *failoverSwitch) notRun(err error) bool {
 func (w *failoverWatch) watch(done <-chan struct{}, child *os.Process) *failoverSwitch {
 	t := time.NewTicker(failoverPoll)
 	defer t.Stop()
-	claudePID := 0
+	claudePID, confirmed := 0, false
 	for {
 		select {
 		case <-done:
 			return nil
 		case <-t.C:
 		}
-		if claudePID == 0 {
-			claudePID = sessionPIDOf(w.configDir, child.Pid)
-			if claudePID == 0 {
-				continue
+		if !confirmed {
+			pid, ok := sessionPIDOf(w.configDir, child.Pid)
+			if pid != 0 {
+				claudePID = pid
 			}
-			// This launch's claude is running: a Ctrl-C is its own again.
-			releaseHandover()
-			handoverClaudeStarted.Store(true)
+			if ok {
+				// This launch's claude is running: a Ctrl-C is its own again.
+				confirmed = true
+				releaseHandover()
+				handoverClaudeStarted.Store(true)
+			}
 		}
+		if claudePID == 0 {
+			continue
+		}
+		// An unconfirmed session file still reaches check, which says once
+		// that it does not switch at this limit.
 		c := w.check(claudePID)
 		if c == nil || !w.act(c, claudePID, child) {
 			continue
@@ -407,16 +415,26 @@ func spellings(p string) []string {
 	return []string{p}
 }
 
-// hasControl reports whether s holds a control character.
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, unicode.IsControl) >= 0
+// hidden reports whether c is a character cpb does not print as written:
+// a control character, a direction mark, embedding, override or isolate,
+// or a line or paragraph separator. Zero-width joiners and spaces stay:
+// folder names hold them, and a paste needs them.
+func hidden(c rune) bool {
+	return unicode.IsControl(c) || c == 0x200E || c == 0x200F || c >= 0x202A && c <= 0x202E || c >= 0x2066 && c <= 0x2069 ||
+		c == 0x2028 || c == 0x2029
 }
 
-// printable is s with each control character shown as '?', for a line on
-// the terminal.
+// hasControl reports whether s holds a character a terminal does not show
+// as written (hidden).
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, hidden) >= 0
+}
+
+// printable is s with each character cpb does not print as written
+// (hidden) shown as '?', for a line on the terminal.
 func printable(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if hidden(r) {
 			return '?'
 		}
 		return r
@@ -530,16 +548,16 @@ func readSessionFileOf(configDir string, pid int) (sessionFile, bool) {
 
 // sessionPIDOf is the pid of the claude the launch started: the child
 // itself when it has a session file, else the child's own child that does
-// (a secret helper that does not exec). 0 while there is none yet.
-func sessionPIDOf(configDir string, child int) int {
-	// A session file counts only for the process it names, by its start
-	// time: a file a process before left on a reused pid is not this one.
-	if f, ok := readSessionFileOf(configDir, child); ok && sameStart(procStartOf(child), f.ProcStart) {
-		return child
+// (a secret helper that does not exec); 0 while there is none yet. It also
+// reports whether that file is confirmed, its start time matching its
+// process: a file a process before left on the pid is not.
+func sessionPIDOf(configDir string, child int) (int, bool) {
+	if f, ok := readSessionFileOf(configDir, child); ok {
+		return child, sameStart(procStartOf(child), f.ProcStart)
 	}
 	ents, err := os.ReadDir(filepath.Join(configDir, "sessions"))
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	var pids []int
 	for _, e := range ents {
@@ -551,11 +569,11 @@ func sessionPIDOf(configDir string, child int) int {
 		if info.ppid != child {
 			continue
 		}
-		if f, ok := readSessionFileOf(configDir, pid); ok && sameStart(info.start, f.ProcStart) {
-			return pid
+		if f, ok := readSessionFileOf(configDir, pid); ok {
+			return pid, sameStart(info.start, f.ProcStart)
 		}
 	}
-	return 0
+	return 0, false
 }
 
 // continuePrompt is the prompt the resumed session gets: what moved, then

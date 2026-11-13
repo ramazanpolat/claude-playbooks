@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"unicode"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -78,9 +77,10 @@ sleep 1
 ts=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 printf '{"type":"assistant","cwd":"%s","timestamp":"%s","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":300000,"cache_creation_input_tokens":2000}}}\n{"type":"assistant","cwd":"%s","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$dir" "$ts" "$dir" "$ts" "$FAKE_RESETS" >> "$t"
 sf="$CLAUDE_CONFIG_DIR/sessions/$$.json"
+[ -n "$FAKE_NO_PROCSTART" ] && st=""
 printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"procStart":"%s","kind":"interactive","status":"idle"}' $$ "$FAKE_SID" "$(pwd -P)" "$st" > "$sf"
 if [ -n "$FAKE_IGNORE_TERM" ]; then trap '' TERM; else trap 'rm -f "$sf"; exit 143' TERM; fi
-n=0; while [ $n -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+n=0; while [ $n -lt "${FAKE_WAIT:-200}" ]; do sleep 0.1; n=$((n+1)); done
 rm -f "$sf"; exit 3
 `
 
@@ -108,6 +108,8 @@ func failoverStage(t *testing.T, root, okTokens string) (out string) {
 	t.Setenv("FAKE_WRITE_FAIL_TOKENS", "")
 	t.Setenv("FAKE_RUN_FAIL_TOKENS", "")
 	t.Setenv("FAKE_IGNORE_TERM", "")
+	t.Setenv("FAKE_NO_PROCSTART", "")
+	t.Setenv("FAKE_WAIT", "")
 	t.Setenv("FAKE_RESETS", strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10))
 	return out
 }
@@ -357,9 +359,10 @@ func TestFailoverWayBackFailsToo(t *testing.T) {
 	msg := captureStderr(t, func() {
 		err = runRun(nil, []string{"--env", "FAKE_SECRETISH=do-not-print", "--account", "acc-a", "alpha"})
 	})
-	want := "cd " + work + " && cpb run --playbooks-dir " + shellWord(config.ResolvePlaybooksDir()) + " '--env=FAKE_SECRETISH=<your value>' --account acc-a alpha --resume " + failSID + " --model claude-opus-5-5"
+	want := "# cd " + work + " && cpb run --playbooks-dir " + shellWord(config.ResolvePlaybooksDir()) + " '--env=FAKE_SECRETISH=<your value>' --account acc-a alpha --resume " + failSID + " --model claude-opus-5-5"
 	if err == nil || len(standInRuns(t, out)) != 0 || strings.Contains(msg, "stayed on") || strings.Contains(msg, "do-not-print") ||
-		!strings.Contains(msg, "nor be resumed on acc-a: nothing runs it now") || !strings.Contains(msg, "to resume it by hand:\n  "+want+"\n") {
+		!strings.Contains(msg, "nor be resumed on acc-a: nothing runs it now") ||
+		!strings.Contains(msg, "to resume it by hand, replace each <...> with its value and remove the leading #, then run:\n  "+want+"\n") {
 		t.Fatalf("err %v\n%s\nwant %s", err, msg, want)
 	}
 	// No claude ran after the switch: the catch lasted until cpb run
@@ -607,12 +610,16 @@ func TestRelaunchFailedLineHasNoControlCharacter(t *testing.T) {
 func TestResumeByHand(t *testing.T) {
 	resetCommandTestState(t)
 	config.PlaybooksDir = "/srv/pb"
-	got := resumeByHand("/w/my dir", []string{"--env=K=v", `--settings={"env":{"A":"b"}}`, "--settings", `{"x":1}`, "--account", "a", "alpha",
-		"--resume", sidLive, "--append-system-prompt", "one\ntwo", "--system-prompt", "bad\x1b[31m", "=x", "~y"})
-	want := `cd '/w/my dir' && cpb run --playbooks-dir /srv/pb '--env=K=<your value>' '--settings=<your settings JSON>' --settings '<your settings JSON>' --account a alpha --resume ` +
-		sidLive + " --append-system-prompt 'one\ntwo' --system-prompt '<a value with control characters, not shown>' '=x' '~y'"
-	if got != want || strings.IndexFunc(got, func(r rune) bool { return unicode.IsControl(r) && r != '\n' }) >= 0 {
+	got, filled := resumeByHand("/w/my dir", []string{"--env=K=v", `--settings={"env":{"A":"b"}}`, "--settings", `{"x":1}`, "--account", "a", "alpha",
+		"--resume", sidLive, "--append-system-prompt", "one\ntwo", "--system-prompt", "bad\x1b[31m", "--agent=x\r", "--settings=s\u202e.json", "=x", "~y", "zw\u200dj"})
+	want := `# cd '/w/my dir' && cpb run --playbooks-dir /srv/pb '--env=K=<your value>' '--settings=<your settings JSON>' --settings '<your settings JSON>' --account a alpha --resume ` +
+		sidLive + " --append-system-prompt 'one\ntwo' --system-prompt '<a value with control characters, not shown>'" +
+		" '--agent=<a value with control characters, not shown>' '--settings=<a value with control characters, not shown>' '=x' '~y' 'zw\u200dj'"
+	if got != want || !filled || strings.IndexFunc(got, func(r rune) bool { return hidden(r) && r != '\n' }) >= 0 {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+	if line, filled := resumeByHand("/w", []string{"--account", "a", "alpha", "--resume", sidLive}); filled || strings.HasPrefix(line, "#") {
+		t.Fatalf("nothing hidden, yet marked: %q", line)
 	}
 	// Every word reads back as itself in the system's POSIX shell.
 	for _, v := range []string{"plain", "my dir", "it's", "one\ntwo\n", "tab\there", "=x", "~y", "$(echo no)", "`no`", "a\\b"} {
@@ -620,6 +627,76 @@ func TestResumeByHand(t *testing.T) {
 		if err != nil || string(out) != v {
 			t.Errorf("%q came back as %q (%v)", v, out, err)
 		}
+	}
+}
+
+// A by-hand line with a value not shown, pasted as it is, starts nothing,
+// in every shell a person types it into; with nothing hidden it runs.
+func TestResumeByHandPasteRunsNothing(t *testing.T) {
+	resetCommandTestState(t)
+	bin := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "ran")
+	if err := os.WriteFile(filepath.Join(bin, "cpb"), []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	folder := t.TempDir()
+	hiddenLine, filled := resumeByHand(folder, []string{"--env=K=v", "--account", "a", "alpha"})
+	plainLine, plain := resumeByHand(folder, []string{"--account", "a", "alpha"})
+	if !filled || plain {
+		t.Fatalf("marks: %v %v", filled, plain)
+	}
+	shells := [][]string{{"/bin/sh", "-c"}}
+	for _, sh := range [][]string{{"dash", "-c"}, {"bash", "--norc", "-i", "-c"}, {"zsh", "-f", "-i", "-c"}} {
+		if p, err := exec.LookPath(sh[0]); err == nil {
+			shells = append(shells, append([]string{p}, sh[1:]...))
+		}
+	}
+	for _, sh := range shells {
+		_ = os.Remove(marker)
+		c := exec.Command(sh[0], append(sh[1:], hiddenLine)...)
+		c.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
+		_ = c.Run()
+		if _, err := os.Stat(marker); err == nil {
+			t.Errorf("%s: the line with a hidden value ran cpb", sh[0])
+		}
+		c = exec.Command(sh[0], append(sh[1:], plainLine)...)
+		c.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
+		_ = c.Run()
+		if _, err := os.Stat(marker); err != nil {
+			t.Errorf("%s: the plain line did not run cpb", sh[0])
+		}
+	}
+}
+
+// A first claude whose session file gives no start time, stopped at a
+// limit: cpb says once that it does not switch, and does not.
+func TestFailoverUnconfirmedSessionSaysSoOnce(t *testing.T) {
+	_, out := failoverE2E(t, "tok-b")
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("FAKE_NO_PROCSTART", "1")
+	t.Setenv("FAKE_WAIT", "15")
+	t.Chdir(work)
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, []string{"--account", "acc-a", "alpha"}) })
+	if len(standInRuns(t, out)) != 0 || strings.Contains(msg, "resuming this session") ||
+		strings.Count(msg, "gives no start time that matches its process") != 1 {
+		t.Fatalf("err %v\n%s", err, msg)
+	}
+}
+
+// The new account's claude ran (its session file confirmed) and failed
+// before writing; the way back then never ran: that is still reported as
+// nothing running the session, the first claude's start not counted for it.
+func TestFailoverStrandedAfterTheNewClaudeRan(t *testing.T) {
+	_, out := failoverE2E(t, "")
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("FAKE_RUN_FAIL_TOKENS", "tok-b")
+	t.Setenv("FAKE_FAIL_TOKENS", "tok-a")
+	t.Chdir(work)
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, []string{"--account", "acc-a", "alpha"}) })
+	if err == nil || len(standInRuns(t, out)) != 0 || !strings.Contains(msg, "nor be resumed on acc-a: nothing runs it now") {
+		t.Fatalf("err %v\n%s", err, msg)
 	}
 }
 

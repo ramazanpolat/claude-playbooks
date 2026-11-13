@@ -1346,8 +1346,9 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     transcript's folders whose encoded name is that of the project
     directory holding the transcript, where Claude Code finds the session.
     The launch's folder comes first: two folders can share one encoded name
-    (`my-app`, `my/app`). None, or one with a control character, is no
-    switch, said once;
+    (`my-app`, `my/app`). None, or one holding a control character, a
+    direction mark, embedding, override or isolate, or a line or paragraph
+    separator, is no switch, said once;
   - a resume would not be refused: that folder is there, the playbook holds
     the transcript, and no other live process runs the session.
   Just before it ends anything, cpb checks again that it is the same
@@ -1377,10 +1378,12 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   again, from the folder above, with `--account <next>` and `--resume <id>`,
   keeping `--failover` and `--no-sandbox` when the launch had them, and the
   launch's `--env-file` paths and playbooks root made absolute against the
-  folder it ran in. From just before cpb ends the old claude until the next
-  one has written its session file (a secret helper may run first), a
-  Ctrl-C (to cpb, with the terminal in its ordinary mode) is caught, not
-  passed on; inside claude it is claude's:
+  folder it ran in. A Ctrl-C (to cpb, with the terminal in its ordinary
+  mode) is caught, not passed on, from just before cpb ends the old claude
+  until the watcher next sees the new claude's session file, confirmed by
+  its start time (at its check interval, so a secret helper that runs
+  first is covered); a file never confirmed keeps it caught until the
+  launch returns. Inside claude it is claude's:
   - the session's last model (`--model`), when it has a model id's shape and
     the new account is the same kind (another kind maps its own models);
     and only claude's flags a resume can
@@ -1402,10 +1405,15 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     before claude runs) resumes the session on the account it came from,
     with no prompt, and says it did not move; that switch's `outcome` is
     `'failed'`. When that fails too, cpb says nothing runs the session and
-    prints the command that resumes it by hand (with the playbooks root
-    when one was given; without `--env` values, an inline `--settings`
-    JSON, or a value holding a control character other than a newline or a
-    tab; quoted for any POSIX shell). A way back whose claude ran and then
+    prints the command that resumes it by hand, quoted for any POSIX
+    shell, with the playbooks root when one was given. A value it does not
+    show becomes a placeholder after its flag's name: an `--env` value, an
+    inline `--settings` JSON, and a value holding a control character
+    (other than a newline or a tab), a direction mark, embedding, override
+    or isolate (U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) or a line or
+    paragraph separator. Such a line starts with `# `, so pasted as it is
+    it runs nothing, and cpb says to replace each placeholder and remove
+    the `#` first. A way back whose claude ran and then
     ended with an error is reported as any launch: the session stayed on
     the old account. A launch on the new account that wrote to the
     transcript and then failed ran the session: that is a move, and its

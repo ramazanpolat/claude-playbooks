@@ -53,12 +53,12 @@
 
 ### Fixed
 
-- **A session in a folder whose name has a non-ASCII character resumes
-  through cpb.** cpb named a folder's project directory with one `-` per
-  byte of its name; Claude Code uses one per character (two for one outside
-  the Basic Multilingual Plane). A `--resume <id>` from that folder was
-  refused as if the session had run elsewhere, and a `--continue` there was
-  not checked against a live session.
+- **cpb names a folder's project directory as Claude Code does:** one `-`
+  for each character outside ASCII letters and digits, two for one outside
+  the Basic Multilingual Plane. A session that ran in a folder whose name
+  has a non-ASCII character is found under its own folder, so `--resume
+  <id>` and `--continue` from there are checked as they are anywhere
+  else.
 
 ## [v4.7.0] -- 2026-11-12
 
