@@ -5,7 +5,7 @@ cpb APPLY playbook.cpb
 cpb run --label name=review-auth agent       # a launch label, fixed at launch
 cpb session label task=triage                # from inside the session: a hook or a tool
 cpb session label --list
-cpb SHOW SESSIONS                            # the SESSION column shows the name label
+cpb SHOW SESSIONS                            # the last column, LABELS, shows them
 ```
 
 A session carries short `key=value` labels, from two sources kept apart:

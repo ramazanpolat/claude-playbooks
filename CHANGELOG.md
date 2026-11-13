@@ -9,21 +9,27 @@
   - **launch labels**, given at launch with `--label KEY=VALUE` on `cpb run`,
     a launcher or `cpb start`. They are kept in the launch record, and every
     launch cpb rebuilds carries them like `--env`: the failover relaunch,
-    the by-hand line, a sandbox host;
+    the by-hand line, a sandbox host. They are checked, each and together,
+    before anything starts and before a launch is forwarded to a sandbox
+    host;
   - **session labels**, set from inside a live session by a hook or a tool
-    with `cpb session label key=value` (`--unset`, `--list`, `--json`,
-    `--session <id>`). It finds the session from its own process ancestry,
-    and exits 3 when it does not run in a session cpb launched, so a hook
+    with `cpb session label key=value` (`--unset`, `--list`, `--json`). It
+    finds the session from its own process ancestry, and labels only that
+    one; outside any session, `--session <id>` labels a live session by its
+    id. It exits 3 when it does not run in a session cpb launched, so a hook
     can ignore exactly that. A write waits at most 400 ms for another
     writer of the same session.
   - Both reach the status line's `cpb` key (`labels`), `SHOW SESSIONS`
-    (`labels` in `--json`, a `labels` column in `SELECT … FROM SESSIONS`,
-    and the `name` label in the `SESSION` column) and the usage log
+    (`labels` in `--json`, a last `LABELS` column in the table, a `labels`
+    column in `SELECT … FROM SESSIONS`) and the usage log
     (`launch_labels`, `session_labels`).
-  - A value that looks like an e-mail address or a credential, or holds a
-    control, direction or invisible character, is refused, with a message
-    naming the key and never the value. Labels are never taken from the
-    environment.
+  - A label value is one line of plain visible text, not empty. A
+    character a screen does not show as written (control, format,
+    separator, private-use, variation selector), a value that looks like
+    an e-mail address, and a credential, judged on key and value together
+    as `cpb ask` judges a request (`password=…`, `key=main`; a hash after
+    `commit=` is fine), are refused, with a message naming a valid key and
+    never a value. Labels are never taken from the environment.
   - A launch whose playbooks root came from `--playbooks-dir` sets
     `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
     one, so a cpb inside it uses the same root.

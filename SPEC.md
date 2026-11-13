@@ -2923,11 +2923,12 @@ a lowercase name, or a time in milliseconds is no limit, never an error.
   its status stays Claude Code's own even when its screen shows the limit.
 
 **`SHOW SESSIONS`** prints the live sessions, newest first: one line each
-(`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
+(`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD LABELS`).
 `ACCOUNT` is `-` for none; `STATUS` reads `limit 5h`, `limit 7d` (or
 `limit <window>`) while the session is at a limit, and Claude Code's own
-status otherwise. `SESSION` is the session's `name` label (a session label
-before a launch label; *Session labels*), else its id.
+status otherwise. `SESSION` is the session's id. `LABELS`, last, is its
+labels (*Session labels*): `launch k=v, …; session k=v, …`, each source left
+out when it has none, `-` for none.
 - `FOR PLAYBOOK` limits it to one playbook, and an unknown name is refused.
 - **`--json`** is an array of objects:
 
@@ -3039,8 +3040,11 @@ sources kept apart:
   on `cpb run`, a launcher or `cpb start` (repeatable; a later one for a key
   wins). They go in the launch record, and every launch cpb rebuilds from
   that launch carries them, like `--env`: the failover relaunch and the way
-  back, the by-hand line, a sandbox host. A launch in a local sandbox takes
-  them and records nothing, as it records no account.
+  back, the by-hand line, a sandbox host. They are checked, each and
+  together, before anything starts, and before a launch is forwarded to a
+  sandbox host, so a refused one is neither printed nor handed to ssh. A
+  launch in a local sandbox takes them and records nothing, as it records
+  no account.
 - **Session labels** are claims made from inside a live session, by a hook
   (a `SessionStart` hook setting `task=<name>`) or a tool:
 
@@ -3048,18 +3052,19 @@ sources kept apart:
 cpb session label task=review-auth 'name=fixing ci'
 cpb session label --unset name
 cpb session label --list [--json]          # key=value lines; --json: {"session_id", "labels"}
-cpb session label --session <id> task=x    # a live session by its id
+cpb session label --session <id> task=x    # outside any session: a live session by its id
 ```
 
   - **Which session.** The first ancestor of the calling process, at most 8
     up, whose Claude Code session file, in a config directory cpb knows,
     names it and records the start time that process has (*Live*).
-    `--session <id>` names a live session instead, one confirmed live: not
-    one recorded in another pid domain, nor one whose file records no start
-    time.
-  - **Exit codes.** 0 done; 1 refused; 3 not in a session cpb launched (or,
-    with `--session`, no such live session), so a hook can ignore exactly
-    that.
+    Inside a session cpb launched, `--session` may name only that session:
+    another is refused. Outside any session, `--session <id>` names a live
+    session, one confirmed live: not one recorded in another pid domain, nor
+    one whose file records no start time.
+  - **Exit codes.** 0 done; 1 refused, an unknown or unconfirmed
+    `--session` id included; 3 not in a session cpb launched, so a hook can
+    ignore exactly that.
   - **Kept** in `<playbooks root>/.state/usage/labels/<session id>.json`
     (mode `0600`), written whole under the session's lock, which a writer
     waits at most 400 ms for before it is refused (another label write of
@@ -3072,15 +3077,31 @@ cpb session label --session <id> task=x    # a live session by its id
     nothing is added.
 
 **What a label is.** A key is `a-z`, `0-9`, `.`, `_` and `-`, starting with
-a letter or a digit, at most 32 characters. A value is valid UTF-8, one
-line, at most 200 bytes; at most 16 labels per source, 4 KiB together
+a letter or a digit, at most 32 characters. A value is one line of plain
+visible text: valid UTF-8, not empty (`k=` is refused; `--unset k` removes
+a label), at most 200 bytes. At most 16 labels per source, 4 KiB together
 (launch labels over the caps refuse the launch before anything starts).
-Refused, with a message that names the key and never the value:
-- a control character, or a direction or invisible character that SHOW
-  SESSIONS does not print as written;
+Refused, with a message that names a valid key and never a value (an
+invalid key is not echoed either, only its length: a value may stand where
+the key goes):
+- a character that is not plain visible text: a control or format
+  character (Unicode Cc and Cf: zero-width spaces and joiners, the soft
+  hyphen, the byte-order mark, direction marks and isolates, the tag
+  characters U+E0000 to U+E007F), a line or paragraph separator (Zl, Zp),
+  a private-use character (Co), a variation selector (U+FE00 to U+FE0F,
+  U+E0100 to U+E01EF), the combining grapheme joiner (U+034F), the Hangul
+  fillers (U+115F, U+1160, U+3164, U+FFA0) and U+180B to U+180F. So an
+  emoji joined into a sequence, or one with a variation selector, is
+  refused; a single emoji is plain text;
 - a value shaped like an e-mail address;
-- a value shaped like a credential (the check `cpb ask` applies to a
-  request).
+- a credential, judged on key and value together as `cpb ask` judges a
+  request: a key that names a secret with any value other than a number,
+  `true`, `false`, a reference (`keychain:x`) or a placeholder (`...`,
+  `<x>`) (`password=…`, `token=…`, `api_key=…`,
+  `secret=…`, `auth=Bearer …`; also `key=main`, since `key` names one), a
+  value shaped like a token, a URL with a password, or a long key-shaped
+  word. A long run after a key that names a hash is a hash, so
+  `commit=<40 hex>` is accepted.
 
 A label is printed on shared screens and written to the usage log, so
 nothing goes in one that does not belong there: no secret, no login
@@ -3091,9 +3112,9 @@ environment. A labels file or a launch record holding a label cpb would
 refuse, or of another shape, is not read.
 
 **Where they show.** The status line's `cpb` key (`labels`; *The usage
-step*), SHOW SESSIONS (`labels` in `--json`, the `name` label in the
-`SESSION` column, a `labels` column in `SELECT … FROM SESSIONS`), and the
-usage log (`launch_labels`, `session_labels`).
+step*), SHOW SESSIONS (`labels` in `--json`, the last `LABELS` column of
+the table, a `labels` column in `SELECT … FROM SESSIONS`), and the usage
+log (`launch_labels`, `session_labels`).
 
 ## SHOW USAGE
 

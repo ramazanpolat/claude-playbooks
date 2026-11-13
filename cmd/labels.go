@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -52,39 +53,100 @@ func labelKeyProblem(k string) string {
 	return ""
 }
 
-// labelValueProblem is why v cannot be a label's value, "" when it can.
-// It never quotes the value.
+// labelInvisible reports a character that is not plain visible text:
+// what the by-hand line hides (control and direction characters), every
+// other format character (Cf: zero-width spaces and joiners, the
+// soft hyphen, the byte-order mark, the tag characters), the line and
+// paragraph separators, private-use characters, the variation selectors,
+// the combining grapheme joiner, the Hangul fillers and the Mongolian
+// free variation selectors.
+func labelInvisible(r rune) bool {
+	switch {
+	case hidden(r), unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp, unicode.Co):
+		return true
+	case r >= 0xFE00 && r <= 0xFE0F, r >= 0xE0100 && r <= 0xE01EF: // variation selectors
+		return true
+	case r == 0x034F: // combining grapheme joiner
+		return true
+	case r == 0x115F, r == 0x1160, r == 0x3164, r == 0xFFA0: // Hangul fillers
+		return true
+	case r >= 0x180B && r <= 0x180F: // Mongolian free variation selectors, vowel separator
+		return true
+	case r >= 0xE0000 && r <= 0xE007F: // tag characters, assigned or not
+		return true
+	}
+	return false
+}
+
+// labelValueProblem is why v cannot be a label's value, whatever its key,
+// "" when it can. It never quotes the value.
 func labelValueProblem(v string) string {
 	switch {
+	case v == "":
+		return "is empty (--unset <key> removes a label)"
 	case len(v) > labelValueMax:
 		return fmt.Sprintf("is %d bytes; a label value is at most %d", len(v), labelValueMax)
 	case !utf8.ValidString(v):
 		return "is not UTF-8"
-	case strings.IndexFunc(v, hidden) >= 0:
-		return "holds a control, direction or invisible character (a label value is one line, shown as written)"
+	case strings.IndexFunc(v, labelInvisible) >= 0:
+		return "holds a character that is not plain visible text (a control, format, direction, separator, private-use or variation character); a label is one line of plain visible text"
 	case emailShape.MatchString(v):
 		return "looks like an e-mail address, which never goes in a label"
 	}
-	if c := askRequestCredential(v); c != "" {
+	return ""
+}
+
+// labelProblem is why k=v cannot be a label, "" when it can: the value's
+// own problems, then the credential check on key and value together, as
+// cpb ask checks a request (a key that names a secret, password=…, is
+// refused with its value; commit=<hash> is a hash).
+func labelProblem(k, v string) string {
+	if p := labelValueProblem(v); p != "" {
+		return p
+	}
+	if c := askRequestCredential(k + "=" + v); c != "" {
 		return "looks like a credential (" + c + "), which never goes in a label"
 	}
 	return ""
 }
 
+// labelKeyRefusal says a typed key is not valid without echoing it: what
+// stands where the key goes may be a value.
+func labelKeyRefusal(k string) error {
+	return fmt.Errorf("the label key is not valid (%d characters): %s", utf8.RuneCountInString(k), labelKeyProblem(k))
+}
+
 // parseTypedLabel reads key=value as typed: a problem is refused with a
-// message that names the key, never the value.
+// message that names a valid key, never a value.
 func parseTypedLabel(s string) (string, string, error) {
 	k, v, ok := strings.Cut(s, "=")
 	if !ok {
 		return "", "", errors.New("a label is key=value; the argument has no '='")
 	}
-	if p := labelKeyProblem(k); p != "" {
-		return "", "", fmt.Errorf("label key %q: %s", k, p)
+	if labelKeyProblem(k) != "" {
+		return "", "", labelKeyRefusal(k)
 	}
-	if p := labelValueProblem(v); p != "" {
+	if p := labelProblem(k, v); p != "" {
 		return "", "", fmt.Errorf("label %s: the value %s", k, p)
 	}
 	return k, v, nil
+}
+
+// checkLaunchLabels checks the --label tokens of a launch, each and
+// together, before anything starts or is forwarded. It reads no file.
+func checkLaunchLabels(tokens []launchToken) error {
+	for _, t := range tokens {
+		if t.flag != "--label" {
+			continue
+		}
+		if _, _, err := parseTypedLabel(t.value); err != nil {
+			return fmt.Errorf("--label: %w", err)
+		}
+	}
+	if err := checkLabelSet(launchLabelsOf(tokens)); err != nil {
+		return fmt.Errorf("--label: %w", err)
+	}
+	return nil
 }
 
 // checkLabelSet refuses a set of labels over the caps: how many, and how
@@ -106,7 +168,7 @@ func validLabels(m map[string]string) bool {
 		return false
 	}
 	for k, v := range m {
-		if labelKeyProblem(k) != "" || labelValueProblem(v) != "" {
+		if labelKeyProblem(k) != "" || labelProblem(k, v) != "" {
 			return false
 		}
 	}
