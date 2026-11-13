@@ -6,7 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -594,4 +596,584 @@ func TestUpdateMigrateConsentWording(t *testing.T) {
 	if err := skip.consentRefusal("pb"); !strings.Contains(err.Error(), "pass --yes to update without running it") {
 		t.Fatalf("refusal, step not run: %v", err)
 	}
+}
+
+// --dry-run compares the files, not only the versions: the same version
+// with other files is not "up to date", and the line names what the update
+// would replace. A preserved file is never listed: the update puts it
+// back. After the update, a dry run finds nothing to replace.
+func TestUpdateDryRunComparesTheFiles(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	source := filepath.Join(filepath.Dir(config.PlaybooksDir), "source")
+	write := func(dir, rel, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manifest.Write(source, &manifest.Manifest{Version: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	write(source, "CLAUDE.md", "v1\n")
+	write(source, "migrations/apply.sh", "#!/bin/sh\n")
+	write(source, "settings.json", `{"from":"source"}`)
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	dry := func() string {
+		t.Helper()
+		var out strings.Builder
+		if err := runPlaybookUpdate(&out, "pb", updateOpts{dryRun: true}); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if out := dry(); !strings.Contains(out, "replaces:  nothing (the source's files are the installed ones)") || !strings.Contains(out, "  up to date\n") {
+		t.Fatalf("the same files:\n%s", out)
+	}
+	// The same version, other files; the install's own settings differ too.
+	write(source, "CLAUDE.md", "v1, edited\n")
+	write(source, "hooks/check.sh", "#!/bin/sh\n")
+	write(installed, "settings.json", `{"mine":true}`)
+	out := dry()
+	if !strings.Contains(out, "replaces:  CLAUDE.md (changed), hooks/ (new)\n") || strings.Contains(out, "up to date") ||
+		!strings.Contains(out, "same version, other files: an update replaces what is listed above") || strings.Contains(out, "settings.json") {
+		t.Fatalf("other files:\n%s", out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(installed, "CLAUDE.md")); string(b) != "v1\n" {
+		t.Fatal("--dry-run changed the playbook")
+	}
+	// A file the install has and the source no longer ships, in a folder
+	// the source ships, goes with the folder.
+	write(installed, "migrations/old.sh", "#!/bin/sh\n")
+	if out := dry(); !strings.Contains(out, "migrations/ (changed)") {
+		t.Fatalf("an installed extra file:\n%s", out)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dry(); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("after the update:\n%s", out)
+	}
+	// A file's mode alone counts.
+	if err := os.Chmod(filepath.Join(source, "hooks", "check.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out := dry(); !strings.Contains(out, "replaces:  hooks/ (changed)\n") {
+		t.Fatalf("a mode:\n%s", out)
+	}
+}
+
+// dryRunUpdate is pb's --dry-run output.
+func dryRunUpdate(t *testing.T) string {
+	t.Helper()
+	var out strings.Builder
+	if err := runPlaybookUpdate(&out, "pb", updateOpts{dryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// A git source keeps a link inside it as a link, and the overlay writes
+// the file or folder it names: right after an update the dry run finds
+// nothing to replace.
+func TestUpdateDryRunComparesLinksAsTheOverlayWritesThem(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	repo := filepath.Join(root, "repo")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	for _, d := range []string{filepath.Join(repo, "shared"), installed} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manifest.Write(repo, &manifest.Manifest{Version: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	for rel, body := range map[string]string{"CLAUDE.md": "v1\n", "shared/rules.md": "rules\n"} {
+		if err := os.WriteFile(filepath.Join(repo, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{"AGENTS.md": "CLAUDE.md", "rules": "shared"} {
+		if err := os.Symlink(target, filepath.Join(repo, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := manifest.Write(installed, &manifest.Manifest{Version: "1.0.0", Source: &manifest.Source{Repository: "file://" + repo}}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "AGENTS.md (new)") || !strings.Contains(out, "rules/ (new)") {
+		t.Fatalf("before the update:\n%s", out)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	// The overlay wrote the link to a file as a file, the one to a folder
+	// as a folder.
+	if fi, err := os.Lstat(filepath.Join(installed, "AGENTS.md")); err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("AGENTS.md: %v %v", fi, err)
+	}
+	if fi, err := os.Lstat(filepath.Join(installed, "rules")); err != nil || !fi.IsDir() {
+		t.Fatalf("rules: %v %v", fi, err)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing (the source's files are the installed ones)") || !strings.Contains(out, "  up to date\n") {
+		t.Fatalf("after the update:\n%s", out)
+	}
+	// .git counts by the commit it holds: another one, with the same files.
+	cmd := exec.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "next")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  .git/ (changed)\n") || !strings.Contains(out, "same version, other files") {
+		t.Fatalf("another commit:\n%s", out)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("after the second update:\n%s", out)
+	}
+}
+
+// gitHead reads the commit HEAD names from the files of a .git folder.
+func TestGitHead(t *testing.T) {
+	const a = "0123456789abcdef0123456789abcdef01234567"
+	const b = "89abcdef0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{"a loose ref", map[string]string{"HEAD": "ref: refs/heads/main\n", "refs/heads/main": a + "\n"}, a},
+		{"packed-refs", map[string]string{"HEAD": "ref: refs/heads/main\n", "packed-refs": "# pack-refs with: peeled\n" + b + " refs/heads/other\n" + a + " refs/heads/main\n"}, a},
+		{"detached", map[string]string{"HEAD": b + "\n"}, b},
+		{"no ref", map[string]string{"HEAD": "ref: refs/heads/main\n"}, ""},
+		{"a ref out of the folder", map[string]string{"HEAD": "ref: refs/../../HEAD\n", "../HEAD": a + "\n"}, ""},
+		{"not a ref", map[string]string{"HEAD": "ref: HEAD\n"}, ""},
+		{"not an id", map[string]string{"HEAD": "ref: refs/heads/main\n", "refs/heads/main": "main\n"}, ""},
+		{"no HEAD", map[string]string{}, ""},
+	} {
+		dir := filepath.Join(t.TempDir(), ".git")
+		for rel, body := range tc.files {
+			path := filepath.Join(dir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := gitHead(dir); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	// packed-refs over its cap is not read.
+	dir := filepath.Join(t.TempDir(), ".git")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	big := strings.Repeat("# padding\n", gitPackedRefsMax/10+1) + a + " refs/heads/main\n"
+	if err := os.WriteFile(filepath.Join(dir, "packed-refs"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitHead(dir); got != "" {
+		t.Errorf("packed-refs over its cap: %q", got)
+	}
+}
+
+// A folder's mode counts, since the overlay writes each folder with the
+// source's mode; the manifest's counts as the update leaves it: the
+// installed manifest's mode masked by the source's.
+func TestUpdateDryRunComparesFolderAndManifestModes(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	source := filepath.Join(filepath.Dir(config.PlaybooksDir), "source")
+	mode := func(rel string) os.FileMode {
+		t.Helper()
+		fi, err := os.Stat(filepath.Join(installed, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fi.Mode().Perm()
+	}
+	chmod := func(path string, m os.FileMode) {
+		t.Helper()
+		if err := os.Chmod(path, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	update := func() {
+		t.Helper()
+		if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nothing := func(what string) {
+		t.Helper()
+		if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") || !strings.Contains(out, "  up to date\n") {
+			t.Fatalf("%s:\n%s", what, out)
+		}
+	}
+	update()
+	nothing("after the first update")
+
+	// A folder with the same entries and another mode.
+	chmod(filepath.Join(source, "migrations"), 0o700)
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  migrations/ (changed)\n") || strings.Contains(out, "up to date") {
+		t.Fatalf("a folder's mode:\n%s", out)
+	}
+	update()
+	if m := mode("migrations"); m != 0o700 {
+		t.Fatalf("the update left migrations/ at %o", m)
+	}
+	nothing("after the folder's update")
+
+	// An installed 0644 manifest and a 0600 one in the source: the update
+	// tightens the installed one.
+	chmod(filepath.Join(installed, manifest.FileName), 0o644)
+	chmod(filepath.Join(source, manifest.FileName), 0o600)
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  .playbook (changed)\n") || !strings.Contains(out, "same version, other files") {
+		t.Fatalf("a tighter manifest in the source:\n%s", out)
+	}
+	update()
+	if m := mode(manifest.FileName); m != 0o600 {
+		t.Fatalf("the update left the manifest at %o", m)
+	}
+	nothing("after the manifest's update")
+
+	// The reverse: an installed 0600 manifest stays 0600 against a 0644 one.
+	chmod(filepath.Join(source, manifest.FileName), 0o644)
+	nothing("a looser manifest in the source")
+	update()
+	if m := mode(manifest.FileName); m != 0o600 {
+		t.Fatalf("the update loosened the manifest to %o", m)
+	}
+}
+
+// The dry run reads the install's manifest again once the source is
+// staged, under the registry lock, as the update does: a change made
+// while staging ran is what it compares with, and an install re-sourced
+// meanwhile stops it as it stops the update.
+func TestUpdateDryRunReadsTheManifestAfterStaging(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { updateStaged = func() {} })
+	alter := func(change func(m *manifest.Manifest)) {
+		updateStaged = func() {
+			m, err := manifest.Read(installed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			change(m)
+			if err := manifest.Write(installed, m); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// An install-local field set while staging ran: the update keeps it,
+	// so the manifest is not one it would replace.
+	alter(func(m *manifest.Manifest) { m.LabelVars = []string{"TERM_PROGRAM"} })
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") || !strings.Contains(out, "  up to date\n") {
+		t.Fatalf("a field set while staging ran:\n%s", out)
+	}
+	// Re-sourced while staging ran.
+	alter(func(m *manifest.Manifest) { m.Source.Branch = "other" })
+	err := runPlaybookUpdate(io.Discard, "pb", updateOpts{dryRun: true})
+	if err == nil || !strings.Contains(err.Error(), "changed while the update was staging") {
+		t.Fatalf("re-sourced: %v", err)
+	}
+}
+
+// gitCommit commits everything in repo.
+func gitCommit(t *testing.T, repo, message string) {
+	t.Helper()
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", message}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// dryRunWithin is pb's --dry-run output, failing the test when the dry run
+// has not ended in a few seconds: one that waits on a FIFO never does.
+func dryRunWithin(t *testing.T) string {
+	t.Helper()
+	type result struct {
+		out string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var out strings.Builder
+		err := runPlaybookUpdate(&out, "pb", updateOpts{dryRun: true})
+		done <- result{out.String(), err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		return r.out
+	case <-time.After(5 * time.Second):
+		t.Fatal("the dry run waited")
+	}
+	return ""
+}
+
+// A local source that is a git repository is compared as files, .git
+// included: the update copies its .git as it is, so a changed config or an
+// added hook at the same commit is listed. A link in it is compared by its
+// target and never read through, so a link to a FIFO does not hold the
+// dry run.
+func TestUpdateDryRunComparesALocalSourcesGitAsFiles(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	source := filepath.Join(filepath.Dir(config.PlaybooksDir), "source")
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = source
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	gitCommit(t, source, "initial")
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("after the update:\n%s", out)
+	}
+	appendTo := func(path, line string) {
+		t.Helper()
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString(line)
+		f.Close()
+	}
+	appendTo(filepath.Join(source, ".git", "config"), "[cpbtest]\n\tx = 1\n")
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  .git/ (changed)\n") || !strings.Contains(out, "same version, other files") {
+		t.Fatalf("a changed .git/config at the same commit:\n%s", out)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	appendTo(filepath.Join(source, ".git", "hooks", "post-checkout"), "#!/bin/sh\n")
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  .git/ (changed)\n") {
+		t.Fatalf("an added hook at the same commit:\n%s", out)
+	}
+	// HEAD a link to a FIFO out of the source: compared by its target.
+	fifo := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	head := filepath.Join(source, ".git", "HEAD")
+	if err := os.Remove(head); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(fifo, head); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunWithin(t); !strings.Contains(out, ".git/ (changed)") {
+		t.Fatalf("HEAD a link to a FIFO:\n%s", out)
+	}
+	if fi, err := os.Lstat(filepath.Join(installed, ".git", "HEAD")); err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("the dry run changed the install's HEAD: %v %v", fi, err)
+	}
+}
+
+// A git source's .git is compared by the commit HEAD names only when every
+// file on the way is a regular one reached without a link: an install
+// whose HEAD is a link, or whose ref is a FIFO, is compared as files,
+// without reading through the link or waiting on the FIFO.
+func TestUpdateDryRunReadsAGitURLsHeadWithoutLinksOrWaiting(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	repo := filepath.Join(root, "repo")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	for _, d := range []string{repo, installed} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manifest.Write(repo, &manifest.Manifest{Version: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	gitCommit(t, repo, "initial")
+	if err := manifest.Write(installed, &manifest.Manifest{Version: "1.0.0", Source: &manifest.Source{Repository: "file://" + repo}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("after the update:\n%s", out)
+	}
+	// HEAD a link to a file out of the install that names the same ref.
+	head := filepath.Join(installed, ".git", "HEAD")
+	b, err := os.ReadFile(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "HEAD")
+	if err := os.WriteFile(outside, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(head); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, head); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  .git/ (changed)\n") {
+		t.Fatalf("HEAD a link:\n%s", out)
+	}
+	if err := os.Remove(head); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(head, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// refs a link to a copy out of the install: compared as files.
+	refs := filepath.Join(installed, ".git", "refs")
+	copied := filepath.Join(t.TempDir(), "refs")
+	if err := copyDir(refs, copied); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(refs, refs+".kept"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(copied, refs); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  .git/ (changed)\n") {
+		t.Fatalf("refs a link:\n%s", out)
+	}
+	if err := os.Remove(refs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(refs+".kept", refs); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("refs put back:\n%s", out)
+	}
+	// The ref HEAD names a FIFO (the loose ref, or packed-refs without one).
+	ref := filepath.Join(installed, ".git", filepath.FromSlash(strings.TrimPrefix(strings.TrimSpace(string(b)), "ref: ")))
+	if _, err := os.Lstat(ref); err != nil {
+		ref = filepath.Join(installed, ".git", "packed-refs")
+	}
+	if err := os.Remove(ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(ref, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunWithin(t); !strings.Contains(out, "replaces:  .git/ (changed)\n") {
+		t.Fatalf("the ref a FIFO:\n%s", out)
+	}
+}
+
+// What the update puts back after the overlay is left out on both sides:
+// a skill ADD SKILL recorded, over a source that ships skills/; a preserved
+// path below a folder the source does not ship; and, on a filesystem that
+// ignores case, a preserved file the source ships under another case.
+func TestUpdateDryRunLeavesOutWhatTheUpdatePutsBack(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	source := filepath.Join(filepath.Dir(config.PlaybooksDir), "source")
+	write := func(dir, rel, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manifest.Write(source, &manifest.Manifest{Version: "2.0.0", Update: &manifest.Update{Preserve: []string{"hooks/sub/mine.txt"}}}); err != nil {
+		t.Fatal(err)
+	}
+	write(source, "skills/shipped/SKILL.md", "---\nname: shipped\ndescription: d\n---\n")
+	write(source, "hooks/check.sh", "#!/bin/sh\n")
+	update := func() {
+		t.Helper()
+		if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upToDate := func(what string) {
+		t.Helper()
+		if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") || !strings.Contains(out, "  up to date\n") {
+			t.Fatalf("%s:\n%s", what, out)
+		}
+	}
+	update()
+	upToDate("after the first update")
+
+	// A recorded skill, put back over the source's skills/.
+	src, _ := filepath.EvalSymlinks(makeSkill(t, filepath.Join(t.TempDir(), "extra")))
+	mustStmt(t, "ALTER PLAYBOOK pb ADD SKILL extra FROM "+src)
+	update()
+	if _, err := os.Lstat(filepath.Join(installed, "skills", "extra")); err != nil {
+		t.Fatalf("the update did not put the skill back: %v", err)
+	}
+	upToDate("after an update that put a recorded skill back")
+	update()
+	upToDate("after the next update")
+
+	// A preserved path below a folder the source does not ship.
+	write(installed, "hooks/sub/mine.txt", "mine\n")
+	update()
+	if b, err := os.ReadFile(filepath.Join(installed, "hooks", "sub", "mine.txt")); err != nil || string(b) != "mine\n" {
+		t.Fatalf("the update did not keep the preserved file: %q %v", b, err)
+	}
+	upToDate("after an update that kept a nested preserved file")
+	// Anything else in that folder the update does not keep: listed.
+	write(installed, "hooks/sub/other.txt", "other\n")
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  hooks/ (changed)\n") {
+		t.Fatalf("an unpreserved file beside it:\n%s", out)
+	}
+	if err := os.Remove(filepath.Join(installed, "hooks", "sub", "other.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The preserved settings.json, shipped as Settings.json.
+	probe := filepath.Join(installed, "case-probe")
+	write(installed, "case-probe", "")
+	_, err := os.Lstat(filepath.Join(installed, "CASE-PROBE"))
+	os.Remove(probe)
+	if err != nil {
+		t.Log("a case-sensitive filesystem: Settings.json is another file here")
+		return
+	}
+	write(installed, "settings.json", `{"mine":true}`)
+	write(source, "Settings.json", `{"from":"source"}`)
+	update()
+	if b, _ := os.ReadFile(filepath.Join(installed, "settings.json")); string(b) != `{"mine":true}` {
+		t.Fatalf("the update did not keep the install's settings: %s", b)
+	}
+	upToDate("a preserved file shipped under another case")
 }

@@ -207,7 +207,7 @@ The rest of this section is about a playbook installed from a source.
 Update pulls the playbook from the source recorded in its `.playbook`:
 
 ```bash
-cpb update awesome --dry-run    # the available version and the migrate step; changes nothing
+cpb update awesome --dry-run    # the available version, what it would replace, the migrate step; changes nothing
 cpb update awesome
 ```
 

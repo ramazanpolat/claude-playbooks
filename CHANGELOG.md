@@ -79,6 +79,15 @@
   USER@HOST: cpb run …`) leaves each `--env` value out and keeps its name
   (`--env=K=<your value>`), as the by-hand resume line does. The command
   sent over ssh carries the values.
+- **`cpb update <name> --dry-run` compares the files.** Next to the
+  versions it lists what the update would replace, each top-level entry
+  the source ships that is new or differs from the install's, as the
+  update would write it: a link inside the source as the file or folder
+  it names, folder and file modes, the manifest assembled with its mode,
+  and for a git URL a `.git` folder by the commit it holds. What the update
+  puts back is left out: preserved files and recorded skills.
+  It says `up to date` only when the versions match and nothing would be
+  replaced; the same version with other files says so.
 - **`ALTER DEFAULTS SET IF UNSET …`** is refused with a message that says
   `SET IF UNSET` is for playbook properties, not DEFAULTS, and names every
   key DEFAULTS takes. `SET IF UNSET` stays a playbook form: a recipe, which
