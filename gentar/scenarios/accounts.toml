@@ -237,6 +237,12 @@ except OSError:
 d = os.environ["CLAUDE_CONFIG_DIR"] + "/sessions"; os.makedirs(d, exist_ok=True); f = d + "/%d.json" % pid
 json.dump({"pid": pid, "sessionId": sid, "cwd": os.getcwd(), "startedAt": int(time.time() * 1000), "procStart": st, "kind": "interactive", "status": "busy"}, open(f, "w"))
 try:
+    # Claude Code renders after it starts; cpb records the launch once the process runs.
+    L = h + "/.claude-playbooks/.state/launches"
+    for _ in range(50):
+        if os.path.isdir(L) and any(n.endswith(".json") for n in os.listdir(L)):
+            break
+        time.sleep(0.1)
     subprocess.run(["/bin/sh", "-c", "cpb session label task=triage"], check=True)
     a = sys.argv[1:]
     s = json.loads(a[a.index("--settings") + 1]) if "--settings" in a else {}

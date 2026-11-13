@@ -31,6 +31,13 @@ with open(session_file, "w") as f:
     json.dump({"pid": os.getpid(), "sessionId": SID, "cwd": os.getcwd(), "startedAt": int(time.time() * 1000),
                "procStart": proc_start(os.getpid()), "kind": "interactive", "status": "busy"}, f)
 try:
+    # Claude Code renders after it starts; cpb records the launch once the
+    # process runs, and the status line step reads that record.
+    launches = os.path.join(home, ".claude-playbooks", ".state", "launches")
+    for _ in range(50):
+        if os.path.isdir(launches) and any(n.endswith(".json") for n in os.listdir(launches)):
+            break
+        time.sleep(0.1)
     # The hook. `|| [ $? -eq 3 ]` ignores exactly "not in a session cpb
     # launched", so the same hook works under plain claude too.
     subprocess.run(["/bin/sh", "-c", "cpb session label task=triage || [ $? -eq 3 ]"], check=True)
