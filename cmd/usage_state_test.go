@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,8 +38,9 @@ func latestFive(t *testing.T, root, key string) float64 {
 }
 
 // An idle session re-rendering its old figure never replaces a newer one
-// another session saw; for a window that resets at the same time, the
-// higher use stands.
+// another session saw. For a window that resets at the same time, a
+// session's first figures do not lower the stored use; its later figures
+// stand as they are.
 func TestUsageLatestKeepsTheNewerFigure(t *testing.T) {
 	root, rec := stepFixture(t, "work", "work", nil)
 	a := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
@@ -54,8 +56,13 @@ func TestUsageLatestKeepsTheNewerFigure(t *testing.T) {
 		t.Fatalf("a re-render replaced the newer figure: %v", got)
 	}
 	stepRecord(a, rateInput(sidB, 45, five, 10, seven)) // B's own new figure, same window
-	if got := latestFive(t, root, "work"); got != 100 {
-		t.Fatalf("a lower use of the same window replaced a higher one: %v", got)
+	if got := latestFive(t, root, "work"); got != 45 {
+		t.Fatalf("a session's later figure did not stand: %v", got)
+	}
+	sidC := "d9c690fc-1a83-4be9-b6aa-00000000000c"
+	stepRecord(a, rateInput(sidC, 30, five, 10, seven)) // C's first figures, same window, lower
+	if got := latestFive(t, root, "work"); got != 45 {
+		t.Fatalf("a session's first figures lowered the stored use: %v", got)
 	}
 	later := five + 5*3600
 	stepRecord(a, rateInput(sidB, 3, later, 10, seven)) // a new window
@@ -360,7 +367,7 @@ func TestUsageForgetsADroppedAccount(t *testing.T) {
 	seed := func() {
 		t.Helper()
 		writeLatest(root, usageSnapshot{Key: "acc", Account: "acc", At: rfc3339(time.Now()), SessionID: stepSID,
-			RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":100,"resets_at":%d}}`, time.Now().Add(time.Hour).Unix()))})
+			RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":100,"resets_at":%d}}`, time.Now().Add(time.Hour).Unix()))}, true)
 		if _, ok := readLatestFigures(root)["acc"]; !ok {
 			t.Fatal("no figure seeded")
 		}
@@ -526,7 +533,7 @@ func TestStatuslineStepMainExitCodes(t *testing.T) {
 		}
 		gone := false
 		for i := 0; i < 100 && !gone; i++ {
-			gone = syscall.Kill(-group, 0) == syscall.ESRCH
+			gone = !groupRunning(group)
 			time.Sleep(10 * time.Millisecond)
 		}
 		if !gone {
@@ -607,7 +614,7 @@ func TestUsageRealFolders(t *testing.T) {
 	// The accounts folder: neither written nor read.
 	root = t.TempDir()
 	out = link(root, "accounts")
-	writeLatest(root, s)
+	writeLatest(root, s, true)
 	if !empty(out) {
 		t.Fatal("a latest figure written through a linked accounts folder")
 	}
@@ -723,4 +730,117 @@ func TestUsageFarAheadStoredIsAbsent(t *testing.T) {
 	if got := latestFive(t, root, "work"); got != 50 {
 		t.Fatalf("latest: %v", got)
 	}
+}
+
+// The later-reset rule needs both conditions: a new figure whose window had
+// already reset replaces a stored window that resets earlier still.
+func TestUsageResetWindowOverAnOlderOne(t *testing.T) {
+	root, rec := stepFixture(t, "work", "work", nil)
+	older, old := time.Now().Add(-2*time.Hour).Unix(), time.Now().Add(-time.Hour).Unix()
+	putLatest(t, root, latestFigure{Key: "work", Account: "work", SeenAt: rfc3339(time.Now().Add(-3 * time.Hour)),
+		RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":90,"resets_at":%d}}`, older))})
+	a := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+	stepRecord(a, rateInput(stepSID, 60, old, 1, time.Now().Add(72*time.Hour).Unix()))
+	if got := latestFive(t, root, "work"); got != 60 {
+		t.Fatalf("latest: %v", got)
+	}
+}
+
+// SHOW CREATE leaves out a label no statement could set, and says so.
+func TestShowCreateAccountLeavesOutAHiddenCharacterLabel(t *testing.T) {
+	b := createAccountBlock(&account.Account{Name: "acc", Provider: account.Anthropic, Identity: "me\x1b]0;x\x07",
+		Auth: account.Auth{Kind: account.ClaudeToken, Ref: "keychain:ok/t"}})
+	if strings.Contains(b.text, "\x1b") || strings.Contains(b.text, "identity") && !strings.Contains(b.text, "its identity label is left out") {
+		t.Fatalf("%q", b.text)
+	}
+	if !strings.Contains(b.text, "-- ACCOUNT acc: its identity label is left out") {
+		t.Fatalf("no note: %q", b.text)
+	}
+	if b := createAccountBlock(&account.Account{Name: "ok", Provider: account.Anthropic, Identity: "me@example.com",
+		Auth: account.Auth{Kind: account.ClaudeToken, Ref: "keychain:ok/t"}}); !strings.Contains(b.text, "identity = 'me@example.com'") {
+		t.Fatalf("a plain label: %q", b.text)
+	}
+}
+
+// A session's first figures are its first line with figures, after lines
+// without any (before its first answer): they do not lower the stored use
+// of the same window.
+func TestUsageFirstFiguresAfterLinesWithout(t *testing.T) {
+	root, rec := stepFixture(t, "work", "work", nil)
+	a := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+	five, seven := time.Now().Add(time.Hour).Unix(), time.Now().Add(72*time.Hour).Unix()
+	stepRecord(a, rateInput("d9c690fc-1a83-4be9-b6aa-00000000000a", 80, five, 1, seven))
+	sidB := "d9c690fc-1a83-4be9-b6aa-00000000000b"
+	stepRecord(a, []byte(`{"session_id":"`+sidB+`","model":{"id":"claude-opus-5-5"}}`+"\n"))
+	stepRecord(a, rateInput(sidB, 30, five, 1, seven))
+	if got := latestFive(t, root, "work"); got != 80 {
+		t.Fatalf("a session's first figures lowered the stored use: %v", got)
+	}
+}
+
+// Managed settings outrank the step from the drop-in folder too, and from
+// the server-managed cache in the config directory; a hidden or non-JSON
+// drop-in is not read, as Claude Code does not read it.
+func TestStatuslineStepManagedSources(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	cfg := filepath.Join(root, "alpha")
+	write := func(p, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(cfg, "settings.json"), `{"statusLine":{"type":"command","command":"x"}}`)
+	sys := t.TempDir()
+	old := managedSettingsPaths
+	managedSettingsPaths = func() []string { return managedSettingsFiles(sys) }
+	t.Cleanup(func() { managedSettingsPaths = old })
+	step := func() statuslineStep { return statuslineStepFor(root, cfg, t.TempDir(), "0123456789abcdef", nil) }
+	write(filepath.Join(sys, "managed-settings.d", ".hidden.json"), `{"statusLine":{"type":"command","command":"p"}}`)
+	write(filepath.Join(sys, "managed-settings.d", "notes.txt"), `{"statusLine":{"type":"command","command":"p"}}`)
+	if s := step(); s.wrapped == nil {
+		t.Fatalf("a hidden or non-JSON drop-in counted: %s", s.reason)
+	}
+	write(filepath.Join(sys, "managed-settings.d", "20-team.json"), `{"statusLine":{"type":"command","command":"p"}}`)
+	if s := step(); s.wrapped != nil || !strings.Contains(s.reason, "20-team.json") {
+		t.Fatalf("a drop-in: %+v", s)
+	}
+	_ = os.Remove(filepath.Join(sys, "managed-settings.d", "20-team.json"))
+	write(filepath.Join(cfg, "remote-settings.json"), `{"statusLine":{"type":"command","command":"p"}}`)
+	if s := step(); s.wrapped != nil || !strings.Contains(s.reason, "remote-settings.json") {
+		t.Fatalf("server-managed: %+v", s)
+	}
+}
+
+// groupRunning reports whether a process of group pgid still runs. A
+// zombie, dead but not yet reaped, does not: where the test runs as a
+// container's first process, nothing reaps the original's orphaned
+// command, and its zombie keeps the group's id.
+func groupRunning(pgid int) bool {
+	if runtime.GOOS != "linux" {
+		return syscall.Kill(-pgid, 0) != syscall.ESRCH
+	}
+	ents, _ := os.ReadDir("/proc")
+	for _, e := range ents {
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join("/proc", e.Name(), "stat"))
+		if err != nil {
+			continue
+		}
+		i := strings.LastIndexByte(string(b), ')')
+		if i < 0 {
+			continue
+		}
+		f := strings.Fields(string(b[i+1:])) // state, ppid, pgrp, ...
+		if len(f) > 2 && f[2] == strconv.Itoa(pgid) && f[0] != "Z" {
+			return true
+		}
+	}
+	return false
 }

@@ -1413,7 +1413,7 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     show becomes a placeholder after its flag's name: an `--env` value, an
     inline `--settings` JSON, and a value holding a control character
     (other than a newline or a tab), a direction mark, embedding, override
-    or isolate (U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) or a line or
+    or isolate (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) or a line or
     paragraph separator. Such a line starts with `# ` and stays one line
     (a value holding a newline is then not shown either), so pasted as it
     is it runs nothing, and cpb says to replace each placeholder and remove
@@ -2070,7 +2070,12 @@ usage (*SHOW USAGE*). The playbook changes nothing.
     so cpb never copies it into a `--settings` of its own, where it would
     run at once; those files are read for the key alone, and one that cannot
     be read means no step;
-  - managed settings set a status line;
+  - managed settings set a status line: the managed settings file, a
+    `managed-settings.d/*.json` drop-in beside it, or server-managed
+    settings cached in the config directory (`remote-settings.json`). A
+    status line set through a macOS managed-preferences profile (the
+    `com.anthropic.claudecode` domain) is not checked: there `EXPLAIN` says
+    recorded while the profile's status line runs instead;
   - the playbook has no status line: the launch adds none.
   `EXPLAIN PLAYBOOK` says which (`Usage at launch: recorded by cpb's status
   line step`, or `not recorded (<reason>)`; `--json` `usage_at_launch`).
@@ -2091,7 +2096,10 @@ usage (*SHOW USAGE*). The playbook changes nothing.
   (no usable temporary folder), the original runs as the step's child, fed
   the same input, and the step ends with its exit code (128 plus the
   signal for one a signal ended; a SIGTERM, SIGINT or SIGHUP to the step
-  goes on to it). The account, its usage key and the rest come from the
+  goes on to it). On that path the original runs in a process group of its
+  own, so every command of it gets the signal; a command of it that reads
+  the terminal or changes the terminal's settings is stopped there, as a
+  background job is. The account, its usage key and the rest come from the
   launch record the id names, never from argv or the session's
   environment. The step reads no login's identity; it reads stored
   accounts' `identity` labels, to merge their entries in the `cpb` key.
@@ -3062,13 +3070,16 @@ SELECT … FROM USAGE
 - `accounts/<hash of the key>.json`: the latest figure per allowance,
   replaced whole, written only when a session's figures differ from its
   own line before (a session re-rendering an old figure never replaces a
-  newer one); for a window that resets at the same time the higher use
-  stands. It is read only from the file its key's hash names, never one
-  seen later than now, with each name checked as a launch writes it, use
-  bounded to 0-1000% and a reset to its seen time plus the window's
-  length. A stored figure that claims a seen time later than now is
-  replaced by the next real one, and a window of the stored figure that
-  resets later than the new one's is kept. `DROP
+  newer one). A stored window is kept over the new figure's only when the
+  new window had already reset when it was seen and the stored one resets
+  later, or, for a session's first figures (which may be ones Claude Code
+  had from before the session's first answer), when both reset at the
+  same time and the stored use is higher; a session's later figures stand
+  as they are. It is read only from the file its key's hash names, never
+  one seen later than now, with each name checked as a launch writes it,
+  use bounded to 0-1000% and a reset to its seen time plus the window's
+  length. A stored figure that claims a seen time more than a minute
+  later than now is replaced by the next real one. `DROP
   ACCOUNT`, and a change of an account's provider, address or credential,
   remove the account's figure.
 - A launch removes files nobody wrote for 30 days. cpb neither writes nor

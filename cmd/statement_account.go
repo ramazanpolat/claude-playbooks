@@ -622,7 +622,9 @@ func createAccountBlock(a *account.Account) createBlock {
 	default:
 		set = append(set, grammar.Var{Key: "auth", Value: a.Auth.Kind})
 	}
-	add("identity", a.Identity)
+	// A label no statement could set (a hand-edited one holding a control
+	// or invisible character) is left out, never printed raw.
+	add("identity", shownLabel(a.Identity))
 	if a.Listed() {
 		add("access", account.AccessListed)
 	}
@@ -638,5 +640,9 @@ func createAccountBlock(a *account.Account) createBlock {
 	add("description", a.Description)
 	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Account, Name: a.Name, OrReplace: true,
 		Clauses: []grammar.Clause{{Kind: grammar.SetAccount, Settings: set}}}
-	return createBlock{text: st.Pretty() + ";"}
+	text := st.Pretty() + ";"
+	if a.Identity != "" && shownLabel(a.Identity) == "" {
+		text = "-- ACCOUNT " + a.Name + ": its identity label is left out; it holds a character a terminal does not show as written\n" + text
+	}
+	return createBlock{text: text}
 }

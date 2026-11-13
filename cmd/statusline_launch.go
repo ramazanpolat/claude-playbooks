@@ -41,11 +41,25 @@ const (
 var managedSettingsPaths = func() []string {
 	switch runtime.GOOS {
 	case "darwin":
-		return []string{"/Library/Application Support/ClaudeCode/managed-settings.json"}
+		return managedSettingsFiles("/Library/Application Support/ClaudeCode")
 	case "linux":
-		return []string{"/etc/claude-code/managed-settings.json"}
+		return managedSettingsFiles("/etc/claude-code")
 	}
 	return nil
+}
+
+// managedSettingsFiles are the file-based managed settings Claude Code
+// reads from dir: managed-settings.json, then every *.json file of the
+// managed-settings.d drop-in folder that is not hidden.
+func managedSettingsFiles(dir string) []string {
+	out := []string{filepath.Join(dir, "managed-settings.json")}
+	ents, _ := os.ReadDir(filepath.Join(dir, "managed-settings.d"))
+	for _, e := range ents {
+		if n := e.Name(); strings.HasSuffix(n, ".json") && !strings.HasPrefix(n, ".") {
+			out = append(out, filepath.Join(dir, "managed-settings.d", n))
+		}
+	}
+	return out
 }
 
 // folderSettingsFiles are the folder-level settings files Claude Code reads
@@ -148,7 +162,10 @@ func statuslineStepFor(root, configDir, wd, launchID string, claudeArgs []string
 	if typ != "command" || strings.TrimSpace(command) == "" {
 		return statuslineStep{reason: stepSkipNotCommand}
 	}
-	for _, p := range managedSettingsPaths() {
+	// Server-managed settings are cached in the config directory; they and
+	// the file-based ones outrank the launch's --settings. (A macOS
+	// managed-preferences profile is not checked.)
+	for _, p := range append(managedSettingsPaths(), filepath.Join(configDir, "remote-settings.json")) {
 		if set, _ := setsStatusLine(p); set {
 			return statuslineStep{reason: "managed settings set a status line (" + p + "), which outranks the playbook's"}
 		}
