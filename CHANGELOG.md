@@ -25,8 +25,8 @@
     naming the key and never the value. A label is taken from the
     environment only through `label_vars` (below), for the names listed.
   - A launch whose playbooks root came from `--playbooks-dir` sets
-    `CPB_PLAYBOOKS_DIR` (absolute) in the session, so a cpb inside it uses
-    the same root.
+    `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
+    one, so a cpb inside it uses the same root.
   - Guide: `docs/guides/labels.md`; example `29-labels`.
 - **`label_vars`**, a PLAYBOOK and a DEFAULTS property: the exact names of
   environment variables whose values a launch copies into launch labels,

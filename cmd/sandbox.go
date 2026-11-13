@@ -109,6 +109,12 @@ func launchLayers(tokens []launchToken) ([]*manifest.Env, error) {
 		}
 		layers = append(layers, layer)
 	}
+	// The labels together, as the launch record will hold them: a set over
+	// the caps is refused before anything starts, never written into a
+	// record no reader would accept.
+	if err := checkLabelSet(launchLabelsOf(tokens)); err != nil {
+		return nil, fmt.Errorf("--label: %w", err)
+	}
 	return layers, nil
 }
 

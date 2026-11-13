@@ -93,6 +93,17 @@ func TestLaunchLabelFlag(t *testing.T) {
 	if got := launchLabelsOf([]launchToken{{flag: "--label", value: "k=1"}, {flag: "--label", value: "k=2"}}); got["k"] != "2" {
 		t.Fatalf("a later label for a key wins: %v", got)
 	}
+	// Over the caps together: refused before anything launches.
+	var many []launchToken
+	for i := 0; i < labelsPerSource+1; i++ {
+		many = append(many, launchToken{flag: "--label", value: fmt.Sprintf("k%d=v", i)})
+	}
+	if _, err := launchLayers(many); err == nil || !strings.Contains(err.Error(), "--label: 17 labels; at most 16") {
+		t.Fatalf("17 labels: %v", err)
+	}
+	if _, err := launchLayers(many[:labelsPerSource]); err != nil {
+		t.Fatalf("16 labels: %v", err)
+	}
 }
 
 // The labels a launch carries travel on every rebuilt launch: the failover
@@ -245,6 +256,13 @@ func TestSessionLabelFindsTheCallersSession(t *testing.T) {
 	if code, _ := run(func() { sessionLabelSession = "99999999-9999-4999-8999-999999999999" }, "via=id"); code != exitNotASession {
 		t.Fatalf("--session of no live session: exit %d", code)
 	}
+	// A session whose file records no start time is not confirmed live
+	// (its pid may be reused): --session does not take it.
+	const unconfirmed = "44444444-4444-4444-8444-444444444444"
+	writeSessionFile(t, cfg, parent, unconfirmed, root, "interactive", "", time.Now())
+	if code, _ := run(func() { sessionLabelSession = unconfirmed }, "via=id"); code != exitNotASession || readSessionLabels(root, unconfirmed) != nil {
+		t.Fatalf("--session of an unconfirmed session: exit %d", code)
+	}
 }
 
 // The labels reach the status line's cpb key and the usage log; a label
@@ -306,8 +324,13 @@ func TestPlaybooksRootReachesTheSession(t *testing.T) {
 	if strings.Join(env, " ") != "A=1 "+want {
 		t.Fatalf("env: %v", env)
 	}
+	// The flag outranks an inherited root: the session gets the flag's.
 	t.Setenv(config.PlaybooksDirEnv, "/from/env")
-	if env := withPlaybooksRoot([]string{"A=1"}); strings.Join(env, " ") != "A=1" {
+	if env := withPlaybooksRoot([]string{"A=1", config.PlaybooksDirEnv + "=/from/env"}); strings.Join(env, " ") != "A=1 "+want {
+		t.Fatalf("a flag over an inherited root: %v", env)
+	}
+	config.PlaybooksDir = ""
+	if env := withPlaybooksRoot([]string{"A=1", config.PlaybooksDirEnv + "=/from/env"}); strings.Join(env, " ") != "A=1 "+config.PlaybooksDirEnv+"=/from/env" {
 		t.Fatalf("a root from the environment: %v", env)
 	}
 	t.Setenv(config.PlaybooksDirEnv, "")

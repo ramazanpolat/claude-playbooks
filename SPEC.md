@@ -3097,7 +3097,9 @@ cpb session label --session <id> task=x    # a live session by its id
   - **Which session.** The first ancestor of the calling process, at most 8
     up, whose Claude Code session file, in a config directory cpb knows,
     names it and records the start time that process has (*Live*).
-    `--session <id>` names a live session instead.
+    `--session <id>` names a live session instead, one confirmed live: not
+    one recorded in another pid domain, nor one whose file records no start
+    time.
   - **Exit codes.** 0 done; 1 refused; 3 not in a session cpb launched (or,
     with `--session`, no such live session), so a hook can ignore exactly
     that.
@@ -3107,13 +3109,15 @@ cpb session label --session <id> task=x    # a live session by its id
     the session is in progress). The file goes when its last label does,
     and is swept with the usage files nobody wrote for 30 days.
   - **The playbooks root.** A launch whose root came from `--playbooks-dir`
-    sets `CPB_PLAYBOOKS_DIR` (absolute) in the session, so a cpb inside it
-    reads and writes the same root. With the root from the environment or
-    the default, nothing is added.
+    sets `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing one it
+    inherited (the flag outranks it), so a cpb inside it reads and writes
+    the same root. With the root from the environment or the default,
+    nothing is added.
 
 **What a label is.** A key is `a-z`, `0-9`, `.`, `_` and `-`, starting with
 a letter or a digit, at most 32 characters. A value is valid UTF-8, one
-line, at most 200 bytes; at most 16 labels per source, 4 KiB together.
+line, at most 200 bytes; at most 16 labels per source, 4 KiB together
+(launch labels over the caps refuse the launch before anything starts).
 Refused, with a message that names the key and never the value:
 - a control character, or a direction or invisible character that SHOW
   SESSIONS does not print as written;
