@@ -512,7 +512,7 @@ func sessionPIDOf(configDir string, child int) int {
 	}
 	var pids []int
 	for _, e := range ents {
-		if p, ok := launchRecordPID(e.Name()); ok {
+		if p, ok := pidFileName(e.Name()); ok {
 			pids = append(pids, p)
 		}
 	}
@@ -740,7 +740,9 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 		return auth.OwnLoginRefusal(in.configDir, eff, in.pb.Name)
 	}
 	w.fullAccounts = func() map[string]bool {
-		out := map[string]bool{}
+		// At a limit by the latest usage figure any session reported for
+		// it (SHOW USAGE), or by a live session stopped there.
+		out := fullKeys(readLatestFigures(config.ResolvePlaybooksDir()), time.Now())
 		rows, _, err := liveSessions("")
 		if err != nil {
 			return out

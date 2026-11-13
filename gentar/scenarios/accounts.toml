@@ -123,8 +123,9 @@ SID=$S2 cpb run --account acct-work sesacct >/dev/null 2>&1 & R2=$!
 w "$S2" acct-work || { echo fork-helper-account-wrong; obj "$S2"; exit 1; }
 cpb ALTER DEFAULTS SET secret_helper = 'arena-helper' >/dev/null
 P1="$(obj "$S1" | sed 's/.*"pid":\([0-9]*\).*/\1/')"; P2="$(obj "$S2" | sed 's/.*"pid":\([0-9]*\).*/\1/')"
-test -e "$L/$P1.json" && ! test -e "$L/$P2.json" && [ "$(ls "$L" | wc -l | tr -d ' ')" = 2 ] || { echo records-wrong; ls -l "$L"; exit 1; }
-[ "$(stat -c %a "$L/$P1.json" 2>/dev/null || stat -f %Lp "$L/$P1.json")" = 600 ] && ! grep -rq "secret-" "$L" || { echo record-mode-or-value-wrong; exit 1; }
+F1="$(grep -l "\"pid\":$P1," "$L"/*.json 2>/dev/null | head -1)"
+[ -n "$F1" ] && ! grep -lq "\"pid\":$P2," "$L"/*.json && [ "$(ls "$L" | wc -l | tr -d ' ')" = 2 ] || { echo records-wrong; ls -l "$L"; exit 1; }
+[ "$(stat -c %a "$F1" 2>/dev/null || stat -f %Lp "$F1")" = 600 ] && ! grep -rq "secret-" "$L" || { echo record-mode-or-value-wrong; exit 1; }
 cpb "SELECT session_id, account FROM SESSIONS" --json | tr -d ' \n' | grep -qF '"account":"acct-work"' && cpb SHOW SESSIONS | grep -q 'ACCOUNT' || { echo select-or-table-wrong; exit 1; }
 E="$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"; mkdir -p "$P/projects/$E"
 printf '{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"five_hour","resetsAt":%s}}\n' "$(( $(date +%s) + 3600 ))" > "$P/projects/$E/$S1.jsonl"
@@ -175,6 +176,44 @@ grep -q '^\[cpb: this session moved from account acct-work (weekly limit' "$HOME
 cpb ALTER DEFAULTS RESET failover, failover_accounts >/dev/null || exit 1
 echo failover-ok'''
 contains = "failover-ok"
+
+[[verify.commands]]
+# Usage (v4.8.0): a launch puts cpb's usage step in front of the playbook's
+# own status line. A stand-in claude runs the launch's statusLine as Claude
+# Code does, with figures in the input: the original runs and sees the cpb
+# key (names only), SHOW USAGE has the figure. A working folder's own status
+# line gets no step, and its command is never copied. No resolved value in
+# cpb's state.
+command = '''
+H="$HOME/slbin"; mkdir -p "$H" "$HOME/slwork" "$HOME/slwork2/.claude"
+cat > "$H/claude" <<'EOF'
+#!/usr/bin/env python3
+import json, os, subprocess, sys, time
+if sys.argv[1:2] == ["--version"]:
+    print("2.1.322 (Claude Code)"); sys.exit(0)
+a = sys.argv[1:]
+s = json.loads(a[a.index("--settings") + 1]) if "--settings" in a else {}
+c = (s.get("statusLine") or {}).get("command")
+if not c:
+    open(os.environ["HOME"] + "/sl.out", "w").write("no-step"); sys.exit(0)
+time.sleep(0.3); n = int(time.time())
+i = {"session_id": "0e5c1a2b-0000-4000-8000-0000000000a2", "version": "2.1.322", "model": {"id": "claude-opus-5-5"},
+     "rate_limits": {"five_hour": {"used_percentage": 40, "resets_at": n + 3600}, "seven_day": {"used_percentage": 100, "resets_at": n + 86400}}}
+o = subprocess.run(["/bin/sh", "-c", c], input=json.dumps(i).encode(), capture_output=True)
+open(os.environ["HOME"] + "/sl.out", "wb").write(o.stdout.strip())
+EOF
+chmod 755 "$H/claude"
+cpb CREATE PLAYBOOK slp SET launcher = '', login = 'isolated', statusline.command = 'cat > "$HOME/sl.in"; echo shown' USE ACCOUNT acct-work >/dev/null || exit 1
+cpb EXPLAIN PLAYBOOK slp | grep -qF "Usage at launch: recorded by cpb's status line step" || { echo explain-wrong; exit 1; }
+cd "$HOME/slwork" && PATH="$H:$PATH" cpb run slp >/dev/null 2>&1 || { echo run-failed; exit 1; }
+[ "$(cat "$HOME/sl.out")" = shown ] && grep -qF '"cpb":{"v":1,"account":{"name":"acct-work"}' "$HOME/sl.in" || { echo step-wrong; cat "$HOME/sl.out"; exit 1; }
+cpb SHOW USAGE | grep -E '^acct-work ' | grep -q '40%' || { echo usage-wrong; cpb SHOW USAGE; exit 1; }
+cpb SHOW USAGE --json | tr -d ' \n' | grep -qF '"seven_day":{"used_percentage":100,"left_percentage":0,' || { echo usage-json-wrong; exit 1; }
+printf '{"statusLine":{"type":"command","command":"echo folder"}}' > "$HOME/slwork2/.claude/settings.json"
+rm -f "$HOME/sl.out"; cd "$HOME/slwork2" && PATH="$H:$PATH" cpb run slp >/dev/null 2>&1; [ "$(cat "$HOME/sl.out")" = no-step ] || { echo folder-wrong; exit 1; }
+! grep -rq 'secret-' "$HOME/.claude-playbooks/.state" || { echo value-in-state; exit 1; }
+echo usage-ok'''
+contains = "usage-ok"
 
 [[verify.commands]]
 # After every launch above: no resolved value (secret-<name>) was ever

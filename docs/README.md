@@ -31,6 +31,7 @@ Pages are grouped by what you came for:
 | [The terminal UI](guides/tui.md) | `cpb tui`: browse playbooks, sessions and env sets; SHOW CREATE, copy, export, resume |
 | [Resume a session](guides/resume-a-session.md) | `SHOW SESSIONS`, `--resume` through a launcher, and the resume line a launch prints |
 | [Account failover](guides/account-failover.md) | a session at a usage limit moves to the next listed account by itself, in the same terminal |
+| [See how much of each account is used](guides/usage.md) | `SHOW USAGE`, the usage step in front of a playbook's status line, the `cpb` key a status line reads |
 | [Agent guide](guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
 | [Ask in plain words](guides/assistant.md) | `cpb ask "<request>"`: the cpb command for what you mean, shown to copy |
 

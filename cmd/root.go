@@ -45,6 +45,15 @@ func Execute() {
 		}
 		os.Exit(1)
 	}
+	// The status line step a launch puts in front of the playbook's own
+	// status line (statusline_step.go). It execs that command; it returns
+	// only when it cannot.
+	if len(os.Args) > 1 && os.Args[1] == statuslineStepArg {
+		if err := runStatuslineStep(os.Args[2:], os.Stdin); err != nil {
+			fmt.Fprintf(os.Stderr, "cpb status line step: %v\n", err)
+		}
+		os.Exit(1)
+	}
 	// cpb's default secret helper, which a launch, a reference check or
 	// the store step runs as a process of its own (secret_default.go).
 	if len(os.Args) > 1 && os.Args[1] == secretHelperArg {

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -175,14 +176,14 @@ func (m Model) keys() string {
 	case vEnvs:
 		return " enter/c SHOW CREATE  e export .cpb  y copy  / filter  q quit"
 	}
-	return " 1-5 views · r refresh · q quit"
+	return " 1-6 views · r refresh · q quit"
 }
 
 var helpLines = []string{
 	"",
 	"  cpb tui: a view of what the cpb grammar reads. It changes nothing (v1).",
 	"",
-	"  1-5          Playbooks, Sessions, Env sets, Defaults, Log",
+	"  1-6          Playbooks, Sessions, Env sets, Defaults, Log, Usage",
 	"  ↑↓ j k       move          enter     open",
 	"  / filter     r refresh     q quit    esc back",
 	"  c            SHOW CREATE of the selection (--skip-secrets)",
@@ -293,6 +294,8 @@ func (m Model) reads() []string {
 		return []string{strings.Join(readEnvs, " ")}
 	case vDefaults:
 		return []string{strings.Join(readDefaults, " ")}
+	case vUsage:
+		return []string{strings.Join(readUsage, " ")}
 	}
 	return nil
 }
@@ -392,8 +395,63 @@ func (m Model) listBody() []string {
 			out = append(out, "  "+l)
 		}
 		return out
+	case vUsage:
+		rows := [][]string{}
+		for _, u := range m.usageRows() {
+			name := u.Account
+			if len(u.Accounts) > 1 {
+				name += " (" + strings.Join(u.Accounts, ", ") + ")"
+			}
+			r := []string{name, strconv.Itoa(u.LiveSessions), strconv.Itoa(u.SessionsAtLimit)}
+			switch u.State {
+			case "not_reported":
+				r = append(r, "not reported", "", "", "", "")
+			case "not_seen":
+				r = append(r, "not seen", "", "", "", "")
+			default:
+				r = append(r, usedCell(u.FiveHour), m.resetCell(u.FiveHour), usedCell(u.SevenDay), m.resetCell(u.SevenDay), m.age(deref(u.SeenAt)))
+			}
+			rows = append(rows, r)
+		}
+		if len(rows) == 0 {
+			return []string{"", "  No accounts and no usage recorded yet."}
+		}
+		return m.table([]string{"ACCOUNT", "SESSIONS", "AT LIMIT", "5H USED", "5H RESETS", "7D USED", "7D RESETS", "SEEN"}, rows, 0, m.cursor[vUsage], h, 2, 7)
 	}
 	return nil
+}
+
+// usedCell and resetCell are a usage window's cells: what is used, and
+// when it resets (reset once it has).
+func usedCell(w *UsageWindow) string {
+	if w == nil {
+		return "-"
+	}
+	return strconv.FormatFloat(w.UsedPercentage, 'f', -1, 64) + "%"
+}
+
+func (m Model) resetCell(w *UsageWindow) string {
+	if w == nil {
+		return "-"
+	}
+	if w.Reset {
+		return "reset"
+	}
+	t, err := time.Parse(time.RFC3339, w.ResetsAt)
+	if err != nil {
+		return "-"
+	}
+	return "in " + untilWords(t.Sub(m.o.Now()))
+}
+
+// untilWords is a wait in words, whatever the time zone: 1h20m, 2d 21h.
+func untilWords(d time.Duration) string {
+	d = d.Round(time.Minute)
+	if d < 24*time.Hour {
+		return strings.TrimSuffix(d.String(), "0s")
+	}
+	days := int(d.Hours()) / 24
+	return strconv.Itoa(days) + "d " + strconv.Itoa(int(d.Hours())-days*24) + "h"
 }
 
 func (m Model) detailBody() []string {

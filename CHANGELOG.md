@@ -31,10 +31,36 @@
     uncached; there is no cap by default.
   - `EXPLAIN PLAYBOOK`, `SHOW DEFAULTS`, `SHOW PLAYBOOK` and `SELECT` show
     the settings; the launch record keeps the switches.
+- **`SHOW USAGE`: how much of each account is used.** A launch puts a
+  small step of cpb's in front of the playbook's own status line.
+  - **What the step does.** It records what Claude Code's status line input
+    says (the 5-hour and weekly figures, cost, context, model), adds one
+    `cpb` key to the input, and runs the original command.
+  - **The `cpb` key** carries the session's account and every account's
+    latest figure, by name, never an e-mail.
+  - **What SHOW USAGE shows.** One row per real login:
+    - live sessions, and how many are at a limit;
+    - used, left, and when each window resets;
+    - how old the figure is.
+    A gateway or API key shows `not reported`, and an account no session has
+    reported for yet shows `not seen`; neither is ever 0. `SELECT … FROM
+    USAGE` has the same rows.
+  - **The TUI** has a Usage view (`6`).
+  - **When there is no step.** Only the playbook's own status line is
+    wrapped. A working folder's status line runs as it is, and a launch with
+    its own `--settings`, or a playbook with no status line, records nothing.
+  - **Where it is kept.** The log is `.state/usage/` under the playbooks
+    root (mode 600): one append-only file per session per month, each line
+    describing itself. A file rotates at 1 MiB and is swept after 30 days.
+- **`SHOW SESSIONS` marks a session whose account is at its limit**
+  (`account_at_limit`; STATUS `account limit 7d`), from the account's latest
+  figure. This is kept apart from `at_limit`, since the session itself may
+  not have tried since.
+
 - **`SHOW SESSIONS` shows each session's account.** A launch through
   `cpb run`, a launcher or `cpb start` keeps a small record of the account
-  it runs on while it runs (`.state/launches/<pid>.json` under the playbooks
-  root, mode 600, removed when the launch ends), since Claude Code's own
+  it runs on while it runs (`.state/launches/<launch id>.json` under the
+  playbooks root, mode 600, removed when the launch ends), since Claude Code's own
   session file does not say. The table has an `ACCOUNT` column and `--json`
   an `account` field; a session cpb did not launch shows none. A session
   started by a secret helper that runs claude as its child is matched

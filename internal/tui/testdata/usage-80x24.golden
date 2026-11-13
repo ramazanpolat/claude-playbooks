@@ -1,0 +1,24 @@
+ cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log  [6 Usage]
+────────────────────────────────────────────────────────────────────────────────
+  ACCOUNT      SESSIONS  5H USED       5H RESETS  7D USED  7D RESETS  SEEN
+▸ claude-home  0         not seen
+  claude-work  1         26%           in 1h20m   100%     in 3d 0h   2m
+  router       1         not reported
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2 playbooks · 2 live sessions · read 0s ago
+ 1-6 views · r refresh · q quit
+reads: cpb SHOW USAGE --json

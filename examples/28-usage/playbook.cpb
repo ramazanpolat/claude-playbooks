@@ -1,0 +1,13 @@
+-- A Claude account, its token by reference (as in example 23), and a
+-- playbook with a status line of its own. A launch puts cpb's usage step in
+-- front of that status line: the step records the account's figures and
+-- adds a cpb key to the input, which this status line prints from.
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
+
+CREATE OR REPLACE ACCOUNT work
+  SET provider = 'anthropic', claude_token FROM 'file:claude-token-work';
+
+CREATE OR ALTER PLAYBOOK agent
+  SET launcher = '', login = 'isolated',
+      statusline.command = 'sed -n ''s/.*"cpb":{"v":1,"account":{"name":"\([^"]*\)".*/\1/p'''
+  USE ACCOUNT work;

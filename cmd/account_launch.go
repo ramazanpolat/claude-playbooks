@@ -15,6 +15,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // The claude a launch runs, for the macOS shadow's version gate
@@ -36,6 +37,9 @@ type accountLaunch struct {
 	// layers are the launch's layers with the account's appended last.
 	layers    []*manifest.Env
 	configDir string
+	// statusline is the status line the launch passes with cpb's step in
+	// front, nil for none (statusline_launch.go).
+	statusline *settings.Object
 }
 
 // accountFlag is the --account a launch names: the last one wins.
@@ -198,7 +202,7 @@ func (a *accountLaunch) prepare() error {
 // nothing at all when there is neither.
 func (a *accountLaunch) claudeArgs(args []string) []string {
 	p := launchPicker(config.ResolvePlaybooksDir(), a.configDir, a.sel, a.rendered, args)
-	s := launchSettings(a.rendered.KeyHelper, p)
+	s := launchSettings(a.rendered.KeyHelper, p, a.statusline)
 	if s == nil {
 		return args
 	}

@@ -1,4 +1,4 @@
- cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log                                                ? help
+ cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log   6 Usage                                      ? help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   PLAYBOOK  ACCOUNT      PID    TTY      KIND  STATUS    AGE  ACTIVE  MODEL            CWD
 ▸ alpha     claude-work  59735  ttys039  int   limit 7d  9h   54s     claude-opus-5-5  ~/DEV/app

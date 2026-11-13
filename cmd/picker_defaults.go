@@ -251,11 +251,11 @@ func hasSettingsArg(claudeArgs []string) bool {
 // launchSettings is the --settings a launch passes, holding the account's
 // apiKeyHelper and the model picker with the DEFAULTS rows: one object,
 // since Claude Code takes one --settings. nil when there is nothing to pass.
-func launchSettings(keyHelper string, p pickerAtLaunch) []byte {
-	if keyHelper == "" && p.picker == nil {
+func launchSettings(keyHelper string, p pickerAtLaunch, statusLine *settings.Object) []byte {
+	if keyHelper == "" && p.picker == nil && statusLine == nil {
 		return nil
 	}
-	if p.picker == nil {
+	if p.picker == nil && statusLine == nil {
 		// The account's setting alone, exactly as before.
 		s, _ := json.Marshal(map[string]string{"apiKeyHelper": keyHelper})
 		return s
@@ -264,7 +264,14 @@ func launchSettings(keyHelper string, p pickerAtLaunch) []byte {
 	if keyHelper != "" {
 		_ = o.Set("apiKeyHelper", keyHelper)
 	}
-	o.SetObject(keyModelPicker, p.picker)
+	if p.picker != nil {
+		o.SetObject(keyModelPicker, p.picker)
+	}
+	if statusLine != nil {
+		// The status line step (statusline_launch.go): the playbook's own
+		// status line, with cpb's step in front of its command.
+		o.SetObject("statusLine", statusLine)
+	}
 	raw, _ := o.MarshalJSON()
 	return compactJSON(raw)
 }
