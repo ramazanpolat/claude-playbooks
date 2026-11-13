@@ -1,6 +1,14 @@
 # Changelog
 
-## [Unreleased]
+## [v4.8.0] -- 2026-11-13
+
+v4.8.0 lets a session outlive a usage limit and shows how much of each
+account is used. With failover on, a session that stops at a limit resumes
+on the next listed account by itself, in the same terminal and folder. A
+small step in front of a playbook's own status line records each account's
+5-hour and weekly figures, which `SHOW USAGE`, the `cpb` key a status line
+reads and the TUI's Usage view show, and `SHOW SESSIONS` shows each
+session's account and who is stopped at a limit.
 
 ### Added
 
