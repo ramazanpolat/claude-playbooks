@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`cpb update <name> --dry-run` compares the files.** Next to the
+  versions it lists what the update would replace, each top-level entry
+  the source ships that is new or differs from the install's (preserved
+  files left out, the manifest compared as the update would write it). It
+  says `up to date` only when the versions match and nothing would be
+  replaced; the same version with other files says so.
+
 ## [v4.8.0] -- 2026-11-13
 
 v4.8.0 lets a session outlive a usage limit and shows how much of each

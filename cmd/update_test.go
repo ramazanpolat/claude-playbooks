@@ -595,3 +595,72 @@ func TestUpdateMigrateConsentWording(t *testing.T) {
 		t.Fatalf("refusal, step not run: %v", err)
 	}
 }
+
+// --dry-run compares the files, not only the versions: the same version
+// with other files is not "up to date", and the line names what the update
+// would replace. A preserved file is never listed: the update puts it
+// back. After the update, a dry run finds nothing to replace.
+func TestUpdateDryRunComparesTheFiles(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	source := filepath.Join(filepath.Dir(config.PlaybooksDir), "source")
+	write := func(dir, rel, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manifest.Write(source, &manifest.Manifest{Version: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	write(source, "CLAUDE.md", "v1\n")
+	write(source, "migrations/apply.sh", "#!/bin/sh\n")
+	write(source, "settings.json", `{"from":"source"}`)
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	dry := func() string {
+		t.Helper()
+		var out strings.Builder
+		if err := runPlaybookUpdate(&out, "pb", updateOpts{dryRun: true}); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if out := dry(); !strings.Contains(out, "replaces:  nothing (the source's files are the installed ones)") || !strings.Contains(out, "  up to date\n") {
+		t.Fatalf("the same files:\n%s", out)
+	}
+	// The same version, other files; the install's own settings differ too.
+	write(source, "CLAUDE.md", "v1, edited\n")
+	write(source, "hooks/check.sh", "#!/bin/sh\n")
+	write(installed, "settings.json", `{"mine":true}`)
+	out := dry()
+	if !strings.Contains(out, "replaces:  CLAUDE.md (changed), hooks/ (new)\n") || strings.Contains(out, "up to date") ||
+		!strings.Contains(out, "same version, other files: an update replaces what is listed above") || strings.Contains(out, "settings.json") {
+		t.Fatalf("other files:\n%s", out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(installed, "CLAUDE.md")); string(b) != "v1\n" {
+		t.Fatal("--dry-run changed the playbook")
+	}
+	// A file the install has and the source no longer ships, in a folder
+	// the source ships, goes with the folder.
+	write(installed, "migrations/old.sh", "#!/bin/sh\n")
+	if out := dry(); !strings.Contains(out, "migrations/ (changed)") {
+		t.Fatalf("an installed extra file:\n%s", out)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dry(); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("after the update:\n%s", out)
+	}
+	// A file's mode alone counts.
+	if err := os.Chmod(filepath.Join(source, "hooks", "check.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out := dry(); !strings.Contains(out, "replaces:  hooks/ (changed)\n") {
+		t.Fatalf("a mode:\n%s", out)
+	}
+}

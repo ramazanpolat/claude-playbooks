@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -204,11 +205,29 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	}
 
 	if o.dryRun {
+		// What the overlay would replace: the staged tree as the update
+		// would put it live (the manifest assembled as below, in the
+		// staging directory, which is removed after), entry by entry.
+		changes, cerr := []string(nil), manifest.Write(work, assembleUpdatedManifest(stagedManifest, pb.Manifest, root))
+		if cerr == nil {
+			changes, cerr = updateChanges(work, root, preserve)
+		}
 		fmt.Fprintf(w, "%s\n", name)
 		fmt.Fprintf(w, "  installed: %s\n", displayVersion(fromVersion))
 		fmt.Fprintf(w, "  available: %s\n", displayVersion(toVersion))
-		if upToDate {
+		switch {
+		case cerr != nil:
+			fmt.Fprintf(w, "  replaces:  not known (the files could not be compared: %v)\n", cerr)
+		case len(changes) == 0:
+			fmt.Fprintln(w, "  replaces:  nothing (the source's files are the installed ones)")
+		default:
+			fmt.Fprintf(w, "  replaces:  %s\n", strings.Join(changes, ", "))
+		}
+		switch {
+		case upToDate && cerr == nil && len(changes) == 0:
 			fmt.Fprintln(w, "  up to date")
+		case upToDate && cerr == nil:
+			fmt.Fprintln(w, "  same version, other files: an update replaces what is listed above")
 		}
 		fmt.Fprintf(w, "  migrate:   %s\n", step.describe())
 		fmt.Fprintln(w, "Nothing was changed (--dry-run).")
@@ -272,26 +291,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	// statements keep) come from the live manifest; the
 	// install's name is its directory name (this also heals installs whose
 	// manifest predates name rewriting).
-	updated := stagedManifest
-	if updated == nil {
-		updated = &manifest.Manifest{}
-		*updated = *liveManifest
-	} else {
-		copied := *updated
-		updated = &copied
-		updated.Launcher = liveManifest.Launcher
-		updated.IsolatedLogin = liveManifest.IsolatedLogin
-		updated.ModelPickerDefaults = liveManifest.ModelPickerDefaults
-		updated.Failover = liveManifest.Failover
-		updated.Source = liveManifest.Source
-		updated.Env = liveManifest.Env
-		updated.Sandbox = liveManifest.Sandbox
-		updated.MCP = liveManifest.MCP
-		updated.Skills = liveManifest.Skills
-		updated.Play = liveManifest.Play
-		updated.Apply = liveManifest.Apply
-	}
-	updated.Name = filepath.Base(root)
+	updated := assembleUpdatedManifest(stagedManifest, liveManifest, root)
 	if err := manifest.Write(work, updated); err != nil {
 		return fmt.Errorf("failed to prepare updated manifest: %w", err)
 	}
@@ -352,6 +352,142 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		return fmt.Errorf("%q is at code version %s, but its migrate step failed: %w", name, displayVersion(toVersion), err)
 	}
 	return nil
+}
+
+// assembleUpdatedManifest is the manifest an update puts live: the staged
+// one with every install-local field (alias, isolation, the
+// model_picker_defaults opt-out, failover, source, [env], [sandbox], and
+// the [mcp], [skills], [play] and [apply] records) taken from the live
+// one, and the install's directory name as its name.
+func assembleUpdatedManifest(staged, live *manifest.Manifest, root string) *manifest.Manifest {
+	updated := &manifest.Manifest{}
+	switch {
+	case staged == nil && live != nil:
+		*updated = *live
+	case staged != nil:
+		*updated = *staged
+		if live == nil {
+			live = &manifest.Manifest{}
+		}
+		updated.Launcher = live.Launcher
+		updated.IsolatedLogin = live.IsolatedLogin
+		updated.ModelPickerDefaults = live.ModelPickerDefaults
+		updated.Failover = live.Failover
+		updated.Source = live.Source
+		updated.Env = live.Env
+		updated.Sandbox = live.Sandbox
+		updated.MCP = live.MCP
+		updated.Skills = live.Skills
+		updated.Play = live.Play
+		updated.Apply = live.Apply
+	}
+	updated.Name = filepath.Base(root)
+	return updated
+}
+
+// updateChanges is what an update would replace in root: each top-level
+// entry of the staged tree work that is not yet in root ("new") or differs
+// from root's ("changed": its type, a file's bytes or mode, a link's
+// target, or a folder's entries, the install's own extra entries counting,
+// since the overlay replaces the folder whole). The preserved paths are
+// left out on both sides: the update puts them back.
+func updateChanges(work, root string, preserve []string) ([]string, error) {
+	skip := map[string]bool{}
+	for _, p := range preserve {
+		skip[filepath.ToSlash(p)] = true
+	}
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		rel := e.Name()
+		if skip[rel] {
+			continue
+		}
+		shown := rel
+		if e.IsDir() {
+			shown += "/"
+		}
+		if _, err := os.Lstat(filepath.Join(root, rel)); errors.Is(err, os.ErrNotExist) {
+			out = append(out, shown+" (new)")
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		same, err := sameTree(filepath.Join(work, rel), filepath.Join(root, rel), rel, skip)
+		if err != nil {
+			return nil, err
+		}
+		if !same {
+			out = append(out, shown+" (changed)")
+		}
+	}
+	return out, nil
+}
+
+// sameTree reports whether a (staged) and b (installed) are the same at
+// rel, the paths in skip left out.
+func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
+	ai, err := os.Lstat(a)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil // the install's own: the overlay removes it
+	} else if err != nil {
+		return false, err
+	}
+	bi, err := os.Lstat(b)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if ai.Mode().Type() != bi.Mode().Type() {
+		return false, nil
+	}
+	switch {
+	case ai.Mode()&os.ModeSymlink != 0:
+		la, err := os.Readlink(a)
+		if err != nil {
+			return false, err
+		}
+		lb, err := os.Readlink(b)
+		return err == nil && la == lb, err
+	case ai.IsDir():
+		names := map[string]bool{}
+		for _, dir := range []string{a, b} {
+			ents, err := os.ReadDir(dir)
+			if err != nil {
+				return false, err
+			}
+			for _, e := range ents {
+				names[e.Name()] = true
+			}
+		}
+		for n := range names {
+			r := rel + "/" + n
+			if skip[r] {
+				continue
+			}
+			same, err := sameTree(filepath.Join(a, n), filepath.Join(b, n), r, skip)
+			if err != nil || !same {
+				return false, err
+			}
+		}
+		return true, nil
+	case ai.Mode().IsRegular():
+		// The manifest's mode is the installed one's after an update.
+		if ai.Size() != bi.Size() || (rel != manifest.FileName && ai.Mode().Perm() != bi.Mode().Perm()) {
+			return false, nil
+		}
+		ab, err := os.ReadFile(a)
+		if err != nil {
+			return false, err
+		}
+		bb, err := os.ReadFile(b)
+		return err == nil && bytes.Equal(ab, bb), err
+	}
+	return false, nil
 }
 
 // overlaySource replaces root's copy of every top-level entry the staged
