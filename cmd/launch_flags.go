@@ -23,12 +23,12 @@ import (
 // one of these ends the scan and everything from there on belongs to claude,
 // so a claude flag can never be mistaken for ours and vice versa. Each flag
 // takes its value as the next argument or after "=".
-const launchFlagsUsage = "[--account NAME] [--env-set NAME] [--env KEY=VALUE] [--block KEY] [--env-file PATH]"
+const launchFlagsUsage = "[--account NAME] [--env-set NAME] [--env KEY=VALUE] [--block KEY] [--env-file PATH] [--label KEY=VALUE]"
 
 // runFlagsUsage adds the sandbox family, which only run accepts.
 const runFlagsUsage = launchFlagsUsage + " [--sandbox[=BACKEND] | --no-sandbox] [--sandbox-host USER@HOST] [--sandbox-fresh] [--clone] [--workdir PATH] [--mount PATH[:ro]]"
 
-var launchFlagNames = map[string]bool{"--env-set": true, "--env": true, "--block": true, "--env-file": true, "--account": true}
+var launchFlagNames = map[string]bool{"--env-set": true, "--env": true, "--block": true, "--env-file": true, "--account": true, "--label": true}
 
 // takeLaunchFlags consumes leading launch flags from args and returns the
 // remaining arguments and the layers they describe, in order. Validation is
@@ -112,6 +112,13 @@ func launchLayer(flag, value string) (*manifest.Env, error) {
 			return nil, err
 		}
 		return &manifest.Env{Block: []string{value}}, nil
+	case "--label":
+		// A launch label (labels.go): checked here, recorded by the launch,
+		// never part of the environment.
+		if _, _, err := parseTypedLabel(value); err != nil {
+			return nil, fmt.Errorf("--label: %w", err)
+		}
+		return &manifest.Env{}, nil
 	case "--env-file":
 		layer, err := manifest.ParseEnvFile(value)
 		if err != nil {

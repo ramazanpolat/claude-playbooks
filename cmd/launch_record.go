@@ -65,6 +65,8 @@ type launchRecord struct {
 	// Switches are the account switches that led to this launch (account
 	// failover), oldest first.
 	Switches []*failoverSwitch `json:"switches,omitempty"`
+	// Labels are the launch labels (--label), as the person gave them.
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // launchRecordsDir is where launch records live.
@@ -276,7 +278,7 @@ func readLaunchRecordFile(path string) (launchRecord, bool) {
 	}
 	var r launchRecord
 	if json.Unmarshal(b, &r) != nil || r.V != launchRecordVersion || r.PID <= 0 || r.ProcStart == "" || !validRecordedAccount(r.Account) ||
-		(r.Key != "" && !validRecordedAccount(r.Key)) {
+		(r.Key != "" && !validRecordedAccount(r.Key)) || (len(r.Labels) > 0 && !validLabels(r.Labels)) {
 		return launchRecord{}, false
 	}
 	return r, true

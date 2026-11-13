@@ -95,6 +95,9 @@ type sessionJSON struct {
 	// latest figure any of its sessions reported (SHOW USAGE), kept apart
 	// from AtLimit: the session itself may not have tried since. Last.
 	AccountAtLimit *sessionLimit `json:"account_at_limit"`
+	// Labels are the session's launch labels (its launch record) and
+	// session labels (cpb session label); null when it has neither. Last.
+	Labels *blockLabelsJSON `json:"labels"`
 	// key is whose allowance the session draws on (its launch record's
 	// usage key), for SHOW USAGE; not printed.
 	key string
@@ -305,8 +308,9 @@ type liveSession struct {
 	state liveState
 	tty   string // the process's controlling terminal, "" for none
 	// account is the account of its launch record, "" for none; key its
-	// usage key.
+	// usage key; labels its launch labels.
 	account, key string
+	labels       map[string]string
 }
 
 // readSessionFiles reads the session files of dirs. It only reads.
@@ -398,7 +402,7 @@ func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 			continue
 		}
 		if r, ok := recordStarted(recs[s.f.PID], info.start); ok {
-			s.account, s.key = r.Account, r.Key
+			s.account, s.key, s.labels = r.Account, r.Key, r.Labels
 			continue
 		}
 		if _, ok := recs[info.ppid]; ok && info.ppid > 1 {
@@ -423,7 +427,7 @@ func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 			continue
 		}
 		if r, ok := recordStarted(recs[info.ppid], p.start); ok {
-			s.account, s.key = r.Account, r.Key
+			s.account, s.key, s.labels = r.Account, r.Key, r.Labels
 		}
 	}
 }
@@ -661,6 +665,9 @@ func (s liveSession) json() sessionJSON {
 			v.AtLimit = &sessionLimit{Window: l.window, ResetsAt: rfc3339(l.resetsAt)}
 		}
 	}
+	if sl := readSessionLabels(config.ResolvePlaybooksDir(), s.f.SessionID); len(s.labels) > 0 || len(sl) > 0 {
+		v.Labels = &blockLabelsJSON{Launch: s.labels, Session: sl}
+	}
 	return v
 }
 
@@ -752,7 +759,7 @@ func showSessions(st *grammar.Stmt) error {
 		fmt.Println("No live Claude Code sessions.")
 		return leftOut(bad)
 	}
-	t := newTable("PLAYBOOK", "ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(10)
+	t := newTable("PLAYBOOK", "ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD", "LABELS").flexible(10)
 	for _, r := range rows {
 		status := deref(r.Status, "-")
 		switch {
@@ -762,8 +769,35 @@ func showSessions(st *grammar.Stmt) error {
 			status = "account " + limitLabel(r.AccountAtLimit)
 		}
 		t.add(r.Playbook, deref(r.Account, "-"), strconv.Itoa(r.PID), deref(r.TTY, "-"), r.Kind, status, ageOf(&r.StartedAt),
-			ageOf(r.LastActive), deref(r.Model, "-"), r.SessionID, r.Cwd)
+			ageOf(r.LastActive), deref(r.Model, "-"), r.SessionID, r.Cwd, labelsCell(r.Labels))
 	}
 	t.render(os.Stdout)
 	return leftOut(bad)
+}
+
+// labelsCell is the LABELS column, last so a value's spaces split nothing
+// before it: `launch k=v, k=v; session k=v`, each source left out when it
+// has none, "-" for no labels.
+func labelsCell(l *blockLabelsJSON) string {
+	if l == nil {
+		return "-"
+	}
+	var parts []string
+	for _, src := range []struct {
+		name string
+		m    map[string]string
+	}{{"launch", l.Launch}, {"session", l.Session}} {
+		if len(src.m) == 0 {
+			continue
+		}
+		pairs := make([]string, 0, len(src.m))
+		for _, k := range sortedLabelKeys(src.m) {
+			pairs = append(pairs, k+"="+src.m[k])
+		}
+		parts = append(parts, src.name+" "+strings.Join(pairs, ", "))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, "; ")
 }

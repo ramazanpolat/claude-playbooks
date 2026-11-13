@@ -2133,13 +2133,17 @@ usage (*SHOW USAGE*). The playbook changes nothing.
     in epoch seconds, `used_percentage` as Claude Code reported it (normally
     0 to 100, not clamped); a window that has reset keeps its last figure,
     and null means cpb never had one. `seen_at` is epoch seconds.
+  - `labels` (since v4.9.0): `{"launch": {...}, "session": {...}}`, the
+    session's labels (*Session labels*), each left out when it has none,
+    and `labels` left out when both are. A session label set during the
+    session shows from the next render.
   - A new optional key does not change `v`; a change a reader would notice
     does. Input that is not one JSON object, or holds a `cpb` key, or any
     failure, passes through as it came.
 - **When it writes.** No timer: the step runs when Claude Code renders the
   status line, after replies and on its own refresh. A line is written when
-  the figures, the model, the effort, fast mode or the session's name
-  differ from the session's last line; cost or context alone, at most once a
+  the figures, the model, the effort, fast mode, the session's name or its
+  labels differ from the session's last line; cost or context alone, at most once a
   minute. An account's figure is as fresh as the last reply any of its
   sessions got.
 - **Limits.** The record's lock is taken without waiting (a busy render is
@@ -2675,7 +2679,7 @@ what it means, is listed under *DESCRIBE* below.
 | `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play` is the last column) |
 | `ENVS` | env set | the `SHOW ENV` object |
 | `VARS` | variable, per layer, per playbook | one variable of one layer, with its `playbook`, `layer` and `effective` |
-| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty`, then `account`, `at_limit` and `account_at_limit`, are the last columns) |
+| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty`, then `account`, `at_limit`, `account_at_limit` and `labels`, are the last columns) |
 | `USAGE` | allowance (*SHOW USAGE*) | the `SHOW USAGE --json` object |
 | `DEFAULTS` | (one row) | the `SHOW DEFAULTS` object |
 
@@ -2801,6 +2805,7 @@ code to the same lines):
 | `account` | `Nullable(String)` | The account cpb launched the session on, from its launch record; null for a session cpb did not launch. |
 | `at_limit` | `JSON` | The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped. |
 | `account_at_limit` | `JSON` | The usage limit the session's account is at, from the latest figure its sessions reported: window and resets_at; null when it is not. |
+| `labels` | `JSON` | The session's labels: launch (from --label at launch) and session (set from inside it with cpb session label); null when it has none. |
 
 **`USAGE`**
 
@@ -2880,9 +2885,11 @@ the usage step is given) and removes it when the launch returns.
   `env:<set>`, `block:<playbook>` or `flags:<host>`), `why` (the reason
   EXPLAIN gives), `key` (whose allowance it draws on: the account, or `machine`, or
   `playbook:<name>` for an isolated playbook's own login), `launch_id`,
-  `launched_at`, and after an account failover, `switches` (each `from`,
-  `to`, `at`, `window`, `resets_at`, `context_tokens`, `outcome`). No
-  credential, no reference, nothing from the environment.
+  `launched_at`, `labels` (the launch labels, since v4.9.0), and after an
+  account failover, `switches` (each `from`, `to`, `at`, `window`,
+  `resets_at`, `context_tokens`, `outcome`). No credential, no reference,
+  nothing from the environment. A record whose labels cpb would refuse is
+  not read.
 - **Matching.** A session gets the account of the record of its own pid,
   or else of its parent's pid (a secret helper that starts claude as its
   child), and only when that process started when the record says, so a
@@ -2916,10 +2923,12 @@ a lowercase name, or a time in milliseconds is no limit, never an error.
   its status stays Claude Code's own even when its screen shows the limit.
 
 **`SHOW SESSIONS`** prints the live sessions, newest first: one line each
-(`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
+(`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD LABELS`).
 `ACCOUNT` is `-` for none; `STATUS` reads `limit 5h`, `limit 7d` (or
 `limit <window>`) while the session is at a limit, and Claude Code's own
-status otherwise.
+status otherwise. `SESSION` is the session's id. `LABELS`, last, is its
+labels (*Session labels*): `launch k=v, …; session k=v, …`, each source left
+out when it has none, `-` for none.
 - `FOR PLAYBOOK` limits it to one playbook, and an unknown name is refused.
 - **`--json`** is an array of objects:
 
@@ -2941,6 +2950,7 @@ status otherwise.
 | `account` | string or null | the launch record (since v4.8.0); null for a session cpb did not launch |
 | `at_limit` | object or null | the transcript (since v4.8.0): `{"window": "seven_day", "resets_at": "<RFC 3339, UTC>"}` while the session is at a limit, else null |
 | `account_at_limit` | object or null | the latest figure of the session's allowance (since v4.8.0, *SHOW USAGE*): the same shape, while a window of it is at 100 or more and has not reset; set even when the session itself has not tried since. `STATUS` reads `account limit 7d` when only this is set |
+| `labels` | object or null | the launch record and the session's labels file (since v4.9.0, *Session labels*): `{"launch": {...}, "session": {...}}`, each left out when it has none; null when both are empty |
 
 A session's transcript is
 `<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`,
@@ -2950,7 +2960,7 @@ If that path is missing, cpb looks under every project directory.
 
 **`SELECT … FROM SESSIONS`** has the same rows. ClickHouse reads
 `started_at` and `last_active` as `DateTime64(3, 'UTC')`, and `at_limit`
-as `JSON`.
+and `labels` as `JSON`.
 
 **Resuming.** There is no resume statement. `<launcher> --resume <id>`,
 `--continue`, or `cpb run <name> --resume …` hand Claude Code's own flags to
@@ -3021,6 +3031,91 @@ Resume this playbook's session with: kd --resume bfb2d226-403f-46da-8216-e39b2a7
 No word is reserved: `SESSIONS` and `FOR` still name playbooks and env
 sets.
 
+## Session labels
+
+(Since v4.9.0.) A session carries short `key=value` labels, from two
+sources kept apart:
+
+- **Launch labels** are the user's own, fixed at launch: `--label KEY=VALUE`
+  on `cpb run`, a launcher or `cpb start` (repeatable; a later one for a key
+  wins). They go in the launch record, and every launch cpb rebuilds from
+  that launch carries them, like `--env`: the failover relaunch and the way
+  back, the by-hand line, a sandbox host. They are checked, each and
+  together, before anything starts, and before a launch is forwarded to a
+  sandbox host, so a refused one is neither printed nor handed to ssh. A
+  launch in a local sandbox takes them and records nothing, as it records
+  no account.
+- **Session labels** are claims made from inside a live session, by a hook
+  (a `SessionStart` hook setting `task=<name>`) or a tool:
+
+```
+cpb session label task=review-auth 'name=fixing ci'
+cpb session label --unset name
+cpb session label --list [--json]          # key=value lines; --json: {"session_id", "labels"}
+cpb session label --session <id> task=x    # outside any session: a live session by its id
+```
+
+  - **Which session.** The first ancestor of the calling process, at most 8
+    up, whose Claude Code session file, in a config directory cpb knows,
+    names it and records the start time that process has (*Live*).
+    Inside a session cpb launched, `--session` may name only that session:
+    another is refused. Outside any session, `--session <id>` names a live
+    session, one confirmed live: not one recorded in another pid domain, nor
+    one whose file records no start time.
+  - **Exit codes.** 0 done; 1 refused, an unknown or unconfirmed
+    `--session` id included; 3 not in a session cpb launched, so a hook can
+    ignore exactly that.
+  - **Kept** in `<playbooks root>/.state/usage/labels/<session id>.json`
+    (mode `0600`), written whole under the session's lock, which a writer
+    waits at most 400 ms for before it is refused (another label write of
+    the session is in progress). The file goes when its last label does,
+    and is swept with the usage files nobody wrote for 30 days.
+  - **The playbooks root.** A launch whose root came from `--playbooks-dir`
+    sets `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing one it
+    inherited (the flag outranks it), so a cpb inside it reads and writes
+    the same root. With the root from the environment or the default,
+    nothing is added.
+
+**What a label is.** A key is `a-z`, `0-9`, `.`, `_` and `-`, starting with
+a letter or a digit, at most 32 characters. A value is one line of plain
+visible text: valid UTF-8, not empty (`k=` is refused; `--unset k` removes
+a label), at most 200 bytes. At most 16 labels per source, 4 KiB together
+(launch labels over the caps refuse the launch before anything starts).
+Refused, with a message that names a valid key and never a value (an
+invalid key is not echoed either, only its length: a value may stand where
+the key goes):
+- a character that is not plain visible text: a control or format
+  character (Unicode Cc and Cf: zero-width spaces and joiners, the soft
+  hyphen, the byte-order mark, direction marks and isolates, the tag
+  characters U+E0000 to U+E007F), a line or paragraph separator (Zl, Zp),
+  a private-use character (Co), a variation selector (U+FE00 to U+FE0F,
+  U+E0100 to U+E01EF), the combining grapheme joiner (U+034F), the Hangul
+  fillers (U+115F, U+1160, U+3164, U+FFA0) and U+180B to U+180F. So an
+  emoji joined into a sequence, or one with a variation selector, is
+  refused; a single emoji is plain text;
+- a value shaped like an e-mail address;
+- a credential, judged on key and value together as `cpb ask` judges a
+  request: a key that names a secret with any value other than a number,
+  `true`, `false`, a reference (`keychain:x`) or a placeholder (`...`,
+  `<x>`) (`password=…`, `token=…`, `api_key=…`,
+  `secret=…`, `auth=Bearer …`; also `key=main`, since `key` names one), a
+  value shaped like a token, a URL with a password, or a long key-shaped
+  word. A long run after a key that names a hash is a hash, so
+  `commit=<40 hex>` is accepted.
+
+A label is printed on shared screens and written to the usage log, so
+nothing goes in one that does not belong there: no secret, no login
+identity, no home path, host name, address or repository URL with a
+credential, no prompt text. cpb refuses what it can recognise (above); the
+rest is for whoever sets the label. A label is never taken from the
+environment. A labels file or a launch record holding a label cpb would
+refuse, or of another shape, is not read.
+
+**Where they show.** The status line's `cpb` key (`labels`; *The usage
+step*), SHOW SESSIONS (`labels` in `--json`, the last `LABELS` column of
+the table, a `labels` column in `SELECT … FROM SESSIONS`), and the usage
+log (`launch_labels`, `session_labels`).
+
 ## SHOW USAGE
 
 (Since v4.8.0.) How much of each allowance is used, from what the usage step
@@ -3062,7 +3157,9 @@ SELECT … FROM USAGE
   `account`, `key`, `claude_version`, `session_name`, `model`,
   `effort`, `fast_mode`, `thinking`, `rate_limits` (whole), `cost` (whole),
   `context_window` (its sizes, totals and percentages), `prompt_cache` (its
-  counts), `project_dir`, `repo`, `git_worktree`, `agent`. Left out: paths
+  counts), `project_dir`, `repo`, `git_worktree`, `agent`, and
+  `launch_labels` and `session_labels` (since v4.9.0) when the session has
+  them. Left out: paths
   the others make redundant, the prompt id, UI state, cache diagnostics.
   A string is cut at 512 bytes; an object over 2 KiB is left out.
   No identity: SHOW USAGE reads it when it runs (*Rows*).
@@ -3082,6 +3179,7 @@ SELECT … FROM USAGE
   later than now is replaced by the next real one. `DROP
   ACCOUNT`, and a change of an account's provider, address or credential,
   remove the account's figure.
+- `labels/<session id>.json`: a session's labels (*Session labels*).
 - A launch removes files nobody wrote for 30 days. cpb neither writes nor
   sweeps through a symbolic link under `.state/usage/`.
 
@@ -3599,6 +3697,7 @@ cpb run --env-file ./work.env sre -p "..."
 |------|-------|
 | `--account NAME` | not a layer: the account this launch runs on (see *Which account a launch runs on*); the last one wins |
 | `--failover`, `--no-failover` | not a layer: account failover on or off for this launch, whatever the playbook and DEFAULTS say (see *Account failover*); not both |
+| `--label KEY=VALUE` | not a layer: a launch label (see *Session labels*); a later one for a key wins |
 | `--env-set NAME` | an existing env set (`<playbooks root>/.env-sets/NAME.toml`); a missing or invalid one refuses the launch |
 | `--env KEY=VALUE` | set one variable |
 | `--block KEY` | remove one variable |

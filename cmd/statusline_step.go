@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
 // The status line step (SPEC.md, "Status line and model"): a launch whose
@@ -112,10 +114,13 @@ func stepRecord(a stepArgs, in []byte) []byte {
 		return in
 	}
 	now := stepNow()
+	sessionID := sessionIDOf(in)
+	sessionLabels := readSessionLabels(a.root, sessionID)
 	if len(in) <= 256<<10 {
 		if s, ok := snapshotOf(in); ok {
 			s.At = rfc3339(now)
 			s.ConfigDir, s.Playbook, s.Account, s.Key = rec.ConfigDir, rec.Playbook, rec.Account, rec.Key
+			s.LaunchLabels, s.SessionLabels = rec.Labels, sessionLabels
 			// Only figures new for this session update the account's
 			// latest: a re-render of an old figure never replaces a newer
 			// one another session saw.
@@ -124,11 +129,23 @@ func stepRecord(a stepArgs, in []byte) []byte {
 			}
 		}
 	}
-	block, err := statuslineBlock(a.root, rec, now)
+	block, err := statuslineBlock(a.root, rec, sessionLabels, now)
 	if err != nil {
 		return in
 	}
 	return withCpbKey(in, block)
+}
+
+// sessionIDOf is the session id of a status line input, "" when it has
+// none of a session id's shape.
+func sessionIDOf(in []byte) string {
+	var v struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal(in, &v) != nil || !grammar.ValidSessionID(v.SessionID) {
+		return ""
+	}
+	return v.SessionID
 }
 
 // statuslineBlockJSON is the cpb key the step adds (SPEC.md, "Status line
@@ -137,6 +154,15 @@ type statuslineBlockJSON struct {
 	V       int               `json:"v"`
 	Account *blockAccountJSON `json:"account"`
 	Usage   []usageBlockRow   `json:"usage"`
+	// Labels are the session's launch and session labels; absent when it
+	// has none (an optional key: v stays 1).
+	Labels *blockLabelsJSON `json:"labels,omitempty"`
+}
+
+// blockLabelsJSON is the cpb key's labels.
+type blockLabelsJSON struct {
+	Launch  map[string]string `json:"launch,omitempty"`
+	Session map[string]string `json:"session,omitempty"`
 }
 
 type blockAccountJSON struct {
@@ -149,7 +175,7 @@ const statuslineBlockMax = 16
 // statuslineBlock is the cpb key for a session of rec: the name of its
 // account (the name of its own usage entry), and the latest figure for
 // every allowance cpb knows of, its own first, from cpb's own files only.
-func statuslineBlock(root string, rec launchRecord, now time.Time) ([]byte, error) {
+func statuslineBlock(root string, rec launchRecord, sessionLabels map[string]string, now time.Time) ([]byte, error) {
 	key := rec.Key
 	if key == "" {
 		key = rec.Account
@@ -166,6 +192,9 @@ func statuslineBlock(root string, rec launchRecord, now time.Time) ([]byte, erro
 			block.Account = &blockAccountJSON{Name: b.Account}
 		}
 		block.Usage = append(block.Usage, b)
+	}
+	if len(rec.Labels) > 0 || len(sessionLabels) > 0 {
+		block.Labels = &blockLabelsJSON{Launch: rec.Labels, Session: sessionLabels}
 	}
 	return json.Marshal(block)
 }
