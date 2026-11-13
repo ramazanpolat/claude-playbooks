@@ -72,7 +72,9 @@ it up.
   says so when it starts, and `--failover` with such a flag is refused.
 - **If the new account fails.** When the launch on the next account never
   runs the session (its helper fails, say), cpb resumes it on the account
-  it came from, and the summary says it did not move.
+  it came from, and the summary says it did not move. If that fails too,
+  cpb says nothing runs the session and prints the command that resumes it
+  by hand.
 - **Only its own sessions.** A launch watches only the session it started.
   A session started some other way is never touched.
 - **What you see.** A line on stderr when a session moves, a summary when the

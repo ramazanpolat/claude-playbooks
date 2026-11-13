@@ -454,7 +454,9 @@ func transcriptPath(configDir, cwd, id string) string {
 // the usage limit its last assistant line reports, if that line is one.
 type transcriptTail struct {
 	model, cwd, title string
-	limit             *quotaStop
+	// cwds are the distinct cwd values in the tail, the last first.
+	cwds  []string
+	limit *quotaStop
 	// context is the size of the context at the last answer: its input,
 	// cache reads and cache writes, in tokens; 0 when unknown.
 	context int64
@@ -536,6 +538,15 @@ func readTranscriptTail(path string) transcriptTail {
 		}
 		if c := rawString(line.Cwd); c != "" {
 			t.cwd = c
+			if len(t.cwds) == 0 || t.cwds[0] != c {
+				kept := []string{c}
+				for _, o := range t.cwds {
+					if o != c {
+						kept = append(kept, o)
+					}
+				}
+				t.cwds = kept
+			}
 		}
 		if a := rawString(line.AITitle); a != "" {
 			t.title = a

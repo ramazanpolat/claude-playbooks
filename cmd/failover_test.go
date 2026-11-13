@@ -37,9 +37,11 @@ func tokenAccount(t *testing.T, name, token string) {
 
 const failSID = "11111111-2222-4333-8444-555555555555"
 
-// standIn is a stand-in claude. A first launch, and a resumed one whose
-// token is not in FAKE_OK_TOKENS, does what Claude Code does at a weekly
-// limit: it appends the limit line (timestamped, with the folder the
+// standIn is a stand-in claude. A resumed launch whose token is in
+// FAKE_FAIL_TOKENS fails at once, writing nothing; one in
+// FAKE_WRITE_FAIL_TOKENS writes a line to the transcript, then fails. A
+// first launch, and a resumed one whose token is not in FAKE_OK_TOKENS,
+// does what Claude Code does at a weekly limit: it appends the limit line (timestamped, with the folder the
 // session runs in: FAKE_SESSION_DIR, else its working folder) to the
 // transcript, writes its session file (the folder it started in, kind,
 // status idle, its own start time) and waits, at most about 20 seconds, so
@@ -50,22 +52,27 @@ const failSID = "11111111-2222-4333-8444-555555555555"
 const standIn = `#!/bin/sh
 tok="$CLAUDE_CODE_OAUTH_TOKEN"
 for a in "$@"; do [ "$a" = --resume ] && resumed=1; done
-if [ -n "$resumed" ]; then case " $FAKE_OK_TOKENS " in *" $tok "*) ok=1;; esac; fi
+dir="${FAKE_SESSION_DIR:-$(pwd -P)}"
+enc=$(printf %s "$dir" | sed 's/[^A-Za-z0-9]/-/g')
+t="$CLAUDE_CONFIG_DIR/projects/$enc/$FAKE_SID.jsonl"
+if [ -n "$resumed" ]; then
+  case " $FAKE_FAIL_TOKENS " in *" $tok "*) exit 1;; esac
+  case " $FAKE_WRITE_FAIL_TOKENS " in *" $tok "*) printf '{"type":"user"}\n' >> "$t"; exit 1;; esac
+  case " $FAKE_OK_TOKENS " in *" $tok "*) ok=1;; esac
+fi
 if [ -n "$ok" ]; then
   { printf '%s|%s|' "$tok" "$(pwd -P)"; for a in "$@"; do printf '%s\037' "$a"; done; printf '\036'; } >> "$FAKE_OUT.log"
   cp "$FAKE_ROOT/.state/launches/$$.json" "$FAKE_OUT.record" 2>/dev/null
   exit 0
 fi
-dir="${FAKE_SESSION_DIR:-$(pwd -P)}"
-enc=$(printf %s "$dir" | sed 's/[^A-Za-z0-9]/-/g')
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$enc" "$CLAUDE_CONFIG_DIR/sessions"
 if [ -r "/proc/$$/stat" ]; then st=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}'); else st=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}'); fi
 sleep 1
 ts=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
-printf '{"type":"assistant","cwd":"%s","timestamp":"%s","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":300000,"cache_creation_input_tokens":2000}}}\n{"type":"assistant","cwd":"%s","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$dir" "$ts" "$dir" "$ts" "$FAKE_RESETS" >> "$CLAUDE_CONFIG_DIR/projects/$enc/$FAKE_SID.jsonl"
+printf '{"type":"assistant","cwd":"%s","timestamp":"%s","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":300000,"cache_creation_input_tokens":2000}}}\n{"type":"assistant","cwd":"%s","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$dir" "$ts" "$dir" "$ts" "$FAKE_RESETS" >> "$t"
 sf="$CLAUDE_CONFIG_DIR/sessions/$$.json"
 printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"procStart":"%s","kind":"interactive","status":"idle"}' $$ "$FAKE_SID" "$(pwd -P)" "$st" > "$sf"
-trap 'rm -f "$sf"; exit 143' TERM
+if [ -n "$FAKE_IGNORE_TERM" ]; then trap '' TERM; else trap 'rm -f "$sf"; exit 143' TERM; fi
 n=0; while [ $n -lt 200 ]; do sleep 0.1; n=$((n+1)); done
 rm -f "$sf"; exit 3
 `
@@ -90,6 +97,9 @@ func failoverStage(t *testing.T, root, okTokens string) (out string) {
 	t.Setenv("FAKE_SID", failSID)
 	t.Setenv("FAKE_OK_TOKENS", okTokens)
 	t.Setenv("FAKE_SESSION_DIR", "")
+	t.Setenv("FAKE_FAIL_TOKENS", "")
+	t.Setenv("FAKE_WRITE_FAIL_TOKENS", "")
+	t.Setenv("FAKE_IGNORE_TERM", "")
 	t.Setenv("FAKE_RESETS", strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10))
 	return out
 }
@@ -261,6 +271,170 @@ func TestFailoverFallsBackWhenTheNewAccountFails(t *testing.T) {
 	}
 }
 
+// failoverE2E is the common stage of an end-to-end switch: playbook alpha,
+// acc-a and acc-b with tokens, failover on to acc-b, the stand-in on PATH.
+func failoverE2E(t *testing.T, okTokens string) (root, out string) {
+	t.Helper()
+	root = sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
+	fakeProcs(t, nil)
+	fastFailover(t, 0, time.Minute)
+	tokenAccount(t, "acc-a", "tok-a")
+	tokenAccount(t, "acc-b", "tok-b")
+	if err := writeFailoverDefaults(root, failoverDefaults{Failover: "on", Accounts: []string{"acc-b"}}); err != nil {
+		t.Fatal(err)
+	}
+	return root, failoverStage(t, root, okTokens)
+}
+
+// A relaunch from the session's folder keeps the launch's relative paths:
+// an --env-file and the playbooks root, given relative to a launch folder
+// that is not next to the session's.
+func TestFailoverRelativeLaunchPaths(t *testing.T) {
+	root, out := failoverE2E(t, "tok-b")
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	work := filepath.Join(base, "a", "b", "c")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "rel.env"), []byte("FAKE_FROM_ENV_FILE=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session, _ := filepath.EvalSymlinks(t.TempDir())
+	// Both sides resolved, so the relative root climbs only to their
+	// common folder and reads differently from the session's folder.
+	realRoot, _ := filepath.EvalSymlinks(root)
+	relRoot, err := filepath.Rel(work, realRoot)
+	if err != nil || strings.Count(relRoot, "..") > 4 {
+		t.Fatalf("relative root %q: %v", relRoot, err)
+	}
+	t.Setenv("FAKE_SESSION_DIR", session)
+	t.Chdir(work)
+	t.Cleanup(func() { config.PlaybooksDir = root })
+	msg := captureStderr(t, func() {
+		err = runRun(nil, []string{"--playbooks-dir", relRoot, "--env-file", "rel.env", "--account", "acc-a", "alpha"})
+	})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, msg)
+	}
+	if runs := standInRuns(t, out); len(runs) != 1 || runs[0].token != "tok-b" || runs[0].pwd != session || strings.Contains(msg, "could not resume") {
+		t.Fatalf("runs: %+v\n%s", runs, msg)
+	}
+}
+
+// A launch on the new account that ran the session (wrote to its
+// transcript) and then failed is a move: there is no way back, and its
+// error is the launch's.
+func TestFailoverNewLaunchRanThenFailed(t *testing.T) {
+	_, out := failoverE2E(t, "tok-a")
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("FAKE_WRITE_FAIL_TOKENS", "tok-b")
+	t.Chdir(work)
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, []string{"--account", "acc-a", "alpha"}) })
+	if err == nil || len(standInRuns(t, out)) != 0 || strings.Contains(msg, "could not resume") || !strings.Contains(msg, "this session moved from acc-a to acc-b at ") {
+		t.Fatalf("err %v, runs %+v\n%s", err, standInRuns(t, out), msg)
+	}
+}
+
+// When the way back fails too, cpb says nothing runs the session, never
+// that it stayed, and prints the command that resumes it by hand, without
+// an --env value.
+func TestFailoverWayBackFailsToo(t *testing.T) {
+	_, out := failoverE2E(t, "")
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("FAKE_FAIL_TOKENS", "tok-b tok-a")
+	t.Chdir(work)
+	var err error
+	msg := captureStderr(t, func() {
+		err = runRun(nil, []string{"--env", "FAKE_SECRETISH=do-not-print", "--account", "acc-a", "alpha"})
+	})
+	want := "cd " + work + " && cpb run '--env=FAKE_SECRETISH=<your value>' --account acc-a alpha --resume " + failSID + " --model claude-opus-5-5"
+	if err == nil || len(standInRuns(t, out)) != 0 || strings.Contains(msg, "stayed on") || strings.Contains(msg, "do-not-print") ||
+		!strings.Contains(msg, "nor be resumed on acc-a: nothing runs it now") || !strings.Contains(msg, "to resume it by hand:\n  "+want+"\n") {
+		t.Fatalf("err %v\n%s\nwant %s", err, msg, want)
+	}
+}
+
+// A claude that does not end at SIGTERM is killed after the wait, and the
+// switch goes on.
+func TestFailoverKillsAfterTheWait(t *testing.T) {
+	_, out := failoverE2E(t, "tok-b")
+	old := failoverKillAfter
+	failoverKillAfter = 300 * time.Millisecond
+	t.Cleanup(func() { failoverKillAfter = old })
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("FAKE_IGNORE_TERM", "1")
+	t.Chdir(work)
+	start := time.Now()
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, []string{"--account", "acc-a", "alpha"}) })
+	if err != nil || time.Since(start) > 10*time.Second {
+		t.Fatalf("%v after %v\n%s", err, time.Since(start), msg)
+	}
+	if runs := standInRuns(t, out); len(runs) != 1 || runs[0].token != "tok-b" {
+		t.Fatalf("runs: %+v\n%s", runs, msg)
+	}
+	if handoverSigs != nil {
+		t.Fatal("Ctrl-C is still caught after cpb run returned")
+	}
+}
+
+// killAfter kills only the process it ended: a pid that another process
+// took over (another start time) is left alone.
+func TestFailoverKillAfterChecksTheProcess(t *testing.T) {
+	c := exec.Command("sleep", "30")
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Process.Kill() })
+	started := procStartOf(c.Process.Pid)
+	if started == "" {
+		t.Skip("no process start times here")
+	}
+	ended := make(chan error, 1)
+	go func() { ended <- c.Wait() }()
+	killAfter(make(chan struct{}), c.Process.Pid, "Mon Jan 1 00:00:00 2001", time.Millisecond)
+	select {
+	case err := <-ended:
+		t.Fatalf("another process's pid was killed: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	killAfter(make(chan struct{}), c.Process.Pid, started, time.Millisecond)
+	select {
+	case err := <-ended:
+		if ee, ok := err.(*exec.ExitError); !ok || ee.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+			t.Fatalf("the process ended with %v, want SIGKILL", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("not killed")
+	}
+}
+
+// A resume is refused while the session is live in another process, which
+// ever of two live processes on one id is this launch's own.
+func TestFailoverLiveInAnotherProcess(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	dir := filepath.Join(root, "alpha")
+	folder, _ := filepath.EvalSymlinks(t.TempDir())
+	writeLimitTranscript(t, dir, folder, failSID, `{"type":"user"}`)
+	writeSessionFile(t, dir, 4242, failSID, folder, "interactive", liveStart, time.Now())
+	w := newFailoverWatch(t, "acc-a")
+	w.configDir = dir
+	fakeProcs(t, map[int]string{4242: liveStart})
+	if err := w.resumeGuard(failSID, folder, 4242); err != nil {
+		t.Fatalf("its own process: %v", err)
+	}
+	writeSessionFile(t, dir, 5555, failSID, folder, "interactive", liveStart, time.Now())
+	fakeProcs(t, map[int]string{4242: liveStart, 5555: liveStart})
+	for own, other := range map[int]string{4242: "pid 5555", 5555: "pid 4242"} {
+		if err := w.resumeGuard(failSID, folder, own); err == nil || !strings.Contains(err.Error(), "is live in another process ("+other+")") {
+			t.Errorf("own %d: %v", own, err)
+		}
+	}
+}
+
 // writeWatched writes, in a config dir of its own, a session file of pid
 // and a transcript whose last line is a limit written at at, in a folder
 // of its own.
@@ -290,6 +464,39 @@ func writeWatched(t *testing.T, sid, kind, status string, pid int, procStart str
 	return configDir, transcript, folder
 }
 
+// moveWatched points what writeWatched wrote elsewhere: the session file's
+// cwd, the cwd of every transcript line, and the project directory that
+// holds the transcript (that of folder). It returns the transcript's path.
+func moveWatched(t *testing.T, configDir, transcript, from string, pid int, sessionCwd, lineCwd, folder string) string {
+	t.Helper()
+	sf := filepath.Join(configDir, "sessions", strconv.Itoa(pid)+".json")
+	b, _ := os.ReadFile(sf)
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["cwd"] = sessionCwd
+	b, _ = json.Marshal(m)
+	if err := os.WriteFile(sf, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := json.Marshal(from)
+	r, _ := json.Marshal(lineCwd)
+	lines, _ := os.ReadFile(transcript)
+	dir := filepath.Join(configDir, "projects", encodeProjectDir(folder))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(transcript); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(dir, filepath.Base(transcript))
+	if err := os.WriteFile(moved, []byte(strings.ReplaceAll(string(lines), `"cwd":`+string(q), `"cwd":`+string(r))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return moved
+}
+
 // newFailoverWatch is a watcher of a launch on from, started an hour ago.
 func newFailoverWatch(t *testing.T, from string, targets ...string) *failoverWatch {
 	t.Helper()
@@ -314,34 +521,47 @@ func TestFailoverCheck(t *testing.T) {
 	tokenAccount(t, "acc-c", "c")
 	putAccount(t, account.Account{Name: "router", Provider: account.Gateway, BaseURL: "http://localhost:4000/v1", Auth: account.Auth{Kind: account.None}})
 	putAccount(t, account.Account{Name: "router2", Provider: account.Gateway, BaseURL: "http://localhost:5000/v1", Auth: account.Auth{Kind: account.None}})
+	putAccount(t, account.Account{Name: "trusted", Provider: account.Gateway, BaseURL: "https://gw.example.com/v1", ClaudeLoginTrusted: true,
+		Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
+	// A gateway trusted with a Claude credential is another kind than
+	// Anthropic itself.
+	if accountClass("trusted") == accountClass("acc-a") || accountClass("acc-a") != accountClass("acc-b") {
+		t.Fatalf("kinds: %q %q %q", accountClass("trusted"), accountClass("acc-a"), accountClass("acc-b"))
+	}
 	far := time.Now().Add(3 * time.Hour)
 	now := time.Now()
+	// The session's process is this test's own: its start time is real.
+	me := os.Getpid()
+	meStart := procStartOf(me)
+	if meStart == "" {
+		t.Skip("no process start times here")
+	}
 
 	t.Run("the first account it can use, from the session's folder", func(t *testing.T) {
 		fastFailover(t, 0, 30*time.Minute)
-		dir, _, folder := writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "seven_day", 1000)
+		dir, _, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
 		w := newFailoverWatch(t, "acc-a", "acc-a", "router", "acc-b", "acc-c")
 		w.configDir = dir
 		w.fullAccounts = func() map[string]bool { return map[string]bool{"acc-b": true} }
 		var folders []string
 		w.canRunOn = func(name, f string) error { folders = append(folders, f); return nil }
-		c := w.check(4242)
+		c := w.check(me)
 		if c == nil || c.sw.To != "acc-c" || c.sw.From != "acc-a" || c.sw.sessionID != failSID || c.sw.model != "claude-opus-5-5" ||
-			c.sw.Context != 1000 || c.sw.folder != folder || strings.Join(folders, ",") != folder || c.procStart != "x" {
+			c.sw.Context != 1000 || c.sw.folder != folder || strings.Join(folders, ",") != folder || c.procStart != meStart {
 			t.Fatalf("candidate: %+v notes %v folders %v", c, w.episode.notes, folders)
 		}
 		// A check marks nothing: until a switch is made, the next poll
 		// decides again.
-		if again := w.check(4242); again == nil || len(w.episode.tried) != 0 || !w.handled.IsZero() {
+		if again := w.check(me); again == nil || len(w.episode.tried) != 0 || !w.handled.IsZero() {
 			t.Fatalf("a check that made no switch was kept: %+v %v %v", again, w.episode.tried, w.handled)
 		}
 	})
 	t.Run("the 5-hour window too", func(t *testing.T) {
 		fastFailover(t, 0, 30*time.Minute)
-		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "five_hour", 1000)
+		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "five_hour", 1000)
 		w := newFailoverWatch(t, "acc-a", "acc-b")
 		w.configDir = dir
-		if c := w.check(4242); c == nil || c.sw.Window != "five_hour" {
+		if c := w.check(me); c == nil || c.sw.Window != "five_hour" {
 			t.Fatalf("five_hour: %+v", c)
 		}
 	})
@@ -361,61 +581,61 @@ func TestFailoverCheck(t *testing.T) {
 			{"a limit from before the launch", failSID, "interactive", "idle", far, now.Add(-2 * time.Hour), 0},
 		} {
 			failoverQuiet = c.quiet
-			dir, _, _ := writeWatched(t, c.sid, c.kind, c.status, 4242, "x", c.resets, c.at, "seven_day", 1000)
+			dir, _, _ := writeWatched(t, c.sid, c.kind, c.status, me, meStart, c.resets, c.at, "seven_day", 1000)
 			w := newFailoverWatch(t, "acc-a", "acc-b")
 			w.configDir = dir
-			if got := w.check(4242); got != nil {
+			if got := w.check(me); got != nil {
 				t.Errorf("%s: a switch to %s", c.name, got.sw.To)
 			}
 		}
 	})
 	t.Run("kinds by address; no model across kinds", func(t *testing.T) {
 		fastFailover(t, 0, 30*time.Minute)
-		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "seven_day", 1000)
+		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
 		w := newFailoverWatch(t, "router", "router2")
 		w.configDir = dir
-		if c := w.check(4242); c != nil || !strings.Contains(notes(w), "router2 is another kind of account") {
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), "router2 is another kind of account") {
 			t.Fatalf("two gateways at two addresses: %+v %v", c, w.episode.notes)
 		}
 		w = newFailoverWatch(t, "acc-a", "router (any provider)")
 		w.configDir = dir
-		if c := w.check(4242); c == nil || c.sw.To != "router" || c.sw.model != "" {
+		if c := w.check(me); c == nil || c.sw.To != "router" || c.sw.model != "" {
 			t.Fatalf("a marked entry of another kind: %+v", c)
 		}
 	})
 	t.Run("a model id of another shape is not passed on", func(t *testing.T) {
 		fastFailover(t, 0, 30*time.Minute)
-		dir, transcript, _ := writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "seven_day", 1000)
+		dir, transcript, _ := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
 		b, _ := os.ReadFile(transcript)
 		if err := os.WriteFile(transcript, []byte(strings.Replace(string(b), `"model":"claude-opus-5-5"`, `"model":"--dangerously-skip-permissions"`, 1)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		w := newFailoverWatch(t, "acc-a", "acc-b")
 		w.configDir = dir
-		if c := w.check(4242); c == nil || c.sw.model != "" {
+		if c := w.check(me); c == nil || c.sw.model != "" {
 			t.Fatalf("model: %+v", c)
 		}
 	})
 	t.Run("refusals and caps say why, once", func(t *testing.T) {
 		fastFailover(t, 0, 30*time.Minute)
-		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "seven_day", 500000)
+		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 500000)
 		w := newFailoverWatch(t, "acc-a", "acc-b", "router")
 		w.configDir = dir
 		w.cfg.maxContext = 400000
-		if c := w.check(4242); c != nil || len(w.episode.notes) != 1 || !strings.Contains(w.episode.notes[0], "500,000 tokens, is above failover_max_context (400,000)") {
+		if c := w.check(me); c != nil || len(w.episode.notes) != 1 || !strings.Contains(w.episode.notes[0], "500,000 tokens, is above failover_max_context (400,000)") {
 			t.Fatalf("cap: %+v %v", c, w.episode.notes)
 		}
-		if again := w.check(4242); again != nil || len(w.episode.notes) != 1 {
+		if again := w.check(me); again != nil || len(w.episode.notes) != 1 {
 			t.Fatalf("decided twice: %v", w.episode.notes)
 		}
 		// Under a cap, a size the tail does not hold is no switch either.
-		dir, _, _ = writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "seven_day", 0)
+		dir, _, _ = writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 0)
 		w = newFailoverWatch(t, "acc-a", "acc-b")
 		w.configDir, w.cfg.maxContext = dir, 400000
-		if c := w.check(4242); c != nil || !strings.Contains(notes(w), "the context's size is not in the transcript") {
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), "the context's size is not in the transcript") {
 			t.Fatalf("unknown size under a cap: %+v %v", c, w.episode.notes)
 		}
-		dir, _, _ = writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "seven_day", 1000)
+		dir, _, _ = writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
 		w = newFailoverWatch(t, "acc-a", "acc-b", "router")
 		w.configDir = dir
 		calls := 0
@@ -423,30 +643,90 @@ func TestFailoverCheck(t *testing.T) {
 			calls++
 			return fmt.Errorf("playbook alpha may not run on %s\nmore", name)
 		}
-		if c := w.check(4242); c != nil || !strings.Contains(notes(w), "acc-b: playbook alpha may not run on acc-b; router is another kind of account") {
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), "acc-b: playbook alpha may not run on acc-b; router is another kind of account") {
 			t.Fatalf("none left: %+v %v", c, w.episode.notes)
 		}
 		// A limit it declined is not weighed again on the next poll.
-		if c := w.check(4242); c != nil || calls != 1 {
+		if c := w.check(me); c != nil || calls != 1 {
 			t.Fatalf("weighed again: %+v, %d checks of the target", c, calls)
 		}
 		w = newFailoverWatch(t, "acc-a", "acc-b")
 		w.configDir = dir
 		at := time.Now().UTC().Format(time.RFC3339)
 		w.episode.switches = []*failoverSwitch{{At: at}, {At: at}, {At: at}}
-		if c := w.check(4242); c != nil || !strings.Contains(notes(w), "3 switches in the last 5 hours") {
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), "3 switches in the last 5 hours") {
 			t.Fatalf("switch cap: %+v %v", c, w.episode.notes)
 		}
 		// A resume that would be refused is refused before anything ends:
 		// here the folder the session ran in is gone.
-		dir, _, folder := writeWatched(t, failSID, "interactive", "idle", 4242, "x", far, now, "seven_day", 1000)
+		dir, _, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
 		if err := os.Remove(folder); err != nil {
 			t.Fatal(err)
 		}
 		w = newFailoverWatch(t, "acc-a", "acc-b")
 		w.configDir = dir
-		if c := w.check(4242); c != nil || !strings.Contains(notes(w), "is not there") {
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), "is not there") {
 			t.Fatalf("folder gone: %+v %v", c, w.episode.notes)
+		}
+	})
+	t.Run("the resume folder is the one the transcript's project directory names", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		// The agent changed directory: the session file and the last line
+		// say <folder>/sub; the transcript is under <folder>'s project
+		// directory, which is the launch folder.
+		dir, transcript, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
+		moveWatched(t, dir, transcript, folder, me, folder+"/sub", folder+"/sub", folder)
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir, w.launchDir = dir, folder
+		if c := w.check(me); c == nil || c.sw.folder != folder {
+			t.Fatalf("resumed from: %+v %v", c, w.episode.notes)
+		}
+		// No candidate names that project directory: no switch, said once.
+		w = newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir, w.launchDir = dir, t.TempDir()
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), "the folder the session's transcript belongs to is not known") {
+			t.Fatalf("no match: %+v %v", c, w.episode.notes)
+		}
+	})
+	t.Run("a folder with a control character is not resumed from, and is printed quoted", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		bad := filepath.Join(t.TempDir(), "bad\x1bname")
+		if err := os.Mkdir(bad, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		dir, transcript, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
+		moveWatched(t, dir, transcript, folder, me, bad, bad, bad)
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir = dir
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), `bad\x1bname" has a control character`) || strings.ContainsRune(notes(w), 0x1b) {
+			t.Fatalf("control character: %+v %q", c, w.episode.notes)
+		}
+	})
+	t.Run("only switches of the last 5 hours count toward the cap", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir = dir
+		old := time.Now().Add(-6 * time.Hour).UTC().Format(time.RFC3339)
+		w.episode.switches = []*failoverSwitch{{At: old}, {At: old}, {At: old}}
+		if c := w.check(me); c == nil {
+			t.Fatalf("three switches six hours ago capped it: %v", w.episode.notes)
+		}
+	})
+	t.Run("a process it cannot confirm is declined once", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		dir, _, _ := writeWatched(t, failSID, "interactive", "idle", me, "Mon Jan 1 00:00:00 2001", far, now, "seven_day", 1000)
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir = dir
+		calls := 0
+		w.canRunOn = func(name, folder string) error { calls++; return nil }
+		for i := 0; i < 3; i++ {
+			if c := w.check(me); c != nil {
+				t.Fatalf("a switch: %+v", c)
+			}
+		}
+		if calls != 0 || len(w.episode.notes) != 1 || w.handled.Unix() != far.Unix() || !strings.Contains(notes(w), "no start time that matches its process") {
+			t.Fatalf("calls %d, notes %v, handled %v", calls, w.episode.notes, w.handled)
 		}
 	})
 	t.Run("each account once per episode", func(t *testing.T) {
@@ -523,10 +803,23 @@ func TestFailoverAct(t *testing.T) {
 			t.Fatalf("%s: acted, or marked: %v %v", name, w.episode.tried, w.handled)
 		}
 	}
+	if handoverSigs != nil {
+		t.Fatal("Ctrl-C is caught after an act that ended nothing")
+	}
 	w, c, _ := setup("idle", started)
 	if !w.act(c, pid, child.Process) {
 		t.Fatal("did not act on its own idle session")
 	}
+	// From the act until the next claude starts, a Ctrl-C is caught.
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handoverSigs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ctrl-C was not caught")
+	}
+	releaseHandover()
 	err := child.Wait()
 	ee, ok := err.(*exec.ExitError)
 	if !ok || ee.Sys().(syscall.WaitStatus).Signal() != syscall.SIGTERM {
@@ -660,8 +953,12 @@ func TestFailoverAlwaysSandboxed(t *testing.T) {
 	if err != nil || pb == nil {
 		t.Fatal(err)
 	}
-	if line := explainFailoverLine(explainFailover(pb)); line != "Failover: off (a sandboxed launch's session runs where cpb cannot watch it)" {
+	v := explainFailover(pb)
+	if line := explainFailoverLine(v); line != "Failover: off (a sandboxed launch's session runs where cpb cannot watch it); with --no-sandbox, on (DEFAULTS); at a usage limit, the session moves to acc-b" {
 		t.Fatalf("EXPLAIN: %q", line)
+	}
+	if v.On || v.NoSandbox == nil || !v.NoSandbox.On || v.NoSandbox.From != "DEFAULTS" {
+		t.Fatalf("EXPLAIN --json: %+v %+v", v, v.NoSandbox)
 	}
 	if err := runRun(nil, []string{"--failover", "boxed"}); !errors.Is(err, errFailoverSandbox) {
 		t.Fatalf("--failover on an always-sandboxed playbook: %v", err)
@@ -732,6 +1029,26 @@ func TestResumeClaudeArgs(t *testing.T) {
 	}
 	if !strings.Contains(continuePrompt(&failoverSwitch{From: "a", To: "b", Window: "seven_day", resetsAt: time.Now()}), "its context, of a size cpb could not read") {
 		t.Fatal("an unknown size reads as a number")
+	}
+	// The resume runs from another folder: a settings file's path is made
+	// absolute against this one; JSON stays as it is.
+	here, _ := os.Getwd()
+	got = resumeClaudeArgs([]string{"--settings", "s.json", "--settings={\"a\":1}", "--settings=t.json"}, &failoverSwitch{sessionID: sidLive, noPrompt: true})
+	want = []string{"--resume", sidLive, "--settings", filepath.Join(here, "s.json"), `--settings={"a":1}`, "--settings=" + filepath.Join(here, "t.json")}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("settings: %q", got)
+	}
+}
+
+// Once the next claude has started, a Ctrl-C is its own again.
+func TestFailoverHandoverEndsWhenClaudeStarts(t *testing.T) {
+	catchHandover()
+	t.Cleanup(releaseHandover)
+	if err := runRecorded(exec.Command("true"), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if handoverSigs != nil {
+		t.Fatal("Ctrl-C still caught while the next claude runs")
 	}
 }
 

@@ -1333,15 +1333,21 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   only when all of these hold:
   - Claude Code's session file says `idle`: no turn, and no background shell,
     subagent or monitor (those show `busy` or `shell`); the session is an
-    interactive one, and its id has a session id's shape;
+    interactive one, its id has a session id's shape, and its start time
+    matches its process (otherwise cpb says so once and leaves this limit);
   - the transcript ends at Claude Code's limit line (*Stopped at a limit*),
     written after this launch started (a limit the launch before ran into
     is not acted on again), and that limit resets more than 30 minutes from
     now: a sooner one is left to Claude Code, which continues by itself at
     the reset;
   - the transcript has not changed for 2 minutes;
-  - a resume would not be refused: the folder the session ran in is there,
-    the playbook holds its transcript, and it is not live in another process.
+  - the folder to resume from is known: the first of the session file's
+    folder, the launch's folder and the transcript's folders whose encoded
+    name is that of the project directory holding the transcript, where
+    Claude Code finds the session. None, or one with a control character,
+    is no switch, said once;
+  - a resume would not be refused: that folder is there, the playbook holds
+    the transcript, and no other live process runs the session.
   Just before it ends anything, cpb checks again that it is the same
   session, still idle, in the same process (its start time), with the
   transcript unchanged, and that the process is the launch's own (claude,
@@ -1354,8 +1360,9 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   - is not known to be at a limit (a live session cpb launched on it shows
     `at_limit`). Otherwise a refused request costs nothing: the next poll
     sees the new limit and moves on;
-  - is the same kind as the session's account (a Claude login or token, or
-    the same provider at the same address), unless listed as
+  - is the same kind as the session's account (a Claude login or token
+    sent to Anthropic, or the same provider at the same address: a gateway
+    trusted with a Claude login is its own kind), unless listed as
     `'<account> (any provider)'`;
   - the playbook may run on, with every refusal a launch on it would give
     checked first, before anything changes (the account, the login guards,
@@ -1365,14 +1372,18 @@ cpb run --failover reviewer                          -- one launch; --no-failove
 - **What moves.** cpb ends claude with SIGTERM (Claude Code removes its
   session file, the transcript stays, a playbook's SessionEnd hook runs; one
   that has not ended 10 seconds later is killed) and runs the same launch
-  again, from the folder the session ran in, with `--account <next>` and
-  `--resume <id>`, keeping `--failover` and `--no-sandbox` when the launch
-  had them. A Ctrl-C between the two claudes is caught, not passed on:
+  again, from the folder above, with `--account <next>` and `--resume <id>`,
+  keeping `--failover` and `--no-sandbox` when the launch had them, and the
+  launch's `--env-file` paths and playbooks root made absolute against the
+  folder it ran in. From just before cpb ends the old claude until the next
+  one starts, a Ctrl-C (to cpb, with the terminal in its ordinary mode) is
+  caught, not passed on; inside claude it is claude's:
   - the session's last model (`--model`), when it has a model id's shape and
     the new account is the same kind (another kind maps its own models);
     and only claude's flags a resume can
     carry safely (`--permission-mode`, `--effort`, `--fallback-model`,
-    `--agent`, `--append-system-prompt`, `--system-prompt`, `--settings`,
+    `--agent`, `--append-system-prompt`, `--system-prompt`, `--settings`
+    (a file's path made absolute),
     `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`,
     `--verbose`, `--strict-mcp-config`); never the first prompt, nor a flag
     that takes a list;
@@ -1386,7 +1397,10 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     ran (the transcript is as it was: refused, or its secret helper failing
     before claude runs) resumes the session on the account it came from,
     with no prompt, and says it did not move; that switch's `outcome` is
-    `'failed'`. A switch never leaves the session ended.
+    `'failed'`. When that fails too, cpb says nothing runs the session and
+    prints the command that resumes it by hand (without `--env` values). A
+    launch on the new account that wrote to the transcript and then failed
+    ran the session: that is a move, and its error is the launch's.
 - **Cost.** The new account reads the whole context again with no cache.
   `failover_max_context` (tokens) is an optional cap above which cpb does
   not switch and says why; there is none by default. Under a cap, a context
@@ -1395,8 +1409,9 @@ cpb run --failover reviewer                          -- one launch; --no-failove
 - **What it says.** A line on stderr at each switch, the switches and any
   "did not switch" reason at the end, the first line of the continue
   prompt in the session itself, and `switches` in the launch record (*SHOW
-  SESSIONS*), each with its `outcome`, `'moved'` or `'failed'`. It never acts on a session it did not launch, and touches no
-  credential beyond what `--account` does.
+  SESSIONS*), each with its `outcome`, `'moved'` or `'failed'`. It never
+  acts on a session it did not launch, and touches no credential beyond
+  what `--account` does. Folders it names are quoted.
 - **Without a restart.** An account whose credential is a `helper` gets its
   key from the helper again while the session runs (Claude Code re-runs an
   `apiKeyHelper` after `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`), so a helper
@@ -1404,7 +1419,10 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   cpb does not do that; a Claude login or token needs the restart above.
 - `EXPLAIN PLAYBOOK` says what a launch would do (`Failover: on (DEFAULTS);
   at a usage limit, the session moves to claude-work, claude-home`), and its
-  `--json` has `failover` (`on`, `from`, `accounts`, `max_context`).
+  `--json` has `failover` (`on`, `from`, `accounts`, `max_context`, and
+  `no_sandbox`). An always-sandboxed playbook is off as launched (`from`
+  `'sandbox'`); `no_sandbox` (`on`, `from`, else null) and the line's
+  "with --no-sandbox" part say what a `--no-sandbox` launch of it does.
   DEFAULTS' settings are stored in `<playbooks root>/.env-sets/.failover`
   (mode `0600`).
 
@@ -2726,7 +2744,7 @@ directory of mode `0700`) and removes it when the launch returns.
   `env:<set>`, `block:<playbook>` or `flags:<host>`), `why` (the reason
   EXPLAIN gives), `identity` (the account's `identity` label, or null),
   `launched_at`, and after an account failover, `switches` (each `from`,
-  `to`, `at`, `window`, `resets_at`, `context_tokens`). No credential, no reference, nothing from the environment.
+  `to`, `at`, `window`, `resets_at`, `context_tokens`, `outcome`). No credential, no reference, nothing from the environment.
 - **Matching.** A session gets the account of the record of its own pid,
   or else of its parent's pid (a secret helper that starts claude as its
   child), and only when that process started when the record says, so a

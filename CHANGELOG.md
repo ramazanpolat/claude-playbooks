@@ -22,7 +22,8 @@
   - A launch whose claude flags a resume would not keep is not moved, and
     says so. If the launch on the new account never runs the session, the
     session resumes on the account it came from and the switch is reported
-    as not made.
+    as not made; if that fails too, cpb says nothing runs the session and
+    prints the command that resumes it by hand.
   - Off by default: `ALTER DEFAULTS SET failover = 'on', failover_accounts =
     [...]`, a playbook's own `failover = 'on' | 'off'`, or `cpb run
     --failover` / `--no-failover` for one launch.

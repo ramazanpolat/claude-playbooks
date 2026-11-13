@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
@@ -78,6 +80,9 @@ type failoverSwitch struct {
 	// noPrompt resumes with no prompt: the way back to the account the
 	// session came from, when the new one did not run.
 	noPrompt bool
+	// stranded: the way back did not run the session either, so nothing
+	// runs it now.
+	stranded bool
 }
 
 func (s *failoverSwitch) Error() string {
@@ -124,6 +129,8 @@ type failoverWatch struct {
 	playbook  string
 	from      string
 	fromClass string
+	// launchDir is the folder the launch started in.
+	launchDir string
 	// since is when the launch started: only a limit line written after it
 	// is this launch's own to act on; an older one was the launch before's.
 	since time.Time
@@ -138,9 +145,11 @@ type failoverWatch struct {
 	handled time.Time
 }
 
-// accountClass is the kind of allowance an account draws on: any Claude
-// login or token is one kind; any other account is its provider at its
-// address, so two gateways at different addresses are not one kind.
+// accountClass is the kind of allowance an account draws on: a Claude
+// login or token sent to Anthropic is one kind; any other account is its
+// provider at its address, so two gateways at different addresses, or a
+// gateway trusted with a Claude login and Anthropic itself, are not one
+// kind.
 func accountClass(name string) string {
 	if name == account.Machine {
 		return "claude"
@@ -149,10 +158,14 @@ func accountClass(name string) string {
 	if err != nil || a == nil {
 		return "unknown " + name
 	}
+	address := strings.TrimRight(strings.ToLower(a.BaseURL), "/")
 	if a.Auth.Kind == account.ClaudeLogin || a.Auth.Kind == account.ClaudeToken {
-		return "claude"
+		if a.Provider == account.Anthropic {
+			return "claude"
+		}
+		return "claude " + address
 	}
-	return a.Provider + " " + strings.TrimRight(strings.ToLower(a.BaseURL), "/")
+	return a.Provider + " " + address
 }
 
 // failoverKillAfter is how long claude has to end after SIGTERM before it
@@ -162,6 +175,33 @@ var failoverKillAfter = 10 * time.Second
 // failoverHandover is the switch whose launch on the new account is
 // running, nil otherwise.
 var failoverHandover *failoverSwitch
+
+// handoverSigs catches Ctrl-C between two claudes of a switch: from just
+// before cpb ends the old one until the next one starts (or cpb run
+// returns). The terminal is in its ordinary mode then, so a Ctrl-C would
+// end cpb and leave the session ended; inside claude it is claude's.
+var (
+	handoverMu   sync.Mutex
+	handoverSigs chan os.Signal
+)
+
+func catchHandover() {
+	handoverMu.Lock()
+	defer handoverMu.Unlock()
+	if handoverSigs == nil {
+		handoverSigs = make(chan os.Signal, 1)
+		signal.Notify(handoverSigs, os.Interrupt)
+	}
+}
+
+func releaseHandover() {
+	handoverMu.Lock()
+	defer handoverMu.Unlock()
+	if handoverSigs != nil {
+		signal.Stop(handoverSigs)
+		handoverSigs = nil
+	}
+}
 
 // notRun reports whether a launch on the new account that ended with err
 // never ran the session: it failed, and the transcript is as it was when
@@ -193,14 +233,21 @@ func (w *failoverWatch) watch(done <-chan struct{}, child *os.Process) *failover
 		if c == nil || !w.act(c, claudePID, child) {
 			continue
 		}
-		go func(pid int) {
-			select {
-			case <-done:
-			case <-time.After(failoverKillAfter):
-				_ = syscall.Kill(pid, syscall.SIGKILL)
-			}
-		}(claudePID)
+		go killAfter(done, claudePID, c.procStart, failoverKillAfter)
 		return c.sw
+	}
+}
+
+// killAfter kills pid if it has not ended after the wait (done closes when
+// it ends), and only while pid is still the process that was ended, by its
+// start time: never a process that took the pid over.
+func killAfter(done <-chan struct{}, pid int, start string, after time.Duration) {
+	select {
+	case <-done:
+	case <-time.After(after):
+		if sameStart(procStartOf(pid), start) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
 	}
 }
 
@@ -245,6 +292,11 @@ func (w *failoverWatch) check(claudePID int) *failoverCandidate {
 		w.episode.note(fmt.Sprintf("cpb: did not switch accounts at the %s: %s", limit, why))
 		return nil
 	}
+	// The process is confirmed by its start time before anything else is
+	// weighed; one that cannot be is declined once, not retried each poll.
+	if f.ProcStart == "" || !sameStart(procStartOf(claudePID), f.ProcStart) {
+		return decline("Claude Code's session file gives no start time that matches its process")
+	}
 	if w.cfg.maxContext > 0 && tail.context == 0 {
 		return decline("failover_max_context is set and the context's size is not in the transcript's last 256 KiB")
 	}
@@ -257,11 +309,15 @@ func (w *failoverWatch) check(claudePID int) *failoverCandidate {
 	if recent >= failoverCap {
 		return decline(fmt.Sprintf("%d switches in the last %d hours already", recent, int(failoverCapWindow.Hours())))
 	}
-	// The resume runs from the folder the session ran in, as Claude Code
-	// finds it; the same checks a resume there makes come first.
-	folder := transcriptCwd(path)
+	// The resume runs from the folder whose project directory holds the
+	// transcript, where Claude Code finds the session; the same checks a
+	// resume there makes come first.
+	folder := resumeFolder(path, append([]string{f.Cwd, w.launchDir}, tail.cwds...)...)
 	if folder == "" {
-		folder = f.Cwd
+		return decline("the folder the session's transcript belongs to is not known (its project directory matches none of the session's folders)")
+	}
+	if hasControl(folder) {
+		return decline(fmt.Sprintf("the session's folder %q has a control character", folder))
 	}
 	if err := w.resumeGuard(f.SessionID, folder, claudePID); err != nil {
 		return decline(err.Error())
@@ -286,7 +342,7 @@ func (w *failoverWatch) check(claudePID int) *failoverCandidate {
 // holds no transcript of it, the session live in another process.
 func (w *failoverWatch) resumeGuard(id, folder string, own int) error {
 	if fi, err := os.Stat(folder); err != nil || !fi.IsDir() {
-		return fmt.Errorf("the folder the session ran in, %s, is not there", folder)
+		return fmt.Errorf("the folder the session ran in, %q, is not there", folder)
 	}
 	if transcriptPath(w.configDir, "", id) == "" {
 		return fmt.Errorf("the playbook holds no transcript of session %s", id)
@@ -295,10 +351,41 @@ func (w *failoverWatch) resumeGuard(id, folder string, own int) error {
 	if err != nil {
 		return err
 	}
-	if s := liveByID(dirs)[id]; s != nil && s.f.PID != own {
-		return fmt.Errorf("session %s is live in another process (pid %d)", id, s.f.PID)
+	for _, s := range readSessionFiles(dirs) {
+		if s.f.SessionID == id && s.f.PID != own {
+			return fmt.Errorf("session %s is live in another process (pid %d)", id, s.f.PID)
+		}
 	}
 	return nil
+}
+
+// resumeFolder is the first of candidates whose encoded name is the name of
+// the project directory that holds transcript: the folder a resume there
+// finds the session from. "" when none is.
+func resumeFolder(transcript string, candidates ...string) string {
+	want := filepath.Base(filepath.Dir(transcript))
+	for _, c := range candidates {
+		if c != "" && filepath.IsAbs(c) && encodeProjectDir(c) == want {
+			return c
+		}
+	}
+	return ""
+}
+
+// hasControl reports whether s holds a control character.
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, unicode.IsControl) >= 0
+}
+
+// printable is s with each control character shown as '?', for a line on
+// the terminal.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '?'
+		}
+		return r
+	}, s)
 }
 
 // act ends claude for c, once more confirming it is still the case: the
@@ -315,16 +402,20 @@ func (w *failoverWatch) act(c *failoverCandidate, claudePID int, child *os.Proce
 	if fi, err := os.Stat(c.sw.transcript); err != nil || !fi.ModTime().Equal(c.mtime) {
 		return false
 	}
+	if claudePID != child.Pid {
+		if info, ok := procStarts([]int{claudePID})[claudePID]; !ok || info.ppid != child.Pid {
+			return false
+		}
+	}
+	catchHandover()
 	var err error
 	if claudePID == child.Pid {
 		err = child.Signal(syscall.SIGTERM)
 	} else {
-		if info, ok := procStarts([]int{claudePID})[claudePID]; !ok || info.ppid != child.Pid {
-			return false
-		}
 		err = syscall.Kill(claudePID, syscall.SIGTERM)
 	}
 	if err != nil {
+		releaseHandover()
 		w.episode.note("cpb: could not end the session to switch accounts: " + err.Error())
 		return false
 	}
@@ -472,17 +563,22 @@ func resumeClaudeArgs(original []string, sw *failoverSwitch) []string {
 		if a == "--" {
 			break
 		}
-		flag, _, inline := strings.Cut(a, "=")
+		flag, value, inline := strings.Cut(a, "=")
 		takesValue, known := carriedClaudeFlags[flag]
 		if !known {
 			continue
 		}
-		if !takesValue || inline {
+		switch {
+		case inline && flag == "--settings":
+			out = append(out, flag+"="+settingsPath(value))
+		case !takesValue || inline:
 			out = append(out, a)
-			continue
-		}
-		if i+1 < len(original) {
-			out = append(out, a, original[i+1])
+		case i+1 < len(original):
+			v := original[i+1]
+			if flag == "--settings" {
+				v = settingsPath(v)
+			}
+			out = append(out, a, v)
 			i++
 		}
 	}
@@ -499,13 +595,40 @@ func resumeClaudeArgs(original []string, sw *failoverSwitch) []string {
 func relaunchArgs(switches []string, tokens []launchToken, name string, claudeArgs []string, sw *failoverSwitch) []string {
 	out := append([]string(nil), switches...)
 	for _, t := range tokens {
-		if t.flag == "--account" {
+		switch t.flag {
+		case "--account":
+			continue
+		case "--env-file":
+			// The relaunch runs from the session's folder: a path is
+			// made absolute against the folder this launch runs in.
+			out = append(out, t.flag+"="+absPath(t.value))
 			continue
 		}
 		out = append(out, t.flag+"="+t.value)
 	}
 	out = append(out, "--account", sw.To, name)
 	return append(out, resumeClaudeArgs(claudeArgs, sw)...)
+}
+
+// absPath is p made absolute against this process's folder; p as it is when
+// it is absolute or cannot be.
+func absPath(p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	if a, err := filepath.Abs(p); err == nil {
+		return a
+	}
+	return p
+}
+
+// settingsPath is a --settings value for a resume from another folder:
+// a file's path made absolute; JSON as it is.
+func settingsPath(v string) string {
+	if strings.HasPrefix(strings.TrimSpace(v), "{") {
+		return v
+	}
+	return absPath(v)
 }
 
 // printFailoverSummary says, on stderr, what this process's failover did.
@@ -515,7 +638,11 @@ func printFailoverSummary() {
 	defer e.mu.Unlock()
 	for _, s := range e.switches {
 		at, _ := time.Parse(time.RFC3339, s.At)
-		if s.Outcome == "failed" {
+		switch {
+		case s.stranded:
+			fmt.Fprintf(os.Stderr, "cpb: at %s this session could not move from %s to %s, nor be resumed on %s: nothing runs it now\n", at.Local().Format("15:04"), s.From, s.To, s.From)
+			continue
+		case s.Outcome == "failed":
 			fmt.Fprintf(os.Stderr, "cpb: at %s this session could not move from %s to %s, and stayed on %s\n", at.Local().Format("15:04"), s.From, s.To, s.From)
 			continue
 		}
@@ -576,7 +703,7 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 		from = account.Machine
 	}
 	w := &failoverWatch{cfg: cfg, configDir: in.configDir, playbook: in.pb.Name, from: from,
-		fromClass: accountClass(from), episode: activeEpisode, since: failoverNow()}
+		fromClass: accountClass(from), launchDir: in.wd, episode: activeEpisode, since: failoverNow()}
 	w.canRunOn = func(next, folder string) error {
 		var tk []launchToken
 		for _, t := range in.tokens {

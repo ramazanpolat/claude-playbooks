@@ -310,6 +310,15 @@ type failoverExplainJSON struct {
 	Accounts   []string `json:"accounts"`
 	MaxContext *int64   `json:"max_context"`
 	Error      *string  `json:"error"`
+	// NoSandbox is, for an always-sandboxed playbook, what a --no-sandbox
+	// launch of it does; null otherwise.
+	NoSandbox *failoverExplainOn `json:"no_sandbox"`
+}
+
+// failoverExplainOn is whether failover is on, and what decides it.
+type failoverExplainOn struct {
+	On   bool   `json:"on"`
+	From string `json:"from"`
 }
 
 func explainFailover(pb *playbook.Playbook) failoverExplainJSON {
@@ -327,12 +336,14 @@ func explainFailover(pb *playbook.Playbook) failoverExplainJSON {
 		v.MaxContext = &n
 	}
 	switch {
-	case pb.Manifest != nil && pb.Manifest.Sandbox != nil && pb.Manifest.Sandbox.Always:
-		v.On, v.From = false, "sandbox"
 	case pb.Manifest != nil && (pb.Manifest.Failover == failoverOn || pb.Manifest.Failover == failoverOff):
 		v.On, v.From = pb.Manifest.Failover == failoverOn, "playbook"
 	case d.Failover != "":
 		v.On, v.From = d.Failover == failoverOn, "DEFAULTS"
+	}
+	if pb.Manifest != nil && pb.Manifest.Sandbox != nil && pb.Manifest.Sandbox.Always {
+		v.NoSandbox = &failoverExplainOn{On: v.On, From: v.From}
+		v.On, v.From = false, "sandbox"
 	}
 	return v
 }
@@ -341,12 +352,22 @@ func explainFailoverLine(v failoverExplainJSON) string {
 	switch {
 	case v.Error != nil:
 		return "Failover: cannot be read (" + *v.Error + ")"
-	case !v.On:
-		return "Failover: off (" + failoverFromWords(v.From) + ")"
+	case v.NoSandbox != nil:
+		// An always-sandboxed playbook: off as launched, and what a
+		// --no-sandbox launch of it does.
+		return "Failover: off (" + failoverFromWords(v.From) + "); with --no-sandbox, " + failoverOnWords(v, v.NoSandbox.On, v.NoSandbox.From)
 	}
-	line := "Failover: on (" + failoverFromWords(v.From) + "); at a usage limit, the session moves to " + listOrNone(v.Accounts)
+	return "Failover: " + failoverOnWords(v, v.On, v.From)
+}
+
+// failoverOnWords is "on (…); at a usage limit, …" or "off (…)".
+func failoverOnWords(v failoverExplainJSON, on bool, from string) string {
+	if !on {
+		return "off (" + failoverFromWords(from) + ")"
+	}
+	line := "on (" + failoverFromWords(from) + "); at a usage limit, the session moves to " + listOrNone(v.Accounts)
 	if len(v.Accounts) == 0 {
-		line = "Failover: on (" + failoverFromWords(v.From) + "), but no account is listed (ALTER DEFAULTS SET failover_accounts = [...])"
+		line = "on (" + failoverFromWords(from) + "), but no account is listed (ALTER DEFAULTS SET failover_accounts = [...])"
 	}
 	if v.MaxContext != nil {
 		line += "; at most " + groupDigits(*v.MaxContext) + " tokens of context"

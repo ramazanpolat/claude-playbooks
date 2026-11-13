@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -65,6 +65,8 @@ func runRecorded(c *exec.Cmd, rec *launchRecord, watch *failoverWatch) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
+	// The next claude of a switch has started: a Ctrl-C is its own again.
+	releaseHandover()
 	// A token run stays live for as long as this session does, even if
 	// cpb is killed first (internal/auth/own_login.go).
 	auth.SessionStarted(c.Process.Pid)
@@ -111,6 +113,10 @@ func (r *failoverRelaunch) Error() string { return r.sw.Error() }
 // claude starts: the transcript is as it was) resumes the session on the
 // account it came from instead, so a switch never leaves it ended.
 func runRun(cmd *cobra.Command, args []string) error {
+	// A Ctrl-C between two claudes of a switch is caught (handoverSigs in
+	// failover.go); cpb run stops catching it when it returns, whatever
+	// happened.
+	defer releaseHandover()
 	err := runRunOnce(cmd, args)
 	for {
 		var rl *failoverRelaunch
@@ -118,27 +124,67 @@ func runRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		sw := rl.sw
-		// A Ctrl-C between the two claudes, with the terminal back in its
-		// ordinary mode, must not end cpb and leave the session ended. The
-		// signal is caught, not ignored, so the next claude gets its own.
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, os.Interrupt)
 		fmt.Fprintf(os.Stderr, "cpb: account %s hit its %s limit (resets %s); resuming this session on %s\n",
 			sw.From, windowWords(sw.Window), sw.resetsAt.Local().Format("Mon 2 Jan 15:04"), sw.To)
+		pinPlaybooksDir()
 		if sw.folder != "" {
 			_ = os.Chdir(sw.folder)
 		}
 		failoverHandover = sw
 		err = runRunOnce(cmd, rl.args)
-		failoverHandover = nil
 		var again *failoverRelaunch
 		if !errors.As(err, &again) && sw.notRun(err) {
 			sw.Outcome = "failed"
-			fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, firstLine(err.Error()), sw.From)
+			fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, printable(firstLine(err.Error())), sw.From)
 			err = runRunOnce(cmd, rl.back)
+			if !errors.As(err, &again) && sw.notRun(err) {
+				sw.stranded = true
+				printFailoverSummary()
+				fmt.Fprintf(os.Stderr, "cpb: could not resume it on %s either (%s); to resume it by hand:\n  %s\n", sw.From, printable(firstLine(err.Error())), resumeByHand(sw.folder, rl.back))
+			}
 		}
-		signal.Stop(sigs)
+		failoverHandover = nil
 	}
+}
+
+// pinPlaybooksDir makes a relative playbooks root absolute before a
+// relaunch changes folder, so the relaunch reads the same root.
+func pinPlaybooksDir() {
+	if v := os.Getenv(config.PlaybooksDirEnv); v != "" && !filepath.IsAbs(v) {
+		_ = os.Setenv(config.PlaybooksDirEnv, absPath(v))
+	}
+	if root := config.ResolvePlaybooksDir(); !filepath.IsAbs(root) {
+		config.PlaybooksDir = absPath(root)
+	}
+}
+
+// resumeByHand is the command line that resumes a session with args from
+// folder, quoted for a POSIX shell. An --env value is not shown: it may be
+// a credential.
+func resumeByHand(folder string, args []string) string {
+	words := []string{"cpb", "run"}
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, "--env="); ok {
+			k, _, _ := strings.Cut(v, "=")
+			a = "--env=" + k + "=<your value>"
+		}
+		words = append(words, shellWord(a))
+	}
+	line := strings.Join(words, " ")
+	if folder != "" {
+		line = "cd " + shellWord(folder) + " && " + line
+	}
+	return printable(line)
+}
+
+// shellWord is s as one word for a POSIX shell.
+func shellWord(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@%+,", r))
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // fileSize is a file's size, -1 when it cannot be read.
