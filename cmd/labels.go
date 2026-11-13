@@ -246,7 +246,7 @@ func labelVarValueProblem(k, v string) string {
 	switch {
 	case urlShape.MatchString(v):
 		return "a URL"
-	case strings.HasPrefix(v, "/") || strings.HasPrefix(v, "~"):
+	case hasPathWord(v):
 		return "a path"
 	case ipv4Shape.MatchString(v) || hasIPv6(v):
 		return "an address"
@@ -263,6 +263,19 @@ func labelVarValueProblem(k, v string) string {
 		return "not a label value (" + strings.SplitN(p, ";", 2)[0] + ")"
 	}
 	return ""
+}
+
+// hasPathWord reports a word of v that is a path: one starting with /, ~
+// or \ (a drive's C:\ or C:/ splits at its colon), anywhere in v. Words
+// split at spaces and at the characters that join a path to the text
+// around it.
+func hasPathWord(v string) bool {
+	for _, w := range strings.FieldsFunc(v, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune(`=:,;"'()[]<>|`, r) }) {
+		if strings.HasPrefix(w, "/") || strings.HasPrefix(w, "~") || strings.HasPrefix(w, `\`) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasIPv6 reports a word of v that is an IPv6 address, with or without a

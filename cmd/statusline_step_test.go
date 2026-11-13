@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -448,5 +449,45 @@ func TestDotClaudeFileIsNoSettings(t *testing.T) {
 	}
 	if err := reservedInSettings(t.TempDir(), repo); err != nil {
 		t.Fatalf("a .claude file refused the launch: %v", err)
+	}
+}
+
+// A settings path that is a FIFO is refused without waiting on it: the
+// folder's settings refuse the launch, a --settings file too, the status
+// line step cannot tell and adds none, and a .git that is a FIFO names no
+// main checkout.
+func TestFIFOSettingsRefusedWithoutWaiting(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(repo, ".claude", "settings.json")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitFIFO := filepath.Join(t.TempDir(), ".git")
+	if err := syscall.Mkfifo(gitFIFO, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := reservedInSettings(t.TempDir(), repo); err == nil || !strings.Contains(err.Error(), "is not a regular file") {
+			t.Errorf("the folder's settings: %v", err)
+		}
+		if err := reservedInSettingsArgs([]string{"--settings", fifo}, repo, false); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Errorf("--settings: %v", err)
+		}
+		if set, err := setsStatusLine(fifo); set || err == nil {
+			t.Errorf("the status line step: %v %v", set, err)
+		}
+		if main := mainCheckoutOf(gitFIFO); main != "" {
+			t.Errorf(".git: %q", main)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("waited on a FIFO")
 	}
 }

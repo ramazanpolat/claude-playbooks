@@ -205,21 +205,35 @@ func psStarts(pids []int) map[int]procInfo {
 	c := exec.Command("ps", "-A", "-o", "pid=,ppid=,lstart=,tty=")
 	c.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
 	b, _ := c.Output()
+	return parsePs(b, true, want)
+}
+
+// parsePs reads the output of ps -o pid=,ppid=,lstart= (and ,tty= when
+// tty) into procInfo by pid, for the pids in keep (every pid when keep is
+// nil). lstart in the C locale is always five words, so a line is seven
+// words, and with tty an eighth is the terminal ("?", "??" or "-" when
+// there is none). Anything else is skipped. It reads text only, so it is
+// tested on every system, not only where ps runs.
+func parsePs(b []byte, tty bool, keep map[int]bool) map[int]procInfo {
+	out := map[int]procInfo{}
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
-		if len(f) < 7 {
+		if len(f) < 7 || (!tty && len(f) != 7) || (tty && len(f) > 8) {
 			continue
 		}
 		pid, err := strconv.Atoi(f[0])
-		if err != nil || !want[pid] {
+		if err != nil || pid <= 0 || (keep != nil && !keep[pid]) {
 			continue
 		}
-		ppid, _ := strconv.Atoi(f[1])
-		tty := ""
-		if len(f) > 7 && strings.Trim(f[7], "?-") != "" {
-			tty = f[7]
+		ppid, err := strconv.Atoi(f[1])
+		if err != nil || ppid < 0 {
+			continue
 		}
-		out[pid] = procInfo{start: strings.Join(f[2:7], " "), tty: tty, ppid: ppid}
+		info := procInfo{start: strings.Join(f[2:7], " "), ppid: ppid}
+		if tty && len(f) == 8 && strings.Trim(f[7], "?-") != "" {
+			info.tty = f[7]
+		}
+		out[pid] = info
 	}
 	return out
 }
@@ -249,23 +263,10 @@ var procWalker = func() func(pid int) (procInfo, bool) {
 // psTable is every process's parent and start time, from one ps call, in
 // the form psStarts reads (lstart in UTC with the C locale).
 func psTable() map[int]procInfo {
-	out := map[int]procInfo{}
 	c := exec.Command("ps", "-A", "-o", "pid=,ppid=,lstart=")
 	c.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
 	b, _ := c.Output()
-	for _, line := range strings.Split(string(b), "\n") {
-		f := strings.Fields(line)
-		if len(f) != 7 {
-			continue
-		}
-		pid, err := strconv.Atoi(f[0])
-		if err != nil {
-			continue
-		}
-		ppid, _ := strconv.Atoi(f[1])
-		out[pid] = procInfo{start: strings.Join(f[2:7], " "), ppid: ppid}
-	}
-	return out
+	return parsePs(b, false, nil)
 }
 
 // pidDomain is this host's pid domain, as Claude Code writes it.

@@ -711,7 +711,7 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 	}
 	switch {
 	case !t.Quoted && strings.EqualFold(word, "IF") && p.defaults:
-		return errAt(t.Pos, "SET IF UNSET is for playbook properties; DEFAULTS takes SET secret_helper = '<command>'")
+		return errAt(t.Pos, "SET IF UNSET is for playbook properties, not DEFAULTS: ALTER DEFAULTS SET <key> = '<value>' ("+keys+")")
 	case !t.Quoted && strings.EqualFold(word, "IF"):
 		return errAt(t.Pos, "IF UNSET goes right after SET: SET IF UNSET <key> = '<value>', …")
 	case !p.defaults && isVarName(word) && p.creating:

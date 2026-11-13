@@ -185,7 +185,7 @@ type File struct {
 func Load(dir string) (*File, error) {
 	path := filepath.Join(dir, FileName)
 	f := &File{Path: path, indent: "  ", mode: 0o644}
-	data, err := os.ReadFile(path)
+	data, err := ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		f.Root = NewObject()
 		return f, nil

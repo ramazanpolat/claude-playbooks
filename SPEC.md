@@ -1236,7 +1236,9 @@ when a cloud switch is on, and only a cloud account turns one on.
   their `env` over the environment cpb hands Claude Code, and may name an
   `apiKeyHelper`. A launch is refused when any of them sets a reserved
   variable or an `apiKeyHelper` (one that cannot be read or parsed refuses
-  too; a `.claude` that is a file holds none): routing and credentials come from the account, never from a file a
+  too, and so does one that is not a regular file, a FIFO, a device or a
+  folder, which cpb refuses without waiting on it; a `.claude` that is a
+  file holds none): routing and credentials come from the account, never from a file a
   repository carries. So is a `--settings` passed through to `claude`
   (`--settings <file>`, `--settings=<file>` or inline JSON) that does the
   same, keys matched exactly as Claude Code reads them; one whose file
@@ -1558,9 +1560,13 @@ of environment variable names; see *Session labels*).
   so it is never unset; use SET`). It is accepted in `ALTER PLAYBOOK` and in
   `CREATE OR ALTER PLAYBOOK` (judged on the playbook as it is: on a new
   one, after the creation, so a key a `FROM` source's `settings.json` sets
-  is set), not in `CREATE PLAYBOOK`. It applies whole or not at all: only
-  when none of the keys it names is set. Otherwise it changes nothing and
-  prints which key was set. A recipe uses it to offer values without
+  is set), not in `CREATE PLAYBOOK`, and not in `ALTER DEFAULTS`: a recipe,
+  which is what offers values, may not change DEFAULTS at all, and what
+  you set there yourself you set with `SET` (`SET IF UNSET is for playbook
+  properties, not DEFAULTS: ALTER DEFAULTS SET <key> = '<value>'
+  (secret_helper, failover, …)`, naming every key DEFAULTS takes). It
+  applies whole or not at all: only when none of the keys it names is set.
+  Otherwise it changes nothing and prints which key was set. A recipe uses it to offer values without
   replacing the ones a playbook has:
 
   ```
@@ -2087,8 +2093,9 @@ usage (*SHOW USAGE*). The playbook changes nothing.
     relative). Claude Code runs a folder's status line only once the folder
     is trusted, so cpb never copies it into a `--settings` of its own, where
     it would run at once; those files are read for the key alone, and one
-    that cannot be read means no step. A `.claude` that is a file holds no
-    settings, as for Claude Code;
+    that cannot be read, or is not a regular file (never waited on), means
+    no step. A `.claude` that is a file holds no settings, as for Claude
+    Code;
   - managed settings set a status line: the managed settings file, a
     `managed-settings.d/*.json` drop-in beside it, or server-managed
     settings cached in the config directory (`remote-settings.json`). A
@@ -3094,7 +3101,11 @@ cpb "ALTER PLAYBOOK reviewer SET label_vars = ['HC_TERMINAL_ID']" # this playboo
       `GITHUB_ACTOR`.
     An entry that is not a variable's name, or is shaped like a credential,
     is named by its length only, in a refusal and wherever a stored list is
-    shown (a file edited by hand): `<an entry of 29 characters>`.
+    shown (a file edited by hand): `<an entry of 29 characters>`. Another
+    name a statement would refuse, in a file edited by hand, is shown as
+    left out where `SHOW PLAYBOOK` and `SHOW DEFAULTS` list the labels
+    (`USER (refused name, left out)`), as `EXPLAIN` shows it: a launch
+    gives it no label.
   - **Read once per run,** where the launch runs, from the environment cpb
     itself was started with, before any layer: DEFAULTS' names, then the
     playbook's that DEFAULTS does not list. A `--label` of the same key
@@ -3102,9 +3113,12 @@ cpb "ALTER PLAYBOOK reviewer SET label_vars = ['HC_TERMINAL_ID']" # this playboo
     relaunch and the way back carry the launch's labels: they read neither
     `label_vars` nor the environment again.
   - **Each value is checked as any label is,** with its key `env.<name>`,
-    and more, since nobody typed it: a URL of any scheme, a path (starting
-    with `/` or `~`) and an IPv4 or IPv6 address are refused too. A label
-    typed with `--label` keeps the label rules alone. A variable that is
+    and more, since nobody typed it: a URL of any scheme, a path (a word
+    starting with `/`, `~` or `\` anywhere in the value, the words split at
+    spaces and at `=:,;"'()[]<>|`: `/home/user`, `dir=/srv/app`,
+    `C:\Users\…`; `feature/x` and `HEAD~1` are not paths) and an IPv4 or
+    IPv6 address are refused too. A label typed with `--label` keeps the
+    label rules alone. A variable that is
     unset or empty is left out and says nothing. A refused value, a label
     over the caps and a name no statement would set (a file edited by
     hand) are left out, and the launch says so in one line on stderr, by
@@ -3150,7 +3164,11 @@ cpb session label --session <id> task=x    # outside any session: a live session
     waits at most 400 ms for before it is refused (another label write of
     the session is in progress). The file goes when its last label does,
     and is swept with the usage files nobody wrote for 30 days, unless its
-    session is still running.
+    session is still running. A session counts as running unless it is
+    known to be over: its process is alive and started when its session
+    file says, or cpb cannot tell (a session file with no start time on a
+    live pid, a session in another process domain such as a sandbox), so
+    a label is never swept from a session that may still run.
   - **Not a boundary.** Labels are not a boundary between processes of
     one user: any of them can write a session's labels file, and outside a
     session `cpb session label --session <id>` labels any live session.
@@ -3259,7 +3277,12 @@ SELECT … FROM USAGE
   same time and the stored use is higher; a session's later figures stand
   as they are. A session moved to another allowance (account failover
   keeps its id) starts over there: its first line on the new allowance
-  holds first figures. It is read only from the file its key's hash names, never
+  holds first figures, unless they are the very figures of its line
+  before, on the old allowance, which Claude Code shows until its first
+  answer on the new one: those are no figures for either allowance, and
+  the figures that follow them are the session's later figures on the new
+  allowance, which stand as they are. It is read only from the file its
+  key's hash names, never
   one seen later than now, with each name checked as a launch writes it,
   use bounded to 0-1000% and a reset to its seen time plus the window's
   length. A stored figure that claims a seen time more than a minute
@@ -4787,7 +4810,7 @@ playbooks, and those that name their playbook, are not run:
 8. Take the registry lock and re-read the live manifest. If the install directory is no longer the same filesystem object, or any `[source]` field changed while staging ran, activate nothing.
 9. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. The live root directory keeps its own mode; only entries below it take the source's. A failure at any point rolls back: entries the source **introduced** are removed and moved entries are restored from the backup; if any restoration fails the backup is kept and named in the error rather than deleted. After a successful overlay the backup keeps only the replaced files: the old `.playbook` and the top-level preserved files, which went live again and hold values (`[env]` sets, a login, settings), are removed from it, an empty backup is removed, and the backups of earlier updates are removed, so one backup, the last update's, is kept. A nested preserved path is removed from the backup only when it lies physically inside its entry there. What cannot be removed is a warning naming it. A backup kept by an incomplete rollback is renamed `.<name>.bak.<stamp>.incomplete` (or, when the rename fails, marked by a `.cpb-rollback-incomplete` file inside): no later update removes it, and `DROP PLAYBOOK` keeps it and names it on stderr.
 10. Restore the preserved files over the incoming copies: `settings.json`, `settings.local.json`, `.credentials.json`, `.claude.json`, plus every path in `[update].preserve`. A preserved file the source ships but the install did not have is removed rather than adopted, whether it arrived under a moved entry or a newly introduced one. Preserved paths under an entry the overlay never touched are left alone. Whether a preserved path's top-level entry was touched is decided by filesystem identity, not spelling, so on a case-insensitive filesystem a source-shipped `SETTINGS.JSON` is the preserved `settings.json`. Before anything is removed or written, every ancestor between a nested preserved path and its top-level entry is checked for **physical** containment inside that entry (symlinks evaluated, nearest existing ancestor; the final component itself is never followed, so a preserved entry that is a symlink such as the shared `.credentials.json` is recreated as a link). A source that turned a directory on the path into a symlink — pointing outside the install, or into a sibling entry the overlay never backed up — makes the update fail and roll back: `<rel> resolves outside <top>/ after the update (a symlinked ancestor); refusing to restore through it`.
-11. Assemble the manifest that goes live in the staged tree before the overlay: local launcher, authentication-isolation, `[env]` overrides, the `[sandbox]` block, and source metadata are preserved from the live manifest (a source-shipped `[env]` or `[sandbox]` block is never adopted, not even transiently), and the install's `name` is always reset to its directory name.
+11. Assemble the manifest that goes live in the staged tree before the overlay. What is the install's own comes from the live manifest: the launcher, the login isolation, the `model_picker_defaults` opt-out, `failover`, `label_vars`, the `[source]` record, the `[env]` overrides, the `[sandbox]` block, the `[mcp]` and `[skills]` records statements keep, and the `[play]` and `[apply]` records. A source-shipped `[env]` or `[sandbox]` block is never adopted, not even transiently. The install's `name` is always reset to its directory name. The staged manifest takes the live one's mode masked by its own, so the update never loosens it.
 12. Check, still under the registry lock, that the installed step resolves inside the install and has the sha256 agreed to; release the lock; then run it: as `<script> <from-version> <to-version> <install-dir>` with working directory the install and `CLAUDE_CONFIG_DIR`, `CPB_PLAYBOOK_NAME`, `CPB_PLAYBOOK_DIR` in the environment. It may run cpb statements, which take the lock themselves. Steps are expected to be idempotent; the CLI does not track which have run. A declared step is not run, with a warning, when either side has no `version`.
 
 **Errors:**

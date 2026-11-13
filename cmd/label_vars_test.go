@@ -143,6 +143,8 @@ func TestLabelVarValues(t *testing.T) {
 	for v, kind := range map[string]string{
 		"https://hooks.example.com/T0/B0/x": "a URL", "postgres://db.example.com/app": "a URL", "ssh://x": "a URL",
 		"/home/user": "a path", "~/work": "a path", "~": "a path",
+		"build in /home/user/src": "a path", "dir=/srv/app": "a path", "PATH:/usr/bin": "a path", "see ~/notes": "a path",
+		`C:\Users\me`: "a path", "C:/Users/me": "a path", `\\server\share`: "a path", "(/tmp/x)": "a path",
 		"10.0.0.1": "an address", "10.0.0.1 52344 10.0.0.2 22": "an address", "at 192.168.1.20:8080": "an address",
 		"fe80::1%en0": "an address", "[2001:db8::1]:22": "an address", "::1": "an address",
 		"me@example.com": "an e-mail address", "password-ish sk-ant-api03-abcdefghijklmnop": "a credential",
@@ -151,7 +153,7 @@ func TestLabelVarValues(t *testing.T) {
 			t.Errorf("%q: %q, want %q", v, got, kind)
 		}
 	}
-	for _, ok := range []string{"kitty", "12:30:45", "v1.2.3", "feature/x", "2.1.322", "main"} {
+	for _, ok := range []string{"kitty", "12:30:45", "v1.2.3", "feature/x", "2.1.322", "main", "HEAD~1", "and/or", "a:b", "release/v4.9 build"} {
 		if got := labelVarValueProblem("env.x", ok); got != "" {
 			t.Errorf("%q refused: %s", ok, got)
 		}
@@ -344,6 +346,25 @@ func TestLabelVarsHandEditedEntryShownByLength(t *testing.T) {
 		"SELECT label_vars FROM PLAYBOOKS --json", "SELECT label_vars FROM DEFAULTS --json"} {
 		out := mustStmt(t, stmt)
 		if strings.Contains(out, "sk-ant") || !strings.Contains(out, shown) {
+			t.Errorf("%s:\n%s", stmt, out)
+		}
+	}
+}
+
+// A hand-edited name a statement would refuse, one that can be shown, is
+// listed as left out, never as the label it would give.
+func TestLabelVarsHandEditedRefusedNameShownAsLeftOut(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", &manifest.Manifest{LabelVars: []string{"USER", "TERM_PROGRAM"}})
+	if err := writeLabelVarsDefaults(root, []string{"CPB_ROOT_X"}); err != nil {
+		t.Fatal(err)
+	}
+	for stmt, want := range map[string]string{
+		"SHOW PLAYBOOK alpha": "USER (refused name, left out), TERM_PROGRAM as env.term_program",
+		"SHOW DEFAULTS":       "CPB_ROOT_X (refused name, left out)",
+	} {
+		out := mustStmt(t, stmt)
+		if !strings.Contains(out, want) || strings.Contains(out, "env.user") || strings.Contains(out, "env.cpb_root_x") {
 			t.Errorf("%s:\n%s", stmt, out)
 		}
 	}
