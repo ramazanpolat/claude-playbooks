@@ -341,6 +341,14 @@ func TestSweepSessionLabels(t *testing.T) {
 	if err := os.Chtimes(tmp, minute, minute); err != nil {
 		t.Fatal(err)
 	}
+	// A session whose lock is old but whose labels were just written keeps
+	// both: a write touches the lock.
+	if err := os.Chtimes(filepath.Join(labelsDir(root), "."+sidLive+".lock"), long, long); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := updateSessionLabels(root, sidLive, map[string]string{"k": "w"}, nil); err != nil {
+		t.Fatal(err)
+	}
 	sweepUsage(root, time.Now())
 	ents, _ := os.ReadDir(labelsDir(root))
 	var left []string
