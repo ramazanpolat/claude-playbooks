@@ -1341,11 +1341,13 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     now: a sooner one is left to Claude Code, which continues by itself at
     the reset;
   - the transcript has not changed for 2 minutes;
-  - the folder to resume from is known: the first of the session file's
-    folder, the launch's folder and the transcript's folders whose encoded
-    name is that of the project directory holding the transcript, where
-    Claude Code finds the session. None, or one with a control character,
-    is no switch, said once;
+  - the folder to resume from is known: the first of the launch's folder,
+    the session file's folder (each also with symlinks resolved) and the
+    transcript's folders whose encoded name is that of the project
+    directory holding the transcript, where Claude Code finds the session.
+    The launch's folder comes first: two folders can share one encoded name
+    (`my-app`, `my/app`). None, or one with a control character, is no
+    switch, said once;
   - a resume would not be refused: that folder is there, the playbook holds
     the transcript, and no other live process runs the session.
   Just before it ends anything, cpb checks again that it is the same
@@ -1376,14 +1378,16 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   keeping `--failover` and `--no-sandbox` when the launch had them, and the
   launch's `--env-file` paths and playbooks root made absolute against the
   folder it ran in. From just before cpb ends the old claude until the next
-  one starts, a Ctrl-C (to cpb, with the terminal in its ordinary mode) is
-  caught, not passed on; inside claude it is claude's:
+  one has written its session file (a secret helper may run first), a
+  Ctrl-C (to cpb, with the terminal in its ordinary mode) is caught, not
+  passed on; inside claude it is claude's:
   - the session's last model (`--model`), when it has a model id's shape and
     the new account is the same kind (another kind maps its own models);
     and only claude's flags a resume can
     carry safely (`--permission-mode`, `--effort`, `--fallback-model`,
     `--agent`, `--append-system-prompt`, `--system-prompt`, `--settings`
-    (a file's path made absolute),
+    (a file's path made absolute, and checked from the launch's folder
+    before the switch; `~/…` as it is),
     `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`,
     `--verbose`, `--strict-mcp-config`); never the first prompt, nor a flag
     that takes a list;
@@ -1398,9 +1402,13 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     before claude runs) resumes the session on the account it came from,
     with no prompt, and says it did not move; that switch's `outcome` is
     `'failed'`. When that fails too, cpb says nothing runs the session and
-    prints the command that resumes it by hand (without `--env` values). A
-    launch on the new account that wrote to the transcript and then failed
-    ran the session: that is a move, and its error is the launch's.
+    prints the command that resumes it by hand (with the playbooks root
+    when one was given; without `--env` values or an inline `--settings`
+    JSON; quoted for a POSIX shell). A way back whose claude ran and then
+    ended with an error is reported as any launch: the session stayed on
+    the old account. A launch on the new account that wrote to the
+    transcript and then failed ran the session: that is a move, and its
+    error is the launch's.
 - **Cost.** The new account reads the whole context again with no cache.
   `failover_max_context` (tokens) is an optional cap above which cpb does
   not switch and says why; there is none by default. Under a cap, a context
@@ -2804,7 +2812,9 @@ status otherwise.
 | `at_limit` | object or null | the transcript (since v4.8.0): `{"window": "seven_day", "resets_at": "<RFC 3339, UTC>"}` while the session is at a limit, else null |
 
 A session's transcript is
-`<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`.
+`<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`,
+counted as Claude Code counts them: one `-` per character, two for one
+outside the Basic Multilingual Plane.
 If that path is missing, cpb looks under every project directory.
 
 **`SELECT … FROM SESSIONS`** has the same rows. ClickHouse reads

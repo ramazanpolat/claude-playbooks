@@ -51,6 +51,15 @@
   `at_limit`, after `tty`; the TUI's Sessions view and a playbook's
   Sessions tab show both.
 
+### Fixed
+
+- **A session in a folder whose name has a non-ASCII character resumes
+  through cpb.** cpb named a folder's project directory with one `-` per
+  byte of its name; Claude Code uses one per character (two for one outside
+  the Basic Multilingual Plane). A `--resume <id>` from that folder was
+  refused as if the session had run elsewhere, and a `--continue` there was
+  not checked against a live session.
+
 ## [v4.7.0] -- 2026-11-12
 
 v4.7.0 lets cpb keep your secrets itself. A `cpb:<name>` reference needs no

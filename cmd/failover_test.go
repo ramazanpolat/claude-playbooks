@@ -58,6 +58,11 @@ t="$CLAUDE_CONFIG_DIR/projects/$enc/$FAKE_SID.jsonl"
 if [ -n "$resumed" ]; then
   case " $FAKE_FAIL_TOKENS " in *" $tok "*) exit 1;; esac
   case " $FAKE_WRITE_FAIL_TOKENS " in *" $tok "*) printf '{"type":"user"}\n' >> "$t"; exit 1;; esac
+  case " $FAKE_RUN_FAIL_TOKENS " in *" $tok "*)
+    mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s","kind":"interactive","status":"busy"}' $$ "$FAKE_SID" "$dir" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
+    sleep 0.5; rm -f "$CLAUDE_CONFIG_DIR/sessions/$$.json"; exit 1;;
+  esac
   case " $FAKE_OK_TOKENS " in *" $tok "*) ok=1;; esac
 fi
 if [ -n "$ok" ]; then
@@ -99,6 +104,7 @@ func failoverStage(t *testing.T, root, okTokens string) (out string) {
 	t.Setenv("FAKE_SESSION_DIR", "")
 	t.Setenv("FAKE_FAIL_TOKENS", "")
 	t.Setenv("FAKE_WRITE_FAIL_TOKENS", "")
+	t.Setenv("FAKE_RUN_FAIL_TOKENS", "")
 	t.Setenv("FAKE_IGNORE_TERM", "")
 	t.Setenv("FAKE_RESETS", strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10))
 	return out
@@ -349,10 +355,31 @@ func TestFailoverWayBackFailsToo(t *testing.T) {
 	msg := captureStderr(t, func() {
 		err = runRun(nil, []string{"--env", "FAKE_SECRETISH=do-not-print", "--account", "acc-a", "alpha"})
 	})
-	want := "cd " + work + " && cpb run '--env=FAKE_SECRETISH=<your value>' --account acc-a alpha --resume " + failSID + " --model claude-opus-5-5"
+	want := "cd " + work + " && cpb run --playbooks-dir " + shellWord(config.ResolvePlaybooksDir()) + " '--env=FAKE_SECRETISH=<your value>' --account acc-a alpha --resume " + failSID + " --model claude-opus-5-5"
 	if err == nil || len(standInRuns(t, out)) != 0 || strings.Contains(msg, "stayed on") || strings.Contains(msg, "do-not-print") ||
 		!strings.Contains(msg, "nor be resumed on acc-a: nothing runs it now") || !strings.Contains(msg, "to resume it by hand:\n  "+want+"\n") {
 		t.Fatalf("err %v\n%s\nwant %s", err, msg, want)
+	}
+	// No claude ran after the switch: the catch lasted until cpb run
+	// returned, and ends there.
+	if handoverSigs != nil {
+		t.Fatal("Ctrl-C is still caught after cpb run returned")
+	}
+}
+
+// A way back whose claude ran and then ended with an error is reported as
+// any launch: the session stayed on the old account; no by-hand line.
+func TestFailoverWayBackRanThenFailed(t *testing.T) {
+	_, out := failoverE2E(t, "")
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("FAKE_FAIL_TOKENS", "tok-b")
+	t.Setenv("FAKE_RUN_FAIL_TOKENS", "tok-a")
+	t.Chdir(work)
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, []string{"--account", "acc-a", "alpha"}) })
+	if err == nil || len(standInRuns(t, out)) != 0 || strings.Contains(msg, "nothing runs it now") || strings.Contains(msg, "by hand") ||
+		!strings.Contains(msg, "could not move from acc-a to acc-b, and stayed on acc-a") {
+		t.Fatalf("err %v\n%s", err, msg)
 	}
 }
 
@@ -432,6 +459,158 @@ func TestFailoverLiveInAnotherProcess(t *testing.T) {
 		if err := w.resumeGuard(failSID, folder, own); err == nil || !strings.Contains(err.Error(), "is live in another process ("+other+")") {
 			t.Errorf("own %d: %v", own, err)
 		}
+	}
+}
+
+// The catch of a switch's Ctrl-C lasts until the next claude has written
+// its session file, not only until the launch's first process starts (a
+// secret helper may run first).
+func TestFailoverHandoverEndsWhenTheSessionFileAppears(t *testing.T) {
+	sandboxDefaultRoot(t)
+	fastFailover(t, 0, time.Minute)
+	c := exec.Command("sleep", "30")
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Process.Kill(); _ = c.Wait() })
+	dir := t.TempDir()
+	w := newFailoverWatch(t, "acc-a", "acc-b")
+	w.configDir = dir
+	catchHandover()
+	t.Cleanup(releaseHandover)
+	handoverClaudeStarted.Store(false)
+	done := make(chan struct{})
+	ended := make(chan *failoverSwitch, 1)
+	go func() { ended <- w.watch(done, c.Process) }()
+	time.Sleep(150 * time.Millisecond)
+	handoverMu.Lock()
+	caught := handoverSigs != nil
+	handoverMu.Unlock()
+	if !caught || handoverClaudeStarted.Load() {
+		t.Fatal("the catch ended before the session file appeared")
+	}
+	writeSessionFile(t, dir, c.Process.Pid, failSID, dir, "interactive", procStartOf(c.Process.Pid), time.Now())
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		handoverMu.Lock()
+		caught = handoverSigs != nil
+		handoverMu.Unlock()
+		if !caught && handoverClaudeStarted.Load() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the catch did not end when the session file appeared")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	close(done)
+	<-ended
+}
+
+// When SIGTERM cannot be sent, the catch it began ends at once.
+func TestFailoverCatchEndsWhenSigtermFails(t *testing.T) {
+	sandboxDefaultRoot(t)
+	c := exec.Command("sleep", "30")
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Process.Kill(); _ = c.Wait() })
+	started := procStartOf(c.Process.Pid)
+	if started == "" {
+		t.Skip("no process start times here")
+	}
+	old := failoverTerm
+	failoverTerm = func(*os.Process, int) error { return errors.New("refused") }
+	t.Cleanup(func() { failoverTerm = old })
+	far := time.Now().Add(3 * time.Hour)
+	dir, transcript, _ := writeWatched(t, failSID, "interactive", "idle", c.Process.Pid, started, far, time.Now(), "seven_day", 1000)
+	fi, _ := os.Stat(transcript)
+	w := newFailoverWatch(t, "acc-a", "acc-b")
+	w.configDir = dir
+	cand := &failoverCandidate{sw: &failoverSwitch{From: "acc-a", To: "acc-b", sessionID: failSID, transcript: transcript, resetsAt: far}, mtime: fi.ModTime(), procStart: started}
+	if w.act(cand, c.Process.Pid, c.Process) || handoverSigs != nil || !strings.Contains(notes(w), "could not end the session") {
+		t.Fatalf("act with a refused SIGTERM: caught %v, notes %v", handoverSigs != nil, w.episode.notes)
+	}
+}
+
+// Claude Code names a project directory per character: one '-' for each
+// that is not an ASCII letter or digit, two for one outside the Basic
+// Multilingual Plane.
+func TestEncodeProjectDirPerCharacter(t *testing.T) {
+	for in, want := range map[string]string{
+		"/a/b-c":         "-a-b-c",
+		"/enc/çx-ü":      "-enc--x--",
+		"/x/\U0001F600y": "-x---y",
+	} {
+		if got := encodeProjectDir(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The pre-check reads a relative --settings file from the launch folder,
+// as the relaunch does, not from the session's folder.
+func TestFailoverPreCheckReadsSettingsFromTheLaunchFolder(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	tokenAccount(t, "acc-a", "a")
+	tokenAccount(t, "acc-b", "b")
+	if err := writeFailoverDefaults(root, failoverDefaults{Failover: "on", Accounts: []string{"acc-b"}}); err != nil {
+		t.Fatal(err)
+	}
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.WriteFile(filepath.Join(work, "s.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(work)
+	pb, err := playbook.Find(root, "alpha")
+	if err != nil || pb == nil {
+		t.Fatal(err)
+	}
+	w, err := failoverWatchFor(failoverWatchInput{pb: pb, configDir: pb.Path, wd: work, from: "acc-a", claudeArgs: []string{"--settings", "s.json"}})
+	if err != nil || w == nil {
+		t.Fatalf("watch: %v %v", w, err)
+	}
+	if err := w.canRunOn("acc-b", t.TempDir()); err != nil {
+		t.Fatalf("checked against the session's folder: %v", err)
+	}
+}
+
+// A relative CPB_PLAYBOOKS_DIR is made absolute before the folder changes.
+func TestPinPlaybooksDirFromTheEnvironment(t *testing.T) {
+	resetCommandTestState(t)
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Chdir(work)
+	t.Setenv(config.PlaybooksDirEnv, "rel/root")
+	pinPlaybooksDir()
+	want := filepath.Join(work, "rel", "root")
+	// Absolute in the environment too, which the launch's processes see.
+	if os.Getenv(config.PlaybooksDirEnv) != want || config.ResolvePlaybooksDir() != want {
+		t.Fatalf("env %q, root %q, want %q", os.Getenv(config.PlaybooksDirEnv), config.ResolvePlaybooksDir(), want)
+	}
+}
+
+// The line said when the new account did not run the session shows a
+// control character in the error as '?'.
+func TestRelaunchFailedLineHasNoControlCharacter(t *testing.T) {
+	line := relaunchFailedLine(&failoverSwitch{From: "acc-a", To: "acc-b"}, errors.New("bad \x1b[31mthing\nmore"))
+	if line != "cpb: could not resume this session on acc-b (bad ?[31mthing); resuming it on acc-a instead\n" {
+		t.Fatalf("%q", line)
+	}
+}
+
+// The by-hand line runs as typed in a POSIX shell: the playbooks root when
+// one was given, no --env value, no inline settings JSON, a control
+// character as an escape, and a word a shell would expand quoted.
+func TestResumeByHand(t *testing.T) {
+	resetCommandTestState(t)
+	config.PlaybooksDir = "/srv/pb"
+	got := resumeByHand("/w/my dir", []string{"--env=K=v", `--settings={"env":{"A":"b"}}`, "--settings", `{"x":1}`, "--account", "a", "alpha",
+		"--resume", sidLive, "--append-system-prompt", "one\ntwo", "=x", "~y"})
+	want := `cd '/w/my dir' && cpb run --playbooks-dir /srv/pb '--env=K=<your value>' '--settings=<your settings JSON>' --settings '<your settings JSON>' --account a alpha --resume ` +
+		sidLive + ` --append-system-prompt $'one\ntwo' '=x' '~y'`
+	if got != want || hasControl(got) {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
 }
 
@@ -727,6 +906,66 @@ func TestFailoverCheck(t *testing.T) {
 		}
 		if calls != 0 || len(w.episode.notes) != 1 || w.handled.Unix() != far.Unix() || !strings.Contains(notes(w), "no start time that matches its process") {
 			t.Fatalf("calls %d, notes %v, handled %v", calls, w.episode.notes, w.handled)
+		}
+	})
+	t.Run("the launch folder before the session file's: two folders, one encoded name", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		base, _ := filepath.EvalSymlinks(t.TempDir())
+		dash, slash := filepath.Join(base, "my-app"), filepath.Join(base, "my", "app")
+		for _, d := range []string{dash, slash} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		dir, transcript, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
+		moveWatched(t, dir, transcript, folder, me, slash, slash, dash)
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir, w.launchDir = dir, dash
+		if c := w.check(me); c == nil || c.sw.folder != dash {
+			t.Fatalf("resumed from: %+v %v", c, w.episode.notes)
+		}
+	})
+	t.Run("a launch through a symlink finds the resolved folder", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		dir, transcript, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(folder, link); err != nil {
+			t.Fatal(err)
+		}
+		moveWatched(t, dir, transcript, folder, me, folder+"/sub", folder+"/sub", folder)
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir, w.launchDir = dir, link
+		if c := w.check(me); c == nil || c.sw.folder != folder {
+			t.Fatalf("resumed from: %+v %v", c, w.episode.notes)
+		}
+	})
+	t.Run("the session file's folder is a candidate", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		dir, transcript, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
+		moveWatched(t, dir, transcript, folder, me, folder, folder+"/sub", folder)
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir, w.launchDir = dir, t.TempDir()
+		if c := w.check(me); c == nil || c.sw.folder != folder {
+			t.Fatalf("resumed from: %+v %v", c, w.episode.notes)
+		}
+	})
+	t.Run("only an absolute folder is a candidate", func(t *testing.T) {
+		fastFailover(t, 0, 30*time.Minute)
+		dir, transcript, folder := writeWatched(t, failSID, "interactive", "idle", me, meStart, far, now, "seven_day", 1000)
+		// The project directory is named for "rel/dir", which only a
+		// relative cwd in the transcript spells.
+		moved := moveWatched(t, dir, transcript, folder, me, folder+"/sub", "rel/dir", folder)
+		named := filepath.Join(dir, "projects", encodeProjectDir("rel/dir"))
+		if err := os.MkdirAll(named, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(moved, filepath.Join(named, filepath.Base(moved))); err != nil {
+			t.Fatal(err)
+		}
+		w := newFailoverWatch(t, "acc-a", "acc-b")
+		w.configDir, w.launchDir = dir, t.TempDir()
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), "is not known") {
+			t.Fatalf("a relative folder: %+v %v", c, w.episode.notes)
 		}
 	})
 	t.Run("each account once per episode", func(t *testing.T) {
@@ -1033,8 +1272,8 @@ func TestResumeClaudeArgs(t *testing.T) {
 	// The resume runs from another folder: a settings file's path is made
 	// absolute against this one; JSON stays as it is.
 	here, _ := os.Getwd()
-	got = resumeClaudeArgs([]string{"--settings", "s.json", "--settings={\"a\":1}", "--settings=t.json"}, &failoverSwitch{sessionID: sidLive, noPrompt: true})
-	want = []string{"--resume", sidLive, "--settings", filepath.Join(here, "s.json"), `--settings={"a":1}`, "--settings=" + filepath.Join(here, "t.json")}
+	got = resumeClaudeArgs([]string{"--settings", "s.json", "--settings={\"a\":1}", "--settings=t.json", "--settings=~/u.json"}, &failoverSwitch{sessionID: sidLive, noPrompt: true})
+	want = []string{"--resume", sidLive, "--settings", filepath.Join(here, "s.json"), `--settings={"a":1}`, "--settings=" + filepath.Join(here, "t.json"), "--settings=~/u.json"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("settings: %q", got)
 	}
@@ -1110,5 +1349,49 @@ func TestFailoverConfigPrecedence(t *testing.T) {
 	}
 	if err := checkFailoverAccounts(root, []string{"nope"}, nil); err == nil {
 		t.Fatal("an unknown account was accepted")
+	}
+}
+
+// A session that ran in a folder with a non-ASCII name is found under the
+// project directory Claude Code names for it, so a resume from there is
+// not refused as one from another folder.
+func TestTranscriptHereNonASCIIFolder(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	folder := filepath.Join(base, "çx")
+	if err := os.Mkdir(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configDir := t.TempDir()
+	// Claude Code's name for <base>/çx: <base>'s, then '-' for '/', '-'
+	// for 'ç', then 'x'.
+	dir := filepath.Join(configDir, "projects", encodeProjectDir(base)+"--x")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, failSID+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !transcriptHere(configDir, folder, failSID) {
+		t.Fatal("the session's transcript is not found from its own folder")
+	}
+}
+
+// A launch with a watcher does not end the catch when its first process
+// starts (a secret helper may run first): only the session file does.
+func TestFailoverHandoverOutlivesAHelperStart(t *testing.T) {
+	sandboxDefaultRoot(t)
+	fastFailover(t, 0, time.Minute)
+	w := newFailoverWatch(t, "acc-a", "acc-b")
+	w.configDir = t.TempDir()
+	catchHandover()
+	t.Cleanup(releaseHandover)
+	if err := runRecorded(exec.Command("sleep", "0.2"), nil, w); err != nil {
+		t.Fatal(err)
+	}
+	handoverMu.Lock()
+	caught := handoverSigs != nil
+	handoverMu.Unlock()
+	if !caught {
+		t.Fatal("the catch ended when the launch's first process started")
 	}
 }

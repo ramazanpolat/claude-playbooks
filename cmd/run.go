@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -65,8 +66,11 @@ func runRecorded(c *exec.Cmd, rec *launchRecord, watch *failoverWatch) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
-	// The next claude of a switch has started: a Ctrl-C is its own again.
-	releaseHandover()
+	// Without a watcher to see the next claude's session file, the launch's
+	// start ends the catch of a switch's Ctrl-C.
+	if watch == nil {
+		releaseHandover()
+	}
 	// A token run stays live for as long as this session does, even if
 	// cpb is killed first (internal/auth/own_login.go).
 	auth.SessionStarted(c.Process.Pid)
@@ -108,10 +112,11 @@ func (r *failoverRelaunch) Error() string { return r.sw.Error() }
 
 // runRun launches a playbook, and launches it again on another account
 // each time its session moves there (account failover). The resume runs
-// from the folder the session ran in. A launch on the new account that
-// never ran the session (refused, or its secret helper failing before
-// claude starts: the transcript is as it was) resumes the session on the
-// account it came from instead, so a switch never leaves it ended.
+// from the session's own folder. A launch on the new account that never
+// ran the session (refused, or its secret helper failing before claude
+// starts: the transcript is as it was) resumes the session on the account
+// it came from instead; when that does not run it either, cpb says nothing
+// runs the session and how to resume it by hand.
 func runRun(cmd *cobra.Command, args []string) error {
 	// A Ctrl-C between two claudes of a switch is caught (handoverSigs in
 	// failover.go); cpb run stops catching it when it returns, whatever
@@ -130,21 +135,32 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if sw.folder != "" {
 			_ = os.Chdir(sw.folder)
 		}
-		failoverHandover = sw
+		failoverHandover, failoverBack = sw, false
+		handoverClaudeStarted.Store(false)
 		err = runRunOnce(cmd, rl.args)
 		var again *failoverRelaunch
 		if !errors.As(err, &again) && sw.notRun(err) {
 			sw.Outcome = "failed"
-			fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, printable(firstLine(err.Error())), sw.From)
+			fmt.Fprint(os.Stderr, relaunchFailedLine(sw, err))
+			failoverBack = true
+			handoverClaudeStarted.Store(false)
 			err = runRunOnce(cmd, rl.back)
-			if !errors.As(err, &again) && sw.notRun(err) {
+			// A way back whose claude ran and then ended with an error
+			// reported as any launch does; one that never ran is stranded.
+			if !errors.As(err, &again) && sw.notRun(err) && !handoverClaudeStarted.Load() {
 				sw.stranded = true
 				printFailoverSummary()
 				fmt.Fprintf(os.Stderr, "cpb: could not resume it on %s either (%s); to resume it by hand:\n  %s\n", sw.From, printable(firstLine(err.Error())), resumeByHand(sw.folder, rl.back))
 			}
 		}
-		failoverHandover = nil
+		failoverHandover, failoverBack = nil, false
 	}
+}
+
+// relaunchFailedLine is what cpb says when the launch on the new account
+// did not run the session, its error shown with control characters as '?'.
+func relaunchFailedLine(sw *failoverSwitch, err error) string {
+	return fmt.Sprintf("cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, printable(firstLine(err.Error())), sw.From)
 }
 
 // pinPlaybooksDir makes a relative playbooks root absolute before a
@@ -159,14 +175,24 @@ func pinPlaybooksDir() {
 }
 
 // resumeByHand is the command line that resumes a session with args from
-// folder, quoted for a POSIX shell. An --env value is not shown: it may be
-// a credential.
+// folder, quoted for a POSIX shell. An --env value and an inline --settings
+// JSON are not shown: they may hold a credential.
 func resumeByHand(folder string, args []string) string {
 	words := []string{"cpb", "run"}
-	for _, a := range args {
+	if config.PlaybooksDir != "" || os.Getenv(config.PlaybooksDirEnv) != "" {
+		words = append(words, "--playbooks-dir", shellWord(config.ResolvePlaybooksDir()))
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		if v, ok := strings.CutPrefix(a, "--env="); ok {
 			k, _, _ := strings.Cut(v, "=")
 			a = "--env=" + k + "=<your value>"
+		} else if v, ok := strings.CutPrefix(a, "--settings="); ok && strings.HasPrefix(strings.TrimSpace(v), "{") {
+			a = "--settings=<your settings JSON>"
+		} else if a == "--settings" && i+1 < len(args) && strings.HasPrefix(strings.TrimSpace(args[i+1]), "{") {
+			words = append(words, a, shellWord("<your settings JSON>"))
+			i++
+			continue
 		}
 		words = append(words, shellWord(a))
 	}
@@ -174,15 +200,41 @@ func resumeByHand(folder string, args []string) string {
 	if folder != "" {
 		line = "cd " + shellWord(folder) + " && " + line
 	}
-	return printable(line)
+	return line
 }
 
-// shellWord is s as one word for a POSIX shell.
+// shellWord is s as one word for a POSIX shell: as it is when it is plain;
+// in single quotes otherwise; with ANSI-C quoting ($'...') when it holds a
+// control character, so the line holds none.
 func shellWord(s string) string {
-	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+	plain := s != "" && s[0] != '=' && s[0] != '~' && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@%+,", r))
-	}) < 0 {
+	}) < 0
+	switch {
+	case plain:
 		return s
+	case hasControl(s):
+		var b strings.Builder
+		b.WriteString("$'")
+		for _, r := range s {
+			switch {
+			case r == '\\' || r == '\'':
+				b.WriteByte('\\')
+				b.WriteRune(r)
+			case r == '\n':
+				b.WriteString(`\n`)
+			case r == '\t':
+				b.WriteString(`\t`)
+			case unicode.IsControl(r) && r < 0x100:
+				fmt.Fprintf(&b, `\x%02x`, r)
+			case unicode.IsControl(r):
+				fmt.Fprintf(&b, `\u%04x`, r)
+			default:
+				b.WriteRune(r)
+			}
+		}
+		b.WriteByte('\'')
+		return b.String()
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -517,10 +569,9 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 			&failoverSwitch{From: sw.To, To: sw.From, sessionID: sw.sessionID, model: sw.model, folder: sw.folder, noPrompt: true})}
 	}
 	err = preserveExitCode(err)
-	if h := failoverHandover; h != nil && h.notRun(err) {
-		// The launch on the new account never ran the session: runRun
-		// resumes it on the account it came from, and that launch's end
-		// reports the switch as not made.
+	if h := failoverHandover; h != nil && h.notRun(err) && !(failoverBack && handoverClaudeStarted.Load()) {
+		// The launch never ran the session: runRun goes on (back to the
+		// account it came from, or says nothing runs it) and reports.
 		return err
 	}
 	printFailoverSummary()
