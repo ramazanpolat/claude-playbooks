@@ -664,3 +664,222 @@ func TestUpdateDryRunComparesTheFiles(t *testing.T) {
 		t.Fatalf("a mode:\n%s", out)
 	}
 }
+
+// dryRunUpdate is pb's --dry-run output.
+func dryRunUpdate(t *testing.T) string {
+	t.Helper()
+	var out strings.Builder
+	if err := runPlaybookUpdate(&out, "pb", updateOpts{dryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// A git source keeps a link inside it as a link, and the overlay writes
+// the file or folder it names: right after an update the dry run finds
+// nothing to replace.
+func TestUpdateDryRunComparesLinksAsTheOverlayWritesThem(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	repo := filepath.Join(root, "repo")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	for _, d := range []string{filepath.Join(repo, "shared"), installed} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manifest.Write(repo, &manifest.Manifest{Version: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	for rel, body := range map[string]string{"CLAUDE.md": "v1\n", "shared/rules.md": "rules\n"} {
+		if err := os.WriteFile(filepath.Join(repo, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{"AGENTS.md": "CLAUDE.md", "rules": "shared"} {
+		if err := os.Symlink(target, filepath.Join(repo, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := manifest.Write(installed, &manifest.Manifest{Version: "1.0.0", Source: &manifest.Source{Repository: "file://" + repo}}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "AGENTS.md (new)") || !strings.Contains(out, "rules/ (new)") {
+		t.Fatalf("before the update:\n%s", out)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	// The overlay wrote the link to a file as a file, the one to a folder
+	// as a folder.
+	if fi, err := os.Lstat(filepath.Join(installed, "AGENTS.md")); err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("AGENTS.md: %v %v", fi, err)
+	}
+	if fi, err := os.Lstat(filepath.Join(installed, "rules")); err != nil || !fi.IsDir() {
+		t.Fatalf("rules: %v %v", fi, err)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing (the source's files are the installed ones)") || !strings.Contains(out, "  up to date\n") {
+		t.Fatalf("after the update:\n%s", out)
+	}
+	// .git counts by the commit it holds: another one, with the same files.
+	cmd := exec.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "next")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  .git/ (changed)\n") || !strings.Contains(out, "same version, other files") {
+		t.Fatalf("another commit:\n%s", out)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("after the second update:\n%s", out)
+	}
+}
+
+// gitHead reads the commit HEAD names from the files of a .git folder.
+func TestGitHead(t *testing.T) {
+	const a = "0123456789abcdef0123456789abcdef01234567"
+	const b = "89abcdef0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{"a loose ref", map[string]string{"HEAD": "ref: refs/heads/main\n", "refs/heads/main": a + "\n"}, a},
+		{"packed-refs", map[string]string{"HEAD": "ref: refs/heads/main\n", "packed-refs": "# pack-refs with: peeled\n" + b + " refs/heads/other\n" + a + " refs/heads/main\n"}, a},
+		{"detached", map[string]string{"HEAD": b + "\n"}, b},
+		{"no ref", map[string]string{"HEAD": "ref: refs/heads/main\n"}, ""},
+		{"a ref out of the folder", map[string]string{"HEAD": "ref: refs/../../HEAD\n", "../HEAD": a + "\n"}, ""},
+		{"not a ref", map[string]string{"HEAD": "ref: HEAD\n"}, ""},
+		{"not an id", map[string]string{"HEAD": "ref: refs/heads/main\n", "refs/heads/main": "main\n"}, ""},
+		{"no HEAD", map[string]string{}, ""},
+	} {
+		dir := filepath.Join(t.TempDir(), ".git")
+		for rel, body := range tc.files {
+			path := filepath.Join(dir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := gitHead(dir); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A folder's mode counts, since the overlay writes each folder with the
+// source's mode; the manifest's counts as the update leaves it: the
+// installed manifest's mode masked by the source's.
+func TestUpdateDryRunComparesFolderAndManifestModes(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	source := filepath.Join(filepath.Dir(config.PlaybooksDir), "source")
+	mode := func(rel string) os.FileMode {
+		t.Helper()
+		fi, err := os.Stat(filepath.Join(installed, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fi.Mode().Perm()
+	}
+	chmod := func(path string, m os.FileMode) {
+		t.Helper()
+		if err := os.Chmod(path, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	update := func() {
+		t.Helper()
+		if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nothing := func(what string) {
+		t.Helper()
+		if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") || !strings.Contains(out, "  up to date\n") {
+			t.Fatalf("%s:\n%s", what, out)
+		}
+	}
+	update()
+	nothing("after the first update")
+
+	// A folder with the same entries and another mode.
+	chmod(filepath.Join(source, "migrations"), 0o700)
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  migrations/ (changed)\n") || strings.Contains(out, "up to date") {
+		t.Fatalf("a folder's mode:\n%s", out)
+	}
+	update()
+	if m := mode("migrations"); m != 0o700 {
+		t.Fatalf("the update left migrations/ at %o", m)
+	}
+	nothing("after the folder's update")
+
+	// An installed 0644 manifest and a 0600 one in the source: the update
+	// tightens the installed one.
+	chmod(filepath.Join(installed, manifest.FileName), 0o644)
+	chmod(filepath.Join(source, manifest.FileName), 0o600)
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  .playbook (changed)\n") || !strings.Contains(out, "same version, other files") {
+		t.Fatalf("a tighter manifest in the source:\n%s", out)
+	}
+	update()
+	if m := mode(manifest.FileName); m != 0o600 {
+		t.Fatalf("the update left the manifest at %o", m)
+	}
+	nothing("after the manifest's update")
+
+	// The reverse: an installed 0600 manifest stays 0600 against a 0644 one.
+	chmod(filepath.Join(source, manifest.FileName), 0o644)
+	nothing("a looser manifest in the source")
+	update()
+	if m := mode(manifest.FileName); m != 0o600 {
+		t.Fatalf("the update loosened the manifest to %o", m)
+	}
+}
+
+// The dry run reads the install's manifest again once the source is
+// staged, under the registry lock, as the update does: a change made
+// while staging ran is what it compares with, and an install re-sourced
+// meanwhile stops it as it stops the update.
+func TestUpdateDryRunReadsTheManifestAfterStaging(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { updateStaged = func() {} })
+	alter := func(change func(m *manifest.Manifest)) {
+		updateStaged = func() {
+			m, err := manifest.Read(installed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			change(m)
+			if err := manifest.Write(installed, m); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// An install-local field set while staging ran: the update keeps it,
+	// so the manifest is not one it would replace.
+	alter(func(m *manifest.Manifest) { m.LabelVars = []string{"TERM_PROGRAM"} })
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") || !strings.Contains(out, "  up to date\n") {
+		t.Fatalf("a field set while staging ran:\n%s", out)
+	}
+	// Re-sourced while staging ran.
+	alter(func(m *manifest.Manifest) { m.Source.Branch = "other" })
+	err := runPlaybookUpdate(io.Discard, "pb", updateOpts{dryRun: true})
+	if err == nil || !strings.Contains(err.Error(), "changed while the update was staging") {
+		t.Fatalf("re-sourced: %v", err)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -100,6 +101,11 @@ type updateOpts struct {
 // both ends. A variable for tests.
 var updateAsks = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) }
 
+// updateStaged runs once the source is staged, which happens without the
+// registry lock: a test changes the install there, as a statement run
+// meanwhile could.
+var updateStaged = func() {}
+
 func runUpdate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	pb, err := playbook.Require(config.ResolvePlaybooksDir(), name)
@@ -184,6 +190,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	if err := stripSourceRuntime(work, pb.Manifest.Source.Repository); err != nil {
 		return err
 	}
+	updateStaged()
 
 	stagedManifest, err := manifest.Read(work)
 	if err != nil {
@@ -205,12 +212,35 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	}
 
 	if o.dryRun {
-		// What the overlay would replace: the staged tree as the update
-		// would put it live (the manifest assembled as below, in the
-		// staging directory, which is removed after), entry by entry.
-		changes, cerr := []string(nil), manifest.Write(work, assembleUpdatedManifest(stagedManifest, pb.Manifest, root))
+		// What the overlay would replace: the live manifest read again under
+		// the registry lock, as the update reads it; the manifest assembled,
+		// and its mode set, as the update does, in the staging directory;
+		// then the staged tree copied as the overlay copies it into a
+		// scratch folder (a link inside the source becomes the file or
+		// folder it names, each folder and file takes the source's mode),
+		// and that copy compared with the install, entry by entry. Both
+		// folders are removed after.
+		unlock, lerr := lockRegistry()
+		if lerr != nil {
+			return lerr
+		}
+		live, err := liveForActivation(name, root, rootInfo, pb.Manifest.Source)
+		var cerr error
+		if err == nil {
+			_, cerr = prepareUpdatedManifest(work, root, stagedManifest, live)
+		}
+		unlock()
+		if err != nil {
+			return err
+		}
+		var changes []string
 		if cerr == nil {
-			changes, cerr = updateChanges(work, root, preserve)
+			var view string
+			var removeView func()
+			if view, removeView, cerr = overlayView(work); cerr == nil {
+				changes, cerr = updateChanges(view, root, preserve)
+				removeView()
+			}
 		}
 		fmt.Fprintf(w, "%s\n", name)
 		fmt.Fprintf(w, "  installed: %s\n", displayVersion(fromVersion))
@@ -264,49 +294,13 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	var once sync.Once
 	unlock := func() { once.Do(lockedUnlock) }
 	defer unlock()
-	liveManifest, err := manifest.Read(root)
+	liveManifest, err := liveForActivation(name, root, rootInfo, pb.Manifest.Source)
 	if err != nil {
-		return fmt.Errorf("cannot re-read manifest before activation: %w", err)
+		return err
 	}
-	// Bind activation to the exact installation we inspected: the DIRECTORY
-	// must be the same filesystem object as before staging (a delete +
-	// reinstall from the very same repository passes any manifest comparison),
-	// and every source field must match. Anything else means the playbook was
-	// deleted, re-created, or re-sourced while staging ran.
-	liveInfo, lierr := os.Lstat(root)
-	if lierr != nil || !os.SameFile(rootInfo, liveInfo) ||
-		liveManifest == nil || liveManifest.Source == nil ||
-		*liveManifest.Source != *pb.Manifest.Source {
-		return fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update", name)
-	}
-
-	// The manifest that goes live is assembled in the STAGED tree before the
-	// overlay, never corrected in place afterwards: the overlay copies the
-	// staged .playbook over the live one, launches do not take the registry
-	// lock, and a source-shipped [env] block that was live even briefly --
-	// or permanently, had a later rewrite failed -- could redirect the
-	// install's endpoint or strip its authentication. Install-local fields
-	// (alias, isolation, the model_picker_defaults opt-out, failover,
-	// label_vars, source, [env],
-	// and the [mcp] and [skills] records
-	// statements keep) come from the live manifest; the
-	// install's name is its directory name (this also heals installs whose
-	// manifest predates name rewriting).
-	updated := assembleUpdatedManifest(stagedManifest, liveManifest, root)
-	if err := manifest.Write(work, updated); err != nil {
+	updated, err := prepareUpdatedManifest(work, root, stagedManifest, liveManifest)
+	if err != nil {
 		return fmt.Errorf("failed to prepare updated manifest: %w", err)
-	}
-	// Manifest.Write's never-loosen rule looked at the STAGED file's mode;
-	// the overlay is about to replace the live file with it, so the staged
-	// copy takes the live file's mode masked by its own -- never looser
-	// than either, whatever the pilot had chosen.
-	if live, err := os.Stat(filepath.Join(root, manifest.FileName)); err == nil {
-		staged := filepath.Join(work, manifest.FileName)
-		if info, err := os.Stat(staged); err == nil {
-			if err := os.Chmod(staged, live.Mode().Perm()&info.Mode().Perm()); err != nil {
-				return fmt.Errorf("failed to prepare updated manifest: %w", err)
-			}
-		}
 	}
 
 	fmt.Fprintf(w, "Updating %s from %s...\n", name, redactSourceURL(pb.Manifest.Source.Repository))
@@ -387,18 +381,88 @@ func assembleUpdatedManifest(staged, live *manifest.Manifest, root string) *mani
 	return updated
 }
 
+// liveForActivation re-reads the install's manifest after staging, with
+// the registry lock held, and binds the update to the exact installation
+// inspected before it: the DIRECTORY must be the same filesystem object
+// (a delete + reinstall from the very same repository passes any manifest
+// comparison), and every source field must match. Anything else means the
+// playbook was deleted, re-created, or re-sourced while staging ran.
+func liveForActivation(name, root string, rootInfo os.FileInfo, source *manifest.Source) (*manifest.Manifest, error) {
+	live, err := manifest.Read(root)
+	if err != nil {
+		return nil, fmt.Errorf("cannot re-read manifest before activation: %w", err)
+	}
+	liveInfo, lierr := os.Lstat(root)
+	if lierr != nil || !os.SameFile(rootInfo, liveInfo) ||
+		live == nil || live.Source == nil || source == nil || *live.Source != *source {
+		return nil, fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update", name)
+	}
+	return live, nil
+}
+
+// prepareUpdatedManifest writes the manifest that goes live into the
+// staged tree work, with the mode it will have in root, and returns it.
+//
+// The manifest is assembled in the STAGED tree before the overlay, never
+// corrected in place afterwards: the overlay copies the staged .playbook
+// over the live one, launches do not take the registry lock, and a
+// source-shipped [env] block that was live even briefly -- or permanently,
+// had a later rewrite failed -- could redirect the install's endpoint or
+// strip its authentication. Install-local fields (alias, isolation, the
+// model_picker_defaults opt-out, failover, label_vars, source, [env], and
+// the [mcp] and [skills] records statements keep) come from the live
+// manifest; the install's name is its directory name (this also heals
+// installs whose manifest predates name rewriting).
+//
+// Manifest.Write's never-loosen rule looks at the STAGED file's mode; the
+// overlay replaces the live file with it, so the staged copy takes the
+// live file's mode masked by its own -- never looser than either, whatever
+// the pilot had chosen.
+func prepareUpdatedManifest(work, root string, staged, live *manifest.Manifest) (*manifest.Manifest, error) {
+	updated := assembleUpdatedManifest(staged, live, root)
+	if err := manifest.Write(work, updated); err != nil {
+		return nil, err
+	}
+	if live, err := os.Stat(filepath.Join(root, manifest.FileName)); err == nil {
+		path := filepath.Join(work, manifest.FileName)
+		if info, err := os.Stat(path); err == nil {
+			if err := os.Chmod(path, live.Mode().Perm()&info.Mode().Perm()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return updated, nil
+}
+
+// overlayView copies the staged tree work into a new scratch folder as the
+// overlay copies it into an install (overlayDir): what the update would
+// leave in place of each entry it replaces. The function removes it.
+func overlayView(work string) (string, func(), error) {
+	view, err := os.MkdirTemp("", "cpb-update-view-")
+	if err != nil {
+		return "", func() {}, err
+	}
+	remove := func() { os.RemoveAll(view) }
+	if err := overlayDir(work, view); err != nil {
+		remove()
+		return "", func() {}, err
+	}
+	return view, remove, nil
+}
+
 // updateChanges is what an update would replace in root: each top-level
-// entry of the staged tree work that is not yet in root ("new") or differs
-// from root's ("changed": its type, a file's bytes or mode, a link's
-// target, or a folder's entries, the install's own extra entries counting,
-// since the overlay replaces the folder whole). The preserved paths are
+// entry of view, the staged tree as the overlay would write it
+// (overlayView), that is not yet in root ("new") or differs from root's
+// ("changed": its type, a file's bytes or mode, a folder's mode or
+// entries, the install's own extra entries counting, since the overlay
+// replaces the folder whole, or a link's target). The preserved paths are
 // left out on both sides: the update puts them back.
-func updateChanges(work, root string, preserve []string) ([]string, error) {
+func updateChanges(view, root string, preserve []string) ([]string, error) {
 	skip := map[string]bool{}
 	for _, p := range preserve {
 		skip[filepath.ToSlash(p)] = true
 	}
-	entries, err := os.ReadDir(work)
+	entries, err := os.ReadDir(view)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +482,7 @@ func updateChanges(work, root string, preserve []string) ([]string, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		same, err := sameTree(filepath.Join(work, rel), filepath.Join(root, rel), rel, skip)
+		same, err := sameTree(filepath.Join(view, rel), filepath.Join(root, rel), rel, skip)
 		if err != nil {
 			return nil, err
 		}
@@ -429,8 +493,8 @@ func updateChanges(work, root string, preserve []string) ([]string, error) {
 	return out, nil
 }
 
-// sameTree reports whether a (staged) and b (installed) are the same at
-// rel, the paths in skip left out.
+// sameTree reports whether a (as the overlay writes it) and b (installed)
+// are the same at rel, the paths in skip left out.
 func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
 	ai, err := os.Lstat(a)
 	if errors.Is(err, os.ErrNotExist) {
@@ -456,6 +520,17 @@ func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
 		lb, err := os.Readlink(b)
 		return err == nil && la == lb, err
 	case ai.IsDir():
+		// The overlay makes each folder it writes with the source's mode.
+		if ai.Mode().Perm() != bi.Mode().Perm() {
+			return false, nil
+		}
+		// A git source's .git is a fresh clone's on every update: its
+		// bookkeeping differs each time, the commit it holds need not.
+		if rel == ".git" {
+			if ha, hb := gitHead(a), gitHead(b); ha != "" && hb != "" {
+				return ha == hb, nil
+			}
+		}
 		names := map[string]bool{}
 		for _, dir := range []string{a, b} {
 			ents, err := os.ReadDir(dir)
@@ -478,8 +553,8 @@ func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
 		}
 		return true, nil
 	case ai.Mode().IsRegular():
-		// The manifest's mode is the installed one's after an update.
-		if ai.Size() != bi.Size() || (rel != manifest.FileName && ai.Mode().Perm() != bi.Mode().Perm()) {
+		// The manifest's mode is the one prepareUpdatedManifest gave it.
+		if ai.Size() != bi.Size() || ai.Mode().Perm() != bi.Mode().Perm() {
 			return false, nil
 		}
 		ab, err := os.ReadFile(a)
@@ -491,6 +566,48 @@ func sameTree(a, b, rel string, skip map[string]bool) (bool, error) {
 	}
 	return false, nil
 }
+
+// gitHead is the commit a .git folder's HEAD names, read from its files
+// (HEAD, then the loose ref or packed-refs line it points to) without
+// running git in the install; "" when it cannot tell.
+func gitHead(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, "HEAD"))
+	if err != nil {
+		return ""
+	}
+	head := strings.TrimSpace(string(b))
+	ref, isRef := strings.CutPrefix(head, "ref: ")
+	if !isRef {
+		if gitObjectID.MatchString(head) {
+			return head
+		}
+		return ""
+	}
+	if !gitRefName.MatchString(ref) || strings.Contains(ref, "..") {
+		return ""
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(ref))); err == nil {
+		if id := strings.TrimSpace(string(b)); gitObjectID.MatchString(id) {
+			return id
+		}
+		return ""
+	}
+	packed, err := os.ReadFile(filepath.Join(dir, "packed-refs"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(packed), "\n") {
+		if id, name, ok := strings.Cut(strings.TrimSpace(line), " "); ok && name == ref && gitObjectID.MatchString(id) {
+			return id
+		}
+	}
+	return ""
+}
+
+var (
+	gitObjectID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+	gitRefName  = regexp.MustCompile(`^refs/[A-Za-z0-9._/-]{1,200}$`)
+)
 
 // overlaySource replaces root's copy of every top-level entry the staged
 // source provides, then restores the preserved local files over the top.

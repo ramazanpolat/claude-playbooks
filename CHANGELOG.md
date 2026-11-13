@@ -79,9 +79,11 @@
   sent over ssh carries the values.
 - **`cpb update <name> --dry-run` compares the files.** Next to the
   versions it lists what the update would replace, each top-level entry
-  the source ships that is new or differs from the install's (preserved
-  files left out, the manifest compared as the update would write it). It
-  says `up to date` only when the versions match and nothing would be
+  the source ships that is new or differs from the install's, as the
+  update would write it: a link inside the source as the file or folder
+  it names, folder and file modes, the manifest assembled with its mode,
+  a `.git` folder by the commit it holds; preserved files are left out.
+  It says `up to date` only when the versions match and nothing would be
   replaced; the same version with other files says so.
 
 ### Fixed
