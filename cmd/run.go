@@ -607,7 +607,7 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 	}
 	err = preserveExitCode(err)
 	if err != nil {
-		fmt.Fprint(os.Stderr, unresolvedAccountLine(acct, plan))
+		fmt.Fprint(os.Stderr, unresolvedAccountLine(acct, plan, withPlaybooksRoot(launchEnv)))
 	}
 	if h := failoverHandover; h != nil && h.notRun(err) && !(failoverBack && handoverClaudeStarted.Load()) {
 		// The launch never ran the session: runRun goes on (back to the

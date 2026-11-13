@@ -121,4 +121,19 @@ func TestUnresolvedAccountReferenceLine(t *testing.T) {
 	if !strings.Contains(last, "account remote's auth_token (a file: reference)") || strings.Contains(last, "on this machine") {
 		t.Fatalf("cpb's line for a remote address:\n%s", out)
 	}
+
+	// The check sees the launch's environment, not cpb's own: a layer that
+	// moves the helper's store to a folder without the token gets the line,
+	// though cpb's own environment still points at one that has it.
+	if err := os.WriteFile(tok, []byte("placeholder-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := t.TempDir()
+	out = captureStderr(t, func() { err = runRun(nil, []string{"--env", "HELPER_DIR=" + elsewhere, "local", "--version"}) })
+	if err == nil {
+		t.Fatal("a launch whose helper store has no token succeeded")
+	}
+	if !strings.Contains(lastLine(out), "account local's auth_token (a file: reference)") {
+		t.Fatalf("the check did not use the launch's environment:\n%s", out)
+	}
 }

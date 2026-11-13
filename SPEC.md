@@ -614,7 +614,8 @@ reference and in the playbook, env-set and account files that hold one).
   call, and none may be built. A non-zero exit before `claude` starts means
   cpb did not launch, and the helper's message says why. Since v4.9.0, when
   a host launch through the helper ends with an error, cpb then checks each
-  of the account's own references (`--check`, its output not shown); for the
+  of the account's own references (`--check`, in the environment the launch
+  gave the helper, its output not shown); for the
   first that does not resolve it adds a last line naming the account, the
   key (`auth_token`, `api_key`, `claude_token`, or `header <Name>`) and the
   reference's scheme, never a value. When the account's `base_url` is on

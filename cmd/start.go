@@ -301,7 +301,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	runErr := runRecorded(c, rec, nil)
 	if runErr != nil {
-		fmt.Fprint(os.Stderr, unresolvedAccountLine(acct, plan))
+		fmt.Fprint(os.Stderr, unresolvedAccountLine(acct, plan, withPlaybooksRoot(launchEnv)))
 	}
 
 	if deleteAfter {

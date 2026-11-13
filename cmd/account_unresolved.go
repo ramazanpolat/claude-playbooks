@@ -16,15 +16,18 @@ import (
 // it adds that the server behind it may not be running, since a local
 // server may make the very secret the account reads. It is printed after
 // the helper's own message, so it is the line read last. A launch that
-// succeeded is never checked; "" when there is nothing to say.
-func unresolvedAccountLine(acct *accountLaunch, plan *launchPlan) string {
+// succeeded is never checked; "" when there is nothing to say. env is the
+// environment the launch passed to launchPlan.command: the check sees what
+// the launch's helper saw (a store location a layer sets, say).
+func unresolvedAccountLine(acct *accountLaunch, plan *launchPlan, env []string) string {
 	if acct == nil || plan == nil || plan.helper == "" || acct.sel.Account == nil || acct.rendered.Layer == nil {
 		return ""
 	}
 	x := helperExe{path: plan.helper, pre: plan.helperPre, def: plan.def}
+	env = withoutKeys(withoutPrefix(env, account.HeaderVarPrefix), sortedKeys(plan.refs))
 	for _, key := range sortedKeys(acct.rendered.Layer.Refs) {
 		ref := acct.rendered.Layer.Refs[key]
-		if helperCheck(x, key, ref, nil) == nil {
+		if runHelper(x, nil, nil, nil, env, "--check", key+"="+ref) == nil {
 			continue
 		}
 		a := acct.sel.Account
