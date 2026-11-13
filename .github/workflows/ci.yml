@@ -114,6 +114,24 @@ jobs:
       - name: Every clause has a reference entry and an example
         run: examples/coverage.sh
 
+  # Every target a release builds (release.yml) builds here too, so a
+  # change that does not build for one fails its pull request, not the
+  # release.
+  cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Build every release target
+        run: |
+          set -eu
+          for t in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            GOOS="${t%/*}" GOARCH="${t#*/}" go build -o /dev/null .
+            echo "ok: $t"
+          done
+
   # The upgrade from the previous release: that release's binary applies
   # its own examples, then this build takes over the same state and must
   # read it identically (examples/upgrade.sh says what is compared). The
@@ -179,7 +197,8 @@ jobs:
       - name: Query
         run: |
           set -eu
-          export HOME="$(mktemp -d)" CPB_CLICKHOUSE="$RUNNER_TEMP/clickhouse"
+          HOME="$(mktemp -d)"
+          export HOME CPB_CLICKHOUSE="$RUNNER_TEMP/clickhouse"
           cpb="$RUNNER_TEMP/cpb"
           # want <expected> <query>: runs the query, joins its lines with spaces.
           want() {

@@ -1,0 +1,23 @@
+# A launch records usage when its playbook has a status line of its own.
+cpb EXPLAIN PLAYBOOK agent | grep -q "Usage at launch: recorded by cpb's status line step"
+
+# Before any session reports, the account has no figure: not 0.
+cpb SHOW USAGE | grep -E '^work ' | grep -q 'not seen'
+
+# A session renders its status line: the stand-in claude runs the launch's
+# statusLine as Claude Code does. The playbook's own command ran and read
+# the cpb key the step added.
+chmod +x stand-in/claude
+PATH="$PWD/stand-in:$PATH" cpb run agent
+test "$(cat "$HOME/statusline.out")" = work
+
+# The figure, per account; the table and the JSON; the same rows in SELECT.
+cpb SHOW USAGE | grep -E '^work ' | grep -q '26%'
+cpb SHOW USAGE --json | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["account"]=="work"][0]; assert r["state"]=="reported" and r["five_hour"]["used_percentage"]==26 and r["seven_day"]["left_percentage"]==95, r'
+cpb "SELECT account, state FROM USAGE" | grep -q "work"
+
+# The log: one line for the session, under the month it started in, 0600.
+log=$(ls "$HOME"/.claude-playbooks/.state/usage/sessions/*/0e5c1a2b-0000-4000-8000-0000000000a1.jsonl)
+test "$(wc -l < "$log" | tr -d ' ')" = 1
+grep -q '"account":"work"' "$log"
+! grep -q 'placeholder-work-token' "$log"

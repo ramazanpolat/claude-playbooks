@@ -1358,8 +1358,11 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   - is not the one the session runs on, and was not tried in this episode
     (each account at most once, so it never loops);
   - is not known to be at a limit (a live session cpb launched on it shows
-    `at_limit`). Otherwise a refused request costs nothing: the next poll
-    sees the new limit and moves on;
+    `at_limit`, or the latest figure of the allowance it draws on from this
+    playbook is at 100% of a window that has not reset: a Claude login's
+    figure is the login's, `machine` or `playbook:<name>`, as in *SHOW
+    USAGE*). Otherwise a refused request costs nothing: the next
+    poll sees the new limit and moves on;
   - is the same kind as the session's account (a Claude login or token
     sent to Anthropic, or the same provider at the same address: a gateway
     trusted with a Claude login is its own kind), unless listed as
@@ -2032,6 +2035,93 @@ The status line is a table of two properties, `statusline.command` and
 
 Both are settings keys with no CLI.
 
+#### The usage step
+
+(Since v4.8.0.) A launch puts a step of cpb's in front of the playbook's own
+status line, to record what Claude Code's status line input says about
+usage (*SHOW USAGE*). The playbook changes nothing.
+
+- **Which launches.** A host launch (`cpb run`, a launcher, `cpb start`)
+  whose config directory's `settings.json` has a `statusLine` of type
+  `command`. None when:
+  - the launch passes its own `--settings` (Claude Code takes one);
+  - any folder-level file Claude Code reads sets `statusLine`: the working
+    folder's `.claude/settings.json` and `.claude/settings.local.json`, the
+    same at its repository's root, and at the main checkout of a worktree.
+    Claude Code runs a folder's status line only once the folder is trusted,
+    so cpb never copies it into a `--settings` of its own, where it would
+    run at once; those files are read for the key alone, and one that cannot
+    be read means no step;
+  - managed settings set a status line;
+  - the playbook has no status line: the launch adds none.
+  `EXPLAIN PLAYBOOK` says which (`Usage at launch: recorded by cpb's status
+  line step`, or `not recorded (<reason>)`; `--json` `usage_at_launch`).
+  Sandboxed launches have none.
+- **How.** The launch-only `--settings` (the one that carries an account's
+  `apiKeyHelper` and the DEFAULTS model rows) holds the playbook's
+  `statusLine` with its `padding` and `refreshInterval`, and the command
+  `if [ -x '<cpb>' ]; then exec '<cpb>' __statusline --root '<root>' --launch
+  <launch id> -- '<original command>'; fi; exec /bin/sh -c '<original
+  command>'`, the root absolute: with cpb's binary gone (removed while the
+  session runs), the original runs as it is. The status line is fixed for
+  the session's life: an edit to the playbook's status line applies from
+  its next launch. The step reads the input, records it, adds
+  one key, `cpb`, and execs `/bin/sh -c '<original command>'` with the
+  result on its standard input (a pipe, or an unlinked temporary file above
+  8 KiB): the original is the same process from then on, its output, exit
+  code and timeout as without the step. When neither can hold the input
+  (no usable temporary folder), the original runs as the step's child, fed
+  the same input, and the step ends with its exit code (128 plus the
+  signal for one a signal ended; a SIGTERM, SIGINT or SIGHUP to the step
+  goes on to it). The account, its usage key and the rest come from the
+  launch record the id names, never from argv or the session's
+  environment. The step reads no login's identity; it reads stored
+  accounts' `identity` labels, to merge their entries in the `cpb` key.
+- **What it adds: the `cpb` key**, version 1. Names only: never an
+  identity, never a credential.
+
+```
+"cpb": {"v": 1, "account": {"name": "claude-work"},
+  "usage": [{"account": "claude-work", "self": true, "state": "reported",
+             "five_hour": {"used_percentage": 26, "resets_at": 1794511200},
+             "seven_day": {"used_percentage": 5, "resets_at": 1795089600},
+             "seen_at": 1794509234},
+            {"account": "router", "self": false, "state": "not_reported",
+             "five_hour": null, "seven_day": null, "seen_at": null}]}
+```
+
+  - `account.name` is the name of the session's own usage entry (null when
+    cpb has none); `usage` has one entry per usage key, except that
+    stored accounts sharing an `identity` label are one entry. The step
+    reads no login's identity, so `machine` and each `playbook:<name>` are
+    entries of their own even where *SHOW USAGE* shows them as one row.
+    The session's own entry comes first, then the others by name, at most
+    16.
+  - A name is lower case `a-z`, digits and `._:@-`, at most 64 characters:
+    a stored account's name, `machine` (the machine's login),
+    `playbook:<name>` (an isolated playbook's own login), a layer route's
+    name; any other character becomes `-` (`flags:[::1]:8080` is
+    `flags:-::1-:8080`).
+  - `state` is `reported`, `not_seen` or `not_reported`, as in *SHOW
+    USAGE*; `five_hour` and `seven_day` are `{used_percentage, resets_at}`
+    in epoch seconds, `used_percentage` as Claude Code reported it (normally
+    0 to 100, not clamped); a window that has reset keeps its last figure,
+    and null means cpb never had one. `seen_at` is epoch seconds.
+  - A new optional key does not change `v`; a change a reader would notice
+    does. Input that is not one JSON object, or holds a `cpb` key, or any
+    failure, passes through as it came.
+- **When it writes.** No timer: the step runs when Claude Code renders the
+  status line, after replies and on its own refresh. A line is written when
+  the figures, the model, the effort, fast mode or the session's name
+  differ from the session's last line; cost or context alone, at most once a
+  minute. An account's figure is as fresh as the last reply any of its
+  sessions got.
+- **Limits.** The record's lock is taken without waiting (a busy render is
+  skipped), nothing goes over the network, and nothing the step does is
+  printed. A session that moves to another project with `/cd` keeps the
+  playbook's status line, wrapped as at launch. A Claude Code session id
+  of any other shape than its own is recorded nowhere.
+
 ### Model picker
 
 The `/model` picker of a playbook, or of a plain config
@@ -2559,7 +2649,8 @@ what it means, is listed under *DESCRIBE* below.
 | `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play` is the last column) |
 | `ENVS` | env set | the `SHOW ENV` object |
 | `VARS` | variable, per layer, per playbook | one variable of one layer, with its `playbook`, `layer` and `effective` |
-| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty`, then `account` and `at_limit`, are the last columns) |
+| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty`, then `account`, `at_limit` and `account_at_limit`, are the last columns) |
+| `USAGE` | allowance (*SHOW USAGE*) | the `SHOW USAGE --json` object |
 | `DEFAULTS` | (one row) | the `SHOW DEFAULTS` object |
 
 `version_tuple` is `Array(UInt32)`, the numbers of the version's leading
@@ -2683,6 +2774,24 @@ code to the same lines):
 | `tty` | `Nullable(String)` | The process's controlling terminal (pts/3, ttys012); null for none, as for a bg session. |
 | `account` | `Nullable(String)` | The account cpb launched the session on, from its launch record; null for a session cpb did not launch. |
 | `at_limit` | `JSON` | The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped. |
+| `account_at_limit` | `JSON` | The usage limit the session's account is at, from the latest figure its sessions reported: window and resets_at; null when it is not. |
+
+**`USAGE`**
+
+| Column | Type | Comment |
+|---|---|---|
+| `account` | `String` | The allowance's name: an account, machine (the machine's login) or playbook:<name> (a playbook's own login). |
+| `accounts` | `Array(String)` | Every account whose sessions draw on it. |
+| `identity` | `Nullable(String)` | Who the allowance belongs to: the account's identity label, or the e-mail a login records; null when unknown. |
+| `playbooks` | `Array(String)` | The playbooks of the live sessions drawing on it. |
+| `live_sessions` | `UInt32` | The live sessions cpb launched on it. |
+| `sessions_at_limit` | `UInt32` | Those of them whose own turn was refused at a usage limit. |
+| `state` | `String` | reported (a figure is on hand), not_seen (a Claude login or token no session has reported for yet) or not_reported (a credential whose provider reports none). |
+| `five_hour` | `JSON` | The 5-hour window: used_percentage, left_percentage, resets_at, reset; null when no figure was seen. |
+| `seven_day` | `JSON` | The weekly window, as five_hour. |
+| `spend_limit` | `JSON` | A gateway's spend limit, as Claude Code reports it; null when none. |
+| `seen_at` | `Nullable(DateTime64(3, 'UTC'))` | When the figure was seen (UTC); null when none was. |
+| `seen_by` | `JSON` | The session that saw it: session_id and playbook; null when none. |
 
 **`DEFAULTS`**
 
@@ -2735,16 +2844,19 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 **Which account** (since v4.8.0). Claude Code's session file does not say
 which account a session runs on, so a host launch (`cpb run`, a launcher,
 `cpb start`) writes it down itself: once the process it starts is running,
-cpb writes `<playbooks root>/.state/launches/<pid>.json` (mode `0600`, in a
-directory of mode `0700`) and removes it when the launch returns.
+cpb writes `<playbooks root>/.state/launches/<launch id>.json` (mode `0600`,
+in a directory of mode `0700`; a random id made before claude starts, which
+the usage step is given) and removes it when the launch returns.
 - **The record.** One JSON object: `v` (1), `pid` and `proc_start` (the
   process cpb started and its start time, read as for *Live*), `playbook`
   (a directory for `cpb start`), `config_dir`, `account` (the account the
   launch runs on: a stored account's name, `machine`, or a layer route's
   `env:<set>`, `block:<playbook>` or `flags:<host>`), `why` (the reason
-  EXPLAIN gives), `identity` (the account's `identity` label, or null),
+  EXPLAIN gives), `key` (whose allowance it draws on: the account, or `machine`, or
+  `playbook:<name>` for an isolated playbook's own login), `launch_id`,
   `launched_at`, and after an account failover, `switches` (each `from`,
-  `to`, `at`, `window`, `resets_at`, `context_tokens`, `outcome`). No credential, no reference, nothing from the environment.
+  `to`, `at`, `window`, `resets_at`, `context_tokens`, `outcome`). No
+  credential, no reference, nothing from the environment.
 - **Matching.** A session gets the account of the record of its own pid,
   or else of its parent's pid (a secret helper that starts claude as its
   child), and only when that process started when the record says, so a
@@ -2802,6 +2914,7 @@ status otherwise.
 | `tty` | string or null | the process's controlling terminal (`pts/3`, `ttys012`), null for none (a `bg` session). It is read in the same pass as the start time: `/proc/<pid>/stat`'s tty_nr on Linux, `ps`'s tty elsewhere |
 | `account` | string or null | the launch record (since v4.8.0); null for a session cpb did not launch |
 | `at_limit` | object or null | the transcript (since v4.8.0): `{"window": "seven_day", "resets_at": "<RFC 3339, UTC>"}` while the session is at a limit, else null |
+| `account_at_limit` | object or null | the latest figure of the session's allowance (since v4.8.0, *SHOW USAGE*): the same shape, while a window of it is at 100 or more and has not reset; set even when the session itself has not tried since. `STATUS` reads `account limit 7d` when only this is set |
 
 A session's transcript is
 `<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`.
@@ -2879,6 +2992,67 @@ Resume this playbook's session with: kd --resume bfb2d226-403f-46da-8216-e39b2a7
 
 No word is reserved: `SESSIONS` and `FOR` still name playbooks and env
 sets.
+
+## SHOW USAGE
+
+(Since v4.8.0.) How much of each allowance is used, from what the usage step
+(*The usage step*) recorded: one row per real login, so nobody is surprised
+by a usage limit.
+
+```
+SHOW USAGE [FOR ACCOUNT <name>] [--json]
+SELECT … FROM USAGE
+```
+
+- **Rows.** One per allowance: every stored account with a credential of
+  its own, the machine's login (`machine`) and an isolated playbook's own
+  login (`playbook:<name>`) once a session used them, and a layer route a
+  session reported for. Allowances of one identity are one row: an
+  account's `identity` label, or for a login the e-mail its `.claude.json`
+  records, read when the statement runs. The row lists every account and
+  playbook that draws on it. `FOR ACCOUNT` keeps the rows an account feeds.
+- **Figures.** The newest figure any session of the row reported:
+  `five_hour` and `seven_day` with `used_percentage`, `left_percentage`
+  (100 minus used), `resets_at`, and `reset` once that time has passed (the
+  figure stays); `spend_limit` behind a gateway, as Claude Code reports it.
+- **State.** `reported`, `not_seen` (a Claude login or token no session has
+  reported for yet), or `not_reported` (a credential whose provider reports
+  none: a gateway, an API key, a cloud). The table prints `not seen` and
+  `not reported`, never 0.
+- **Sessions.** `live_sessions`, and `sessions_at_limit` (their own turn
+  refused; *SHOW SESSIONS*).
+- **Human form**: `ACCOUNT SESSIONS AT LIMIT 5H USED 5H RESETS 7D USED 7D
+  RESETS SEEN`, an account's other names in parentheses.
+- **`--json`**: an array of `{account, accounts, identity, playbooks,
+  live_sessions, sessions_at_limit, state, five_hour, seven_day,
+  spend_limit, seen_at, seen_by: {session_id, playbook}}`.
+
+**Files.** `<playbooks root>/.state/usage/` (mode `0700`, files `0600`):
+- `sessions/<YYYY-MM>/<session id>.jsonl`, one per session under the month
+  of its first line, append-only: one JSON object per line, version 1, each
+  describing itself: `v`, `at`, `session_id`, `config_dir`, `playbook`,
+  `account`, `key`, `claude_version`, `session_name`, `model`,
+  `effort`, `fast_mode`, `thinking`, `rate_limits` (whole), `cost` (whole),
+  `context_window` (its sizes, totals and percentages), `prompt_cache` (its
+  counts), `project_dir`, `repo`, `git_worktree`, `agent`. Left out: paths
+  the others make redundant, the prompt id, UI state, cache diagnostics.
+  A string is cut at 512 bytes; an object over 2 KiB is left out.
+  No identity: SHOW USAGE reads it when it runs (*Rows*).
+- At 1 MiB a session's file becomes `<id>.1.jsonl` (one older generation).
+- `accounts/<hash of the key>.json`: the latest figure per allowance,
+  replaced whole, written only when a session's figures differ from its
+  own line before (a session re-rendering an old figure never replaces a
+  newer one); for a window that resets at the same time the higher use
+  stands. It is read only from the file its key's hash names, never one
+  seen later than now, with each name checked as a launch writes it, use
+  bounded to 0-1000% and a reset to its seen time plus the window's
+  length. A stored figure that claims a seen time later than now is
+  replaced by the next real one, and a window of the stored figure that
+  resets later than the new one's is kept. `DROP
+  ACCOUNT`, and a change of an account's provider, address or credential,
+  remove the account's figure.
+- A launch removes files nobody wrote for 30 days. cpb neither writes nor
+  sweeps through a symbolic link under `.state/usage/`.
 
 ## playbook.cpb: SHOW CREATE and APPLY
 
@@ -3809,13 +3983,14 @@ shows `SHOW CREATE`, copies statements and commands, and exports a `.cpb`.
 - **What it can do.** Only what the grammar can. It changes no state. Its
   only write is the `.cpb` file `e` exports.
 
-**Views** (`1`–`5`):
+**Views** (`1`–`6`):
 
 | View | Reads | Shows |
 |---|---|---|
 | Playbooks | `SHOW PLAYBOOKS --json`, `SHOW SESSIONS --json` | name, launcher, version, env sets, login kind (`shared`, `isolated`, `sandbox`), live-session count, model |
 | a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview, Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line, Model (the picker), Sessions |
 | Sessions | `SHOW SESSIONS --json` | playbook, account, pid, tty, kind, status (the limit a session is stopped at, if any), age, last active, model, folder; the footer says where past sessions are, `past sessions: <launcher> --resume` |
+| Usage (`6`) | `SHOW USAGE --json` | per allowance: sessions, at limit, 5-hour and weekly used and when each resets, how old the figure is; re-read every 5 s while it is up |
 | Env sets | `SHOW ENVS --json` | the env sets: variables, `used_by`, default |
 | Defaults | `SHOW DEFAULTS --json` | the env sets under every playbook, the secret helper |
 | Log | none | what this session copied and exported |
@@ -3847,8 +4022,7 @@ always runs with `--skip-secrets`.
 session is not resumed. `y` copies the command that resumes one once it
 ends. Past sessions open in Claude Code's picker: `<launcher> --resume`.
 
-**Sessions refresh.** `SHOW SESSIONS` is re-read every 5 s, and only while
-a screen that shows sessions is up. Everything else is re-read on `r`.
+**Refresh.** `SHOW SESSIONS` is re-read every 5 s while a screen that shows sessions is up, and `SHOW USAGE` while the Usage view is. Everything else is re-read on `r`.
 
 **The terminal.**
 - **Start.** `cpb tui` needs a terminal on stdin and stdout. Off one, it

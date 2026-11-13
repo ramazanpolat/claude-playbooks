@@ -135,30 +135,51 @@ var selectTables = map[string]selectTable{
 	},
 	"SESSIONS": {
 		columns: []string{"playbook", "pid", "session_id", "cwd", "kind", "status", "name", "claude_version",
-			"started_at", "last_active", "model", "launcher", "config_dir", "resume", "tty", "account", "at_limit"},
+			"started_at", "last_active", "model", "launcher", "config_dir", "resume", "tty", "account", "at_limit", "account_at_limit"},
 		structure: "playbook String, pid UInt32, session_id String, cwd String, kind String, status Nullable(String), name Nullable(String), " +
 			"claude_version Nullable(String), started_at DateTime64(3, 'UTC'), last_active Nullable(DateTime64(3, 'UTC')), model Nullable(String), " +
-			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String), account Nullable(String), at_limit JSON",
+			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String), account Nullable(String), at_limit JSON, account_at_limit JSON",
 		comments: map[string]string{
-			"playbook":       "The playbook's name; a plain directory's path.",
-			"pid":            "The Claude Code process's id.",
-			"session_id":     "The session's id.",
-			"cwd":            "The session's working directory.",
-			"kind":           "interactive or bg.",
-			"status":         "The session's status, as Claude Code records it; null when it records none.",
-			"name":           "The session's name, as Claude Code records it; null when it records none.",
-			"claude_version": "The Claude Code version the session runs; null when it records none.",
-			"started_at":     "When the session started (UTC).",
-			"last_active":    "When the transcript last changed (UTC); null before the first message.",
-			"model":          "The model of the transcript's last assistant message; null before one.",
-			"launcher":       "The playbook's launcher, as SHOW PLAYBOOK reports it; null for a plain directory.",
-			"config_dir":     "The config directory the session runs under.",
-			"resume":         "The command that resumes this session from any folder once it ends.",
-			"tty":            "The process's controlling terminal (pts/3, ttys012); null for none, as for a bg session.",
-			"account":        "The account cpb launched the session on, from its launch record; null for a session cpb did not launch.",
-			"at_limit":       "The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped.",
+			"playbook":         "The playbook's name; a plain directory's path.",
+			"pid":              "The Claude Code process's id.",
+			"session_id":       "The session's id.",
+			"cwd":              "The session's working directory.",
+			"kind":             "interactive or bg.",
+			"status":           "The session's status, as Claude Code records it; null when it records none.",
+			"name":             "The session's name, as Claude Code records it; null when it records none.",
+			"claude_version":   "The Claude Code version the session runs; null when it records none.",
+			"started_at":       "When the session started (UTC).",
+			"last_active":      "When the transcript last changed (UTC); null before the first message.",
+			"model":            "The model of the transcript's last assistant message; null before one.",
+			"launcher":         "The playbook's launcher, as SHOW PLAYBOOK reports it; null for a plain directory.",
+			"config_dir":       "The config directory the session runs under.",
+			"resume":           "The command that resumes this session from any folder once it ends.",
+			"tty":              "The process's controlling terminal (pts/3, ttys012); null for none, as for a bg session.",
+			"account":          "The account cpb launched the session on, from its launch record; null for a session cpb did not launch.",
+			"at_limit":         "The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped.",
+			"account_at_limit": "The usage limit the session's account is at, from the latest figure its sessions reported: window and resets_at; null when it is not.",
 		},
 		rows: sessionRows,
+	},
+	"USAGE": {
+		columns: []string{"account", "accounts", "identity", "playbooks", "live_sessions", "sessions_at_limit", "state", "five_hour", "seven_day", "spend_limit", "seen_at", "seen_by"},
+		structure: "account String, accounts Array(String), identity Nullable(String), playbooks Array(String), live_sessions UInt32, sessions_at_limit UInt32, " +
+			"state String, five_hour JSON, seven_day JSON, spend_limit JSON, seen_at Nullable(DateTime64(3, 'UTC')), seen_by JSON",
+		comments: map[string]string{
+			"account":           "The allowance's name: an account, machine (the machine's login) or playbook:<name> (a playbook's own login).",
+			"accounts":          "Every account whose sessions draw on it.",
+			"identity":          "Who the allowance belongs to: the account's identity label, or the e-mail a login records; null when unknown.",
+			"playbooks":         "The playbooks of the live sessions drawing on it.",
+			"live_sessions":     "The live sessions cpb launched on it.",
+			"sessions_at_limit": "Those of them whose own turn was refused at a usage limit.",
+			"state":             "reported (a figure is on hand), not_seen (a Claude login or token no session has reported for yet) or not_reported (a credential whose provider reports none).",
+			"five_hour":         "The 5-hour window: used_percentage, left_percentage, resets_at, reset; null when no figure was seen.",
+			"seven_day":         "The weekly window, as five_hour.",
+			"spend_limit":       "A gateway's spend limit, as Claude Code reports it; null when none.",
+			"seen_at":           "When the figure was seen (UTC); null when none was.",
+			"seen_by":           "The session that saw it: session_id and playbook; null when none.",
+		},
+		rows: usageTableRows,
 	},
 	"DEFAULTS": {
 		columns:   []string{"envs", "account", "secret_helper", "secret_helper_from", "model_picker", "failover", "failover_accounts", "failover_max_context"},
@@ -445,7 +466,7 @@ func planSelect(q string) (*selectPlan, error) {
 		table := strings.ToUpper(m[2])
 		t, ok := selectTables[table]
 		if !ok {
-			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS)", m[2])
+			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, USAGE, DEFAULTS)", m[2])
 		}
 		var cols []string
 		for _, c := range strings.Split(m[1], ",") {
@@ -470,7 +491,7 @@ func planSelect(q string) (*selectPlan, error) {
 		return nil, errors.New("one statement at a time: remove what follows the semicolon")
 	}
 	if len(froms) == 0 {
-		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS")
+		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, SESSIONS, USAGE, DEFAULTS")
 	}
 	if len(froms) > 1 {
 		return nil, errors.New("a query reads one table; join them in ClickHouse yourself: cpb SHOW … --json | clickhouse local …")
@@ -891,7 +912,7 @@ type columnJSON struct {
 func describeTable(name string) ([]columnJSON, error) {
 	t, ok := selectTables[strings.ToUpper(name)]
 	if !ok {
-		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS)", name)
+		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, USAGE, DEFAULTS)", name)
 	}
 	types := map[string]string{"version_tuple": "Array(UInt32)"} // computed, not in the structure
 	depth, start := 0, 0
@@ -924,7 +945,7 @@ func describeTable(name string) ([]columnJSON, error) {
 
 func runDescribe(words []string, asJSON bool) error {
 	if len(words) != 1 {
-		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, SESSIONS or DEFAULTS")
+		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, SESSIONS, USAGE or DEFAULTS")
 	}
 	cols, err := describeTable(words[0])
 	if err != nil {
