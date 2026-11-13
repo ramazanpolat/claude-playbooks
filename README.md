@@ -109,15 +109,15 @@ cpb SHOW CREATE ALL > machine.cpb                  # this whole machine, as stat
 cpb APPLY machine.cpb                              # on the next machine
 ```
 
-Secrets are references, resolved at launch by your helper, or for `cpb:<name>` by cpb itself in your Keychain or keyring ([example](examples/26-cpb-secrets/)); `SHOW CREATE` never
-prints a value. A recipe covers the whole agent (plugins, MCP servers, tools,
-status line, model and `/model` picker, skills) and applies to any
-playbook or to `~/.claude`. A playbook can also be installed from a source, a git repository or a folder (`FROM <url-or-dir> BRANCH <ref>`), or run in place from a folder (`LINK <dir>`).
+Secrets are references, resolved at launch by your helper, or for `cpb:<name>` by cpb itself in your Keychain or keyring ([example](examples/26-cpb-secrets/)); `SHOW CREATE` never prints a value. A recipe covers the whole agent (plugins, MCP servers, tools,
+status line, model and `/model` picker, skills) and applies to any playbook or to `~/.claude`. A playbook can also be installed from a source, a git repository or a folder (`FROM <url-or-dir> BRANCH <ref>`), or run in place from a folder (`LINK <dir>`).
 
 ### See everything that is running
 
 ```bash
 cpb SHOW SESSIONS                                  # live sessions in every playbook: account, who is at a usage limit
+cpb SHOW USAGE                                     # each account: how much of its 5-hour and weekly allowance is used
+cpb "ALTER DEFAULTS SET failover = 'on', failover_accounts = ['claude-work', 'claude-home']"   # at a usage limit, a session moves on by itself
 cpb run work --continue                            # this folder's latest, in its playbook; never one live elsewhere
 cpb tui                                            # browse playbooks, sessions and env sets; never shows a secret
 cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHouse for full SQL
@@ -125,7 +125,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 
 ## Built to be relied on
 
-- **Tested on every change:** CI applies all 25 examples and, on Linux and
+- **Tested on every change:** CI applies all 28 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
   same. A full arena regression runs on the exact commit each release is
   tagged from.
