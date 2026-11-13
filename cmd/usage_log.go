@@ -590,4 +590,20 @@ func sweepUsage(root string, now time.Time) {
 			_ = os.Remove(filepath.Join(accounts, e.Name()))
 		}
 	}
+	// Session labels, and their locks, nobody wrote for usageSweepAge (a
+	// write touches its lock), and a writer's temporary file left behind.
+	labels := labelsDir(root)
+	ents = nil
+	if realDirs(usageDir(root), labels) {
+		ents, _ = os.ReadDir(labels)
+	}
+	for _, e := range ents {
+		fi, err := e.Info()
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		if (strings.HasPrefix(e.Name(), ".labels-") && old(fi, time.Minute)) || old(fi, usageSweepAge) {
+			_ = os.Remove(filepath.Join(labels, e.Name()))
+		}
+	}
 }

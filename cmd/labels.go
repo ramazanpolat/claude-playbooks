@@ -190,6 +190,11 @@ func updateSessionLabels(root, sessionID string, set map[string]string, unset []
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// The lock's time is the last write's, so the usage sweep removes a
+	// lock only once nobody has written the session's labels for as long
+	// as the rest.
+	now := time.Now()
+	_ = os.Chtimes(lock.Name(), now, now)
 	labels := map[string]string{}
 	for k, v := range readSessionLabels(root, sessionID) {
 		labels[k] = v

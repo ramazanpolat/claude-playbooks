@@ -32,6 +32,7 @@ Pages are grouped by what you came for:
 | [Resume a session](guides/resume-a-session.md) | `SHOW SESSIONS`, `--resume` through a launcher, and the resume line a launch prints |
 | [Account failover](guides/account-failover.md) | a session at a usage limit moves to the next listed account by itself, in the same terminal |
 | [See how much of each account is used](guides/usage.md) | `SHOW USAGE`, the usage step in front of a playbook's status line, the `cpb` key a status line reads |
+| [Label your sessions](guides/labels.md) | `--label` at launch, `cpb session label` from a hook, and where labels show |
 | [Agent guide](guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
 | [Ask in plain words](guides/assistant.md) | `cpb ask "<request>"`: the cpb command for what you mean, shown to copy |
 

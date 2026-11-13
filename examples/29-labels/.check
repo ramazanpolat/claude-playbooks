@@ -1,0 +1,32 @@
+sid=0e5c1a2b-0000-4000-8000-0000000000b1
+
+# Outside a session cpb launched, cpb session label says so with its own
+# exit code, 3, which a hook can ignore exactly.
+code=0
+cpb session label task=x 2> "$HOME/outside.err" || code=$?
+test "$code" = 3
+grep -q "not in a session cpb launched" "$HOME/outside.err"
+
+# A label that looks like an e-mail address is refused before anything
+# launches; the message names the key, never the value.
+if cpb run --label 'owner=someone@example.com' agent 2> "$HOME/refused.err"; then echo "took an e-mail address"; exit 1; fi
+grep -q "label owner" "$HOME/refused.err"
+! grep -q "someone@example.com" "$HOME/refused.err"
+
+# The launch: a launch label from the command line; the stand-in's hook adds
+# a session label from inside. The status line prints both from the cpb key.
+chmod +x stand-in/claude
+PATH="$PWD/stand-in:$PATH" cpb run --label name=review-auth agent
+test "$(cat "$HOME/statusline.out")" = "review-auth: triage"
+
+# SHOW SESSIONS, run inside the session: both sources, kept apart; the
+# SESSION column shows the name label.
+python3 -c 'import json,sys; r=[x for x in json.load(open(sys.argv[1])) if x["session_id"]==sys.argv[2]][0]; assert r["labels"]=={"launch":{"name":"review-auth"},"session":{"task":"triage"}}, r' "$HOME/sessions.json" "$sid"
+grep -q "review-auth" "$HOME/sessions.txt"
+
+# The usage log carries them, and the labels file is the session's own, 0600.
+log=$(ls "$HOME"/.claude-playbooks/.state/usage/sessions/*/$sid.jsonl)
+grep -q '"launch_labels":{"name":"review-auth"}' "$log"
+grep -q '"session_labels":{"task":"triage"}' "$log"
+f="$HOME/.claude-playbooks/.state/usage/labels/$sid.json"
+test "$(ls -l "$f" | cut -c1-10)" = "-rw-------"

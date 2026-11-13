@@ -1,0 +1,105 @@
+# Label your sessions
+
+With many sessions open, an id says little. A label says what a session is
+for: `name=review-auth`, `task=triage`. cpb shows labels where you look at
+sessions: in the playbook's status line, in `SHOW SESSIONS` and in the usage
+log.
+
+```
+$ cpb run --label name=review-auth agent
+...
+$ cpb SHOW SESSIONS
+PLAYBOOK  ACCOUNT      PID    TTY      KIND         STATUS  AGE  ACTIVE  MODEL            SESSION      CWD
+--------  -------      ---    ---      ----         ------  ---  ------  -----            -------      ---
+agent     claude-work  41870  pts/3    interactive  busy    12m  1m      claude-opus-5-5  review-auth  /home/user/app
+```
+
+## Two sources, kept apart
+
+- **Launch labels** are yours, given at launch: `--label KEY=VALUE` on `cpb
+  run`, a launcher or `cpb start`, as many as you like. A later one for the
+  same key wins. They are fixed for the launch, and travel with it like
+  `--env`: an account failover relaunch, the line cpb prints to resume by
+  hand, and a launch on a sandbox host carry them.
+- **Session labels** are set from inside a live session, by a hook or a
+  tool, with `cpb session label`:
+
+```
+cpb session label task=triage 'name=fixing ci'
+cpb session label --unset name
+cpb session label --list              # key=value, one per line
+cpb session label --list --json       # {"session_id": "...", "labels": {...}}
+```
+
+  `cpb session label` finds the session it runs in from its own process
+  ancestry: the nearest ancestor that is a Claude Code session of a
+  playbook. `--session <id>` names a live session instead.
+
+The two never mix: a session label does not change a launch label of the
+same key, and every place that shows labels shows both, apart.
+
+## From a hook
+
+A `SessionStart` hook can label every session, here with its folder's name.
+In a playbook's `settings.json`, or a folder's `.claude/settings.json`:
+
+```json
+{"hooks": {"SessionStart": [{"hooks": [{"type": "command",
+  "command": "cpb session label task=\"$(basename \"$PWD\")\" || [ $? -eq 3 ]"}]}]}}
+```
+
+`cpb session label` exits:
+
+| Code | Meaning |
+|---|---|
+| 0 | done |
+| 1 | refused: a label it does not take, or another write of the same session's labels held the lock for 400 ms |
+| 3 | not in a session cpb launched (or, with `--session`, no such live session) |
+
+`|| [ $? -eq 3 ]` ignores exactly the last, so the same hook works under
+plain `claude`. A hook never waits long: a write that cannot get the
+session's lock within 400 ms gives up.
+
+## Where they show
+
+- **The status line.** The `cpb` key a playbook's status line reads has
+  `labels`: `{"launch": {...}, "session": {...}}`, each left out when
+  empty. A label set during the session shows from the next render. This
+  needs the usage step, so a playbook status line of its own ([See how much
+  of each account is used](usage.md)).
+- **`SHOW SESSIONS`.** `--json` has `labels`; the `SESSION` column shows the
+  `name` label (a session label first) instead of the id. `cpb "SELECT
+  session_id, labels FROM SESSIONS"` queries them.
+- **The usage log.** Each line under `.state/usage/sessions/` has
+  `launch_labels` and `session_labels`, and a change of either writes a new
+  line.
+
+## What a label may hold
+
+- A key: `a-z`, `0-9`, `.`, `_`, `-`, starting with a letter or a digit, at
+  most 32 characters.
+- A value: one line of UTF-8, at most 200 bytes.
+- At most 16 labels from each source, 4 KiB together.
+
+A label is printed on shared screens and written to the log, so cpb refuses
+a value that looks like an e-mail address or a credential, and any control,
+direction or invisible character. The refusal names the key, never the
+value. What cpb cannot recognise is yours to keep out: no secrets, no login
+identity, no home paths, host names or addresses, no prompt text. cpb never
+takes a label from the environment.
+
+## Another playbooks root
+
+A session launched with `--playbooks-dir` gets `CPB_PLAYBOOKS_DIR` set to
+that root, so `cpb session label` and `SHOW SESSIONS` inside the session use
+the same one. A root you set in the environment is passed on as it is.
+
+## Files
+
+Session labels live in `.state/usage/labels/<session id>.json` under the
+playbooks root (mode 600). The file goes when its last label does, and with
+the other usage files nobody wrote for 30 days. Launch labels live in the
+launch's record, which goes when the launch ends.
+
+Reference: [Session labels](../../SPEC.md#session-labels). Example:
+[29-labels](../../examples/29-labels/README.md).

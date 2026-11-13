@@ -316,3 +316,38 @@ func TestPlaybooksRootReachesTheSession(t *testing.T) {
 		t.Fatalf("the default root: %v", env)
 	}
 }
+
+// Labels nobody wrote for 30 days, their lock, and a writer's leftover
+// temporary file are swept with the rest of the usage files.
+func TestSweepSessionLabels(t *testing.T) {
+	root := t.TempDir()
+	const other = "33333333-3333-4333-8333-333333333333"
+	for _, sid := range []string{sidLive, other} {
+		if _, err := updateSessionLabels(root, sid, map[string]string{"k": "v"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmp := filepath.Join(labelsDir(root), ".labels-123")
+	if err := os.WriteFile(tmp, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long := time.Now().Add(-31 * 24 * time.Hour)
+	for _, p := range []string{labelsPath(root, other), filepath.Join(labelsDir(root), "."+other+".lock")} {
+		if err := os.Chtimes(p, long, long); err != nil {
+			t.Fatal(err)
+		}
+	}
+	minute := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(tmp, minute, minute); err != nil {
+		t.Fatal(err)
+	}
+	sweepUsage(root, time.Now())
+	ents, _ := os.ReadDir(labelsDir(root))
+	var left []string
+	for _, e := range ents {
+		left = append(left, e.Name())
+	}
+	if strings.Join(left, " ") != "."+sidLive+".lock "+sidLive+".json" {
+		t.Fatalf("left: %v", left)
+	}
+}
