@@ -122,8 +122,12 @@ func (m Model) tabLine() string {
 			parts = append(parts, " "+label+" ")
 		}
 	}
-	line := strings.Join(parts, " ")
 	right := "? help"
+	line := strings.Join(parts, " ")
+	if m.w-width(line)-len(right)-1 <= 0 {
+		// Tight: the tabs closer together, so the help hint still fits.
+		line = strings.Join(parts, "")
+	}
 	if pad := m.w - width(line) - len(right) - 1; pad > 0 {
 		line += strings.Repeat(" ", pad) + right
 	}
@@ -416,7 +420,9 @@ func (m Model) listBody() []string {
 		if len(rows) == 0 {
 			return []string{"", "  No accounts and no usage recorded yet."}
 		}
-		return m.table([]string{"ACCOUNT", "SESSIONS", "AT LIMIT", "5H USED", "5H RESETS", "7D USED", "7D RESETS", "SEEN"}, rows, 0, m.cursor[vUsage], h, 2, 7)
+		// Narrow: SEEN goes first, then AT LIMIT; who is at a limit is
+		// what the view is for.
+		return m.table([]string{"ACCOUNT", "SESSIONS", "AT LIMIT", "5H USED", "5H RESETS", "7D USED", "7D RESETS", "SEEN"}, rows, 0, m.cursor[vUsage], h, 7, 2)
 	}
 	return nil
 }

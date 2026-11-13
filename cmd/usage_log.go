@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
 // The usage log (SPEC.md, "SHOW USAGE" and "Files and state"): what the
@@ -59,7 +62,6 @@ type usageSnapshot struct {
 	Playbook      string          `json:"playbook"`
 	Account       string          `json:"account"`
 	Key           string          `json:"key"`
-	Identity      *string         `json:"identity"`
 	ClaudeVersion *string         `json:"claude_version"`
 	SessionName   *string         `json:"session_name"`
 	Model         *string         `json:"model"`
@@ -256,43 +258,72 @@ func lastSnapshot(f *os.File) *usageSnapshot {
 // so, rotating a full log first. It takes the log's lock without waiting:
 // another render of the same session holding it means this one is not
 // needed, and the status line never waits on cpb. It reports whether a
-// line was written.
-func appendSnapshot(root string, s usageSnapshot, now time.Time) bool {
+// line was written, and whether that line's figures differ from this
+// session's line before: only then is it news for the account's latest
+// figure (an idle session re-rendering an old figure is not).
+func appendSnapshot(root string, s usageSnapshot, now time.Time) (wrote, newFigures bool) {
 	path := sessionLogPath(root, s.SessionID, now)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return false
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil || !realDirs(usageDir(root), filepath.Dir(filepath.Dir(path)), filepath.Dir(path)) {
+		return false, false
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer f.Close()
+	appendOpened(path)
 	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
-		return false
+		return false, false
 	}
-	if !worthWriting(s, lastSnapshot(f)) {
-		return false
+	// A render that opened the log just before another rotated it holds
+	// the old file: it writes nothing rather than renaming the new one.
+	if held, err := f.Stat(); err != nil {
+		return false, false
+	} else if cur, err := os.Lstat(path); err != nil || !os.SameFile(held, cur) {
+		return false, false
 	}
+	last := lastSnapshot(f)
+	if !worthWriting(s, last) {
+		return false, false
+	}
+	newFigures = len(s.RateLimits) > 0 && (last == nil || string(last.RateLimits) != string(s.RateLimits))
 	if fi, err := f.Stat(); err == nil && fi.Size() >= usageRotateBytes {
 		// Under the lock, so no other render appends to the old file after
 		// the rename; the new file is opened with the same rules.
 		if os.Rename(path, strings.TrimSuffix(path, ".jsonl")+".1.jsonl") != nil {
-			return false
+			return false, false
 		}
-		nf, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE|os.O_EXCL, 0o600)
+		nf, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
 		if err != nil {
-			return false
+			return false, false
 		}
 		defer nf.Close()
 		f = nf
 	}
 	line, err := json.Marshal(s)
 	if err != nil {
-		return false
+		return false, false
 	}
 	// One write: a line is whole or absent.
-	_, err = f.Write(append(line, '\n'))
-	return err == nil
+	if _, err = f.Write(append(line, '\n')); err != nil {
+		return false, false
+	}
+	return true, newFigures
+}
+
+// appendOpened runs between opening a log and locking it; a hook for tests.
+var appendOpened = func(string) {}
+
+// realDirs reports whether every path is a directory itself, not a
+// symbolic link to one: cpb writes and sweeps under .state/usage only.
+func realDirs(paths ...string) bool {
+	for _, p := range paths {
+		fi, err := os.Lstat(p)
+		if err != nil || !fi.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 // latestFigure is accounts/<hash>.json: the newest figure seen for one
@@ -301,7 +332,6 @@ type latestFigure struct {
 	V          int             `json:"v"`
 	Key        string          `json:"key"`
 	Account    string          `json:"account"`
-	Identity   *string         `json:"identity"`
 	SeenAt     string          `json:"seen_at"`
 	SessionID  string          `json:"session_id"`
 	Playbook   string          `json:"playbook"`
@@ -316,24 +346,31 @@ func latestPath(root, key string) string {
 	return filepath.Join(usageDir(root), "accounts", hex.EncodeToString(h[:8])+".json")
 }
 
-// writeLatest records s as its key's newest figure when it carries one and
-// is not older than the figure there. A race between two sessions of one
-// key costs at most a figure a moment older; the file is always whole.
+// writeLatest records s, a session's new figures, as its key's newest
+// figure, unless the one there is newer. For a window that resets at the
+// same time, the higher use stands: two sessions of one account seeing the
+// window at different moments never lower it. A race between two sessions
+// of one key costs at most a figure a moment older; the file is always
+// whole.
 func writeLatest(root string, s usageSnapshot) {
 	if len(s.RateLimits) == 0 || s.Key == "" {
 		return
 	}
 	path := latestPath(root, s.Key)
-	if old, ok := readLatest(path); ok && old.SeenAt > s.At {
-		return
+	rates := s.RateLimits
+	if old, ok := readLatest(path); ok {
+		if old.SeenAt > s.At {
+			return
+		}
+		rates = keepHigher(old.RateLimits, rates)
 	}
-	b, err := json.Marshal(latestFigure{V: usageVersion, Key: s.Key, Account: s.Account, Identity: s.Identity,
-		SeenAt: s.At, SessionID: s.SessionID, Playbook: s.Playbook, ConfigDir: s.ConfigDir, RateLimits: s.RateLimits})
+	b, err := json.Marshal(latestFigure{V: usageVersion, Key: s.Key, Account: s.Account,
+		SeenAt: s.At, SessionID: s.SessionID, Playbook: s.Playbook, ConfigDir: s.ConfigDir, RateLimits: rates})
 	if err != nil {
 		return
 	}
 	dir := filepath.Dir(path)
-	if os.MkdirAll(dir, 0o700) != nil {
+	if os.MkdirAll(dir, 0o700) != nil || !realDirs(usageDir(root), dir) {
 		return
 	}
 	tmp, err := os.CreateTemp(dir, ".latest-*")
@@ -355,7 +392,31 @@ func writeLatest(root string, s usageSnapshot) {
 	}
 }
 
-// readLatest reads one latest file, defensively.
+// keepHigher is now's rate limits, with each window that resets when old's
+// does and was higher in old kept from old.
+func keepHigher(old, now json.RawMessage) json.RawMessage {
+	var o, n map[string]json.RawMessage
+	if json.Unmarshal(old, &o) != nil || json.Unmarshal(now, &n) != nil {
+		return now
+	}
+	for _, k := range []string{"five_hour", "seven_day"} {
+		var ow, nw usageWindow
+		if json.Unmarshal(o[k], &ow) != nil || json.Unmarshal(n[k], &nw) != nil {
+			continue
+		}
+		if ow.ResetsAt == nw.ResetsAt && ow.UsedPercentage > nw.UsedPercentage {
+			n[k] = o[k]
+		}
+	}
+	b, err := json.Marshal(n)
+	if err != nil {
+		return now
+	}
+	return b
+}
+
+// readLatest reads one latest file, defensively: every name in it has the
+// shape a launch writes, so nothing from it reaches a terminal raw.
 func readLatest(path string) (latestFigure, bool) {
 	fi, err := os.Lstat(path)
 	if err != nil || !fi.Mode().IsRegular() || fi.Size() > 16<<10 {
@@ -366,31 +427,90 @@ func readLatest(path string) (latestFigure, bool) {
 		return latestFigure{}, false
 	}
 	var l latestFigure
-	if json.Unmarshal(b, &l) != nil || l.V != usageVersion || l.Key == "" || !validRecordedAccount(l.Key) {
+	if json.Unmarshal(b, &l) != nil || l.V != usageVersion || !validRecordedAccount(l.Key) || !validRecordedAccount(l.Account) ||
+		(l.Playbook != "" && !validRecordedAccount(l.Playbook)) || (l.ConfigDir != "" && !validRecordedAccount(l.ConfigDir)) ||
+		(l.SessionID != "" && !grammar.ValidSessionID(l.SessionID)) {
+		return latestFigure{}, false
+	}
+	if _, err := time.Parse(time.RFC3339Nano, l.SeenAt); err != nil {
 		return latestFigure{}, false
 	}
 	return l, true
 }
 
-// readLatestFigures is every latest figure, by usage key.
+// forgetUsage removes key's latest figure: its account was dropped, or now
+// draws on another credential.
+func forgetUsage(root, key string) {
+	_ = os.Remove(latestPath(root, key))
+}
+
+// usageClock is the time latest figures are read at; a variable for tests.
+var usageClock = time.Now
+
+// readLatestFigures is every latest figure, by usage key: each from the
+// file its key's hash names, never one seen later than now, its windows
+// bounded (boundRates).
 func readLatestFigures(root string) map[string]latestFigure {
 	out := map[string]latestFigure{}
 	dir := filepath.Join(usageDir(root), "accounts")
+	if !realDirs(usageDir(root), dir) {
+		return out
+	}
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return out
 	}
+	now := usageClock()
 	for _, e := range ents {
 		if !strings.HasSuffix(e.Name(), ".json") || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		if l, ok := readLatest(filepath.Join(dir, e.Name())); ok {
-			if old, seen := out[l.Key]; !seen || l.SeenAt > old.SeenAt {
-				out[l.Key] = l
-			}
+		l, ok := readLatest(filepath.Join(dir, e.Name()))
+		if !ok || e.Name() != filepath.Base(latestPath(root, l.Key)) {
+			continue
 		}
+		if at, _ := time.Parse(time.RFC3339Nano, l.SeenAt); at.After(now.Add(time.Minute)) {
+			continue
+		}
+		l.RateLimits = boundRates(l.RateLimits, now)
+		out[l.Key] = l
 	}
 	return out
+}
+
+// usageWindowLength is how long a window Claude Code names lasts.
+var usageWindowLength = map[string]time.Duration{"five_hour": 5 * time.Hour, "seven_day": 7 * 24 * time.Hour}
+
+// boundRates is raw with each window's numbers bounded: use between 0 and
+// 1000 percent, and a reset no later than now plus the window's length (a
+// figure cannot hold an account full past its window). Other keys pass.
+func boundRates(raw json.RawMessage, now time.Time) json.RawMessage {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return raw
+	}
+	for k, length := range usageWindowLength {
+		var w map[string]json.RawMessage
+		if json.Unmarshal(m[k], &w) != nil {
+			continue
+		}
+		var used, resets float64
+		if json.Unmarshal(w["used_percentage"], &used) != nil || json.Unmarshal(w["resets_at"], &resets) != nil ||
+			math.IsNaN(used) || math.IsNaN(resets) {
+			delete(m, k)
+			continue
+		}
+		used = math.Max(0, math.Min(used, 1000))
+		resets = math.Max(0, math.Min(resets, float64(now.Add(length).Unix())))
+		w["used_percentage"], _ = json.Marshal(used)
+		w["resets_at"], _ = json.Marshal(int64(resets))
+		m[k], _ = json.Marshal(w)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return b
 }
 
 // sweepUsage removes logs and latest figures nobody wrote for
@@ -399,8 +519,12 @@ func readLatestFigures(root string) map[string]latestFigure {
 func sweepUsage(root string, now time.Time) {
 	old := func(fi os.FileInfo, age time.Duration) bool { return now.Sub(fi.ModTime()) > age }
 	sessions := filepath.Join(usageDir(root), "sessions")
-	months, _ := os.ReadDir(sessions)
+	var months []os.DirEntry
+	if realDirs(usageDir(root), sessions) {
+		months, _ = os.ReadDir(sessions)
+	}
 	for _, m := range months {
+		// A DirEntry's type is the link's own: a symbolic link is skipped.
 		if !m.IsDir() {
 			continue
 		}
@@ -419,7 +543,10 @@ func sweepUsage(root string, now time.Time) {
 		}
 	}
 	accounts := filepath.Join(usageDir(root), "accounts")
-	ents, _ := os.ReadDir(accounts)
+	var ents []os.DirEntry
+	if realDirs(usageDir(root), accounts) {
+		ents, _ = os.ReadDir(accounts)
+	}
 	for _, e := range ents {
 		fi, err := e.Info()
 		if err != nil || !fi.Mode().IsRegular() {

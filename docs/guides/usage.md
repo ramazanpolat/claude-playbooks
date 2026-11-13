@@ -14,7 +14,7 @@ router        2         0         not reported
 
 - **SESSIONS** counts the live sessions on that account.
 - **AT LIMIT** counts the ones whose own request was refused.
-- **SEEN** is how old the figure is.
+- **SEEN** is how old the figure is: when a session last saw it change.
 - **`not reported`**: a gateway, an API key or a cloud account; their
   providers report no allowance.
 - **`not seen`**: a Claude account no session has reported for yet.
@@ -66,12 +66,18 @@ The full shape is in [the SPEC](../../SPEC.md#the-usage-step).
 
 - **The log.** `.state/usage/sessions/<YYYY-MM>/<session id>.jsonl` under
   the playbooks root holds one line per change, each describing itself:
-  - the time, the session, its config directory, playbook, account and
-    identity;
+  - the time, the session, its config directory, playbook and account
+    (never an e-mail: SHOW USAGE reads the identity when it runs);
   - the figures, cost, context and model.
-- **The latest figure** per account is in `.state/usage/accounts/`.
+- **The latest figure** per account is in `.state/usage/accounts/`. Only a
+  session whose figures changed updates it, so an idle session showing an
+  old figure never replaces a newer one. Dropping an account, or changing
+  its credential, removes its figure.
 - Everything is mode 600. Nothing in it is a credential.
 - A session's log rotates at 1 MiB, and a launch removes files nobody wrote
   for 30 days.
+- **An edit to the playbook's status line applies from its next launch.**
+  The launch hands Claude Code the status line, with the step in front, as
+  a launch setting, which ranks above the playbook's own settings file.
 
 Reference: [SHOW USAGE](../../SPEC.md#show-usage).

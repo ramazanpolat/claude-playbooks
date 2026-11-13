@@ -15,6 +15,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
+	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 const stepSID = "d9c690fc-1a83-4be9-b6aa-000000000001"
@@ -30,11 +31,11 @@ func statusInput(sid string, five, seven float64, cost float64) []byte {
 }
 
 // stepFixture is a playbooks root with one launch record and its id.
-func stepFixture(t *testing.T, acct, key string, identity *string) (root string, rec launchRecord) {
+func stepFixture(t *testing.T, acct, key string, _ *string) (root string, rec launchRecord) {
 	t.Helper()
 	root = sandboxDefaultRoot(t)
 	rec = launchRecord{V: launchRecordVersion, LaunchID: "0123456789abcdef", PID: os.Getpid(), ProcStart: "x", Playbook: "alpha",
-		ConfigDir: filepath.Join(root, "alpha"), Account: acct, Key: key, Identity: identity, LaunchedAt: rfc3339(time.Now())}
+		ConfigDir: filepath.Join(root, "alpha"), Account: acct, Key: key, LaunchedAt: rfc3339(time.Now())}
 	dir := launchRecordsDir(root)
 	if err := writeLaunchRecord(dir, filepath.Join(dir, rec.LaunchID+".json"), &rec); err != nil {
 		t.Fatal(err)
@@ -96,7 +97,15 @@ func TestStepRecordsAndAddsTheBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	var s usageSnapshot
-	if err := json.Unmarshal(bytes.TrimSpace(data), &s); err != nil || s.Account != "acc-a" || s.Key != "acc-a" || s.Identity == nil || *s.Identity != id ||
+	// No identity in the line, or in the account's latest figure: SHOW
+	// USAGE reads it from the account when a statement asks.
+	if strings.Contains(string(data), id) || strings.Contains(string(data), `"identity"`) {
+		t.Fatalf("the line holds an identity: %s", data)
+	}
+	if lb, _ := os.ReadFile(latestPath(root, "acc-a")); len(lb) == 0 || strings.Contains(string(lb), id) || strings.Contains(string(lb), `"identity"`) {
+		t.Fatalf("the latest figure holds an identity, or is missing: %s", lb)
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(data), &s); err != nil || s.Account != "acc-a" || s.Key != "acc-a" ||
 		s.ConfigDir != rec.ConfigDir || s.Playbook != "alpha" || s.Model == nil || *s.Model != "claude-opus-5-5" || len(s.RateLimits) == 0 {
 		t.Fatalf("line: %v %s", err, data)
 	}
@@ -338,5 +347,50 @@ func TestUsageRowsGroupAndCap(t *testing.T) {
 	}
 	if blockName("flags:[::1]:8080") != "flags:-::1-:8080" || blockName("Playbook:My Dir") != "playbook:my-dir" {
 		t.Fatalf("names: %q %q", blockName("flags:[::1]:8080"), blockName("Playbook:My Dir"))
+	}
+}
+
+// A playbooks root given relative to the launch folder is embedded in the
+// step absolute: the step runs from wherever Claude Code runs it.
+func TestStatuslineStepRootIsAbsolute(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
+	cfg := filepath.Join(root, "alpha")
+	old := managedSettingsPaths
+	managedSettingsPaths = func() []string { return nil }
+	t.Cleanup(func() { managedSettingsPaths = old })
+	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{"statusLine":{"type":"command","command":"x"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Dir(root))
+	s := statuslineStepFor(filepath.Base(root), cfg, filepath.Dir(root), "0123456789abcdef", nil)
+	if s.wrapped == nil {
+		t.Fatalf("not wrapped: %s", s.reason)
+	}
+	var cmd string
+	_ = json.Unmarshal(s.wrapped.Raw("command"), &cmd)
+	abs, _ := filepath.Abs(filepath.Base(root))
+	if !strings.Contains(cmd, " --root "+shell.QuoteArg(abs)+" ") {
+		t.Fatalf("command %q does not name the root %q", cmd, abs)
+	}
+}
+
+// When no descriptor can hold the input for an exec (over a pipe's size,
+// and no temporary folder), the original runs as a child, fed the whole
+// input, and the step ends with its exit code.
+func TestStatuslineStepFallsBackToAChild(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+	execs := 0
+	oldExec := stepExec
+	stepExec = func(string, []string, []string) error { execs++; return nil }
+	t.Cleanup(func() { stepExec = oldExec })
+	out := filepath.Join(t.TempDir(), "got")
+	data := []byte(`{"pad":"` + strings.Repeat("x", 3*stepPipeBytes) + `"}`)
+	err := execOriginal("cat > "+shell.QuoteArg(out)+"; exit 3", data)
+	if code, ok := exitCode(err); !ok || code != 3 || execs != 0 {
+		t.Fatalf("err %v, execs %d", err, execs)
+	}
+	if got, _ := os.ReadFile(out); string(got) != string(data) {
+		t.Fatalf("the original read %d bytes of %d", len(got), len(data))
 	}
 }

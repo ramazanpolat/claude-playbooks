@@ -97,6 +97,10 @@ func accountStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err := account.Write(dir, a); err != nil {
 		return fmt.Errorf("cannot write account: %w", err)
 	}
+	if old != nil && (old.Provider != a.Provider || old.BaseURL != a.BaseURL || !reflect.DeepEqual(old.Auth, a.Auth)) {
+		// Another credential is another allowance: its old figure goes.
+		forgetUsage(config.ResolvePlaybooksDir(), st.Name)
+	}
 	head := "Altered ACCOUNT " + st.Name
 	switch {
 	case r.outcome == outCreated:
@@ -272,6 +276,7 @@ func (r *stmtRun) dropAccount(playbooksDir, dir string, st *grammar.Stmt, a *acc
 	if err := account.Delete(dir, st.Name); err != nil {
 		return err
 	}
+	forgetUsage(config.ResolvePlaybooksDir(), st.Name)
 	fmt.Printf("Dropped ACCOUNT %s\n", st.Name)
 	return nil
 }

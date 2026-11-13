@@ -1,9 +1,9 @@
- cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log  [6 Usage]
+ cpb  1 Playbooks  2 Sessions  3 Env sets  4 Defaults  5 Log [6 Usage]   ? help
 ────────────────────────────────────────────────────────────────────────────────
-  ACCOUNT      SESSIONS  5H USED       5H RESETS  7D USED  7D RESETS  SEEN
-▸ claude-home  0         not seen
-  claude-work  1         26%           in 1h20m   100%     in 3d 0h   2m
-  router       1         not reported
+  ACCOUNT      SESSIONS  AT LIMIT  5H USED       5H RESETS  7D USED  7D RESETS
+▸ claude-home  0         0         not seen
+  claude-work  1         1         26%           in 1h20m   100%     in 3d 0h
+  router       1         0         not reported
 
 
 

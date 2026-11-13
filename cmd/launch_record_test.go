@@ -71,15 +71,20 @@ func TestRunRecordsTheLaunch(t *testing.T) {
 		return r
 	}
 
-	// The implicit account: machine, inherited, no identity.
-	if r := launch("alpha"); r.Account != "machine" || r.Why != account.WhyInherited || r.Identity != nil {
+	// The implicit account: machine, inherited.
+	if r := launch("alpha"); r.Account != "machine" || r.Why != account.WhyInherited || r.Key != account.Machine {
 		t.Fatalf("machine launch: %+v", r)
 	}
-	// A named account carries its identity label.
+	// A named account with an identity label: the record names the
+	// account, never the identity (it is read when a statement needs it).
 	putAccount(t, account.Account{Name: "acc", Provider: account.Anthropic, Identity: "someone@example.com",
 		Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
-	if r := launch("--account", "acc", "alpha"); r.Account != "acc" || r.Why != "--account" || r.Identity == nil || *r.Identity != "someone@example.com" {
+	if r := launch("--account", "acc", "alpha"); r.Account != "acc" || r.Why != "--account" || r.Key != "acc" {
 		t.Fatalf("--account launch: %+v", r)
+	}
+	b, _ := json.Marshal(newLaunchRecord("alpha", filepath.Join(root, "alpha"), account.Selection{Name: "acc", Account: &account.Account{Name: "acc", Identity: "someone@example.com"}}))
+	if strings.Contains(string(b), "someone@example.com") || strings.Contains(string(b), "identity") {
+		t.Fatalf("the record holds an identity: %s", b)
 	}
 	if fi, err := os.Stat(launchRecordsDir(root)); err != nil || fi.Mode().Perm() != 0o700 {
 		t.Fatalf("records directory: %v %v", fi.Mode(), err)

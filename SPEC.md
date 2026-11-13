@@ -1358,8 +1358,10 @@ cpb run --failover reviewer                          -- one launch; --no-failove
   - is not the one the session runs on, and was not tried in this episode
     (each account at most once, so it never loops);
   - is not known to be at a limit (a live session cpb launched on it shows
-    `at_limit`, or its latest figure in *SHOW USAGE* is at 100% of a window
-    that has not reset). Otherwise a refused request costs nothing: the next
+    `at_limit`, or the latest figure of the allowance it draws on from this
+    playbook is at 100% of a window that has not reset: a Claude login's
+    figure is the login's, `machine` or `playbook:<name>`, as in *SHOW
+    USAGE*). Otherwise a refused request costs nothing: the next
     poll sees the new limit and moves on;
   - is the same kind as the session's account (a Claude login or token
     sent to Anthropic, or the same provider at the same address: a gateway
@@ -2058,12 +2060,18 @@ usage (*SHOW USAGE*). The playbook changes nothing.
 - **How.** The launch-only `--settings` (the one that carries an account's
   `apiKeyHelper` and the DEFAULTS model rows) holds the playbook's
   `statusLine` with its `padding` and `refreshInterval`, and the command
-  `'<cpb>' __statusline --root '<root>' --launch <launch id> -- '<original
-  command>'`. The step reads the input, records it, adds one key, `cpb`, and
-  execs `/bin/sh -c '<original command>'` with the result on its standard
-  input (a pipe, or an unlinked temporary file above 8 KiB): the original is
-  the same process from then on, its output, exit code and timeout as
-  without the step. The account, the identity and the rest come from the
+  `if [ -x '<cpb>' ]; then exec '<cpb>' __statusline --root '<root>' --launch
+  <launch id> -- '<original command>'; fi; exec /bin/sh -c '<original
+  command>'`, the root absolute: with cpb's binary gone (removed while the
+  session runs), the original runs as it is. The status line is fixed for
+  the session's life: an edit to the playbook's status line applies from
+  its next launch. The step reads the input, records it, adds
+  one key, `cpb`, and execs `/bin/sh -c '<original command>'` with the
+  result on its standard input (a pipe, or an unlinked temporary file above
+  8 KiB): the original is the same process from then on, its output, exit
+  code and timeout as without the step. When neither can hold the input
+  (no usable temporary folder), the original runs as the step's child, fed
+  the same input, and the step ends with its exit code. The account, the identity and the rest come from the
   launch record the id names, never from argv or the session's
   environment.
 - **What it adds: the `cpb` key**, version 1. Names only: never an
@@ -2837,9 +2845,7 @@ the usage step is given) and removes it when the launch returns.
   (a directory for `cpb start`), `config_dir`, `account` (the account the
   launch runs on: a stored account's name, `machine`, or a layer route's
   `env:<set>`, `block:<playbook>` or `flags:<host>`), `why` (the reason
-  EXPLAIN gives), `identity` (the account's `identity` label, or for a
-  Claude login the e-mail its config directory records; null when neither is
-  known), `key` (whose allowance it draws on: the account, or `machine`, or
+  EXPLAIN gives), `key` (whose allowance it draws on: the account, or `machine`, or
   `playbook:<name>` for an isolated playbook's own login), `launch_id`,
   `launched_at`, and after an account failover, `switches` (each `from`,
   `to`, `at`, `window`, `resets_at`, `context_tokens`, `outcome`). No
@@ -3018,15 +3024,25 @@ SELECT … FROM USAGE
 - `sessions/<YYYY-MM>/<session id>.jsonl`, one per session under the month
   of its first line, append-only: one JSON object per line, version 1, each
   describing itself: `v`, `at`, `session_id`, `config_dir`, `playbook`,
-  `account`, `key`, `identity`, `claude_version`, `session_name`, `model`,
+  `account`, `key`, `claude_version`, `session_name`, `model`,
   `effort`, `fast_mode`, `thinking`, `rate_limits` (whole), `cost` (whole),
   `context_window` (its sizes, totals and percentages), `prompt_cache` (its
   counts), `project_dir`, `repo`, `git_worktree`, `agent`. Left out: paths
   the others make redundant, the prompt id, UI state, cache diagnostics.
   A string is cut at 512 bytes; an object over 2 KiB is left out.
+  No identity: SHOW USAGE reads it when it runs (*Rows*).
 - At 1 MiB a session's file becomes `<id>.1.jsonl` (one older generation).
-- `accounts/<hash>.json`: the latest figure per allowance, replaced whole.
-- A launch removes files nobody wrote for 30 days.
+- `accounts/<hash of the key>.json`: the latest figure per allowance,
+  replaced whole, written only when a session's figures differ from its
+  own line before (a session re-rendering an old figure never replaces a
+  newer one); for a window that resets at the same time the higher use
+  stands. It is read only from the file its key's hash names, never one
+  seen later than now, with each name checked as a launch writes it, use
+  bounded to 0-1000% and a reset to now plus the window's length. `DROP
+  ACCOUNT`, and a change of an account's provider, address or credential,
+  remove the account's figure.
+- A launch removes files nobody wrote for 30 days. cpb neither writes nor
+  sweeps through a symbolic link under `.state/usage/`.
 
 ## playbook.cpb: SHOW CREATE and APPLY
 

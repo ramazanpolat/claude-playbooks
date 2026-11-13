@@ -60,12 +60,8 @@ type launchRecord struct {
 	Why     string `json:"why"`
 	// Key is whose allowance the session draws on (usageKey): the
 	// account, or for a Claude login, the login it reaches.
-	Key string `json:"key,omitempty"`
-	// Identity is the account's identity label, or for a Claude login the
-	// e-mail its config directory records; null when neither is known. The
-	// file is the user's own state, mode 0600; it is never printed.
-	Identity   *string `json:"identity"`
-	LaunchedAt string  `json:"launched_at"`
+	Key        string `json:"key,omitempty"`
+	LaunchedAt string `json:"launched_at"`
 	// Switches are the account switches that led to this launch (account
 	// failover), oldest first.
 	Switches []*failoverSwitch `json:"switches,omitempty"`
@@ -84,12 +80,6 @@ func newLaunchRecord(label, configDir string, sel account.Selection) *launchReco
 		r.Account = account.Machine
 	}
 	r.Key = usageKey(sel, configDir, label)
-	if sel.Account != nil && strings.TrimSpace(sel.Account.Identity) != "" {
-		id := sel.Account.Identity
-		r.Identity = &id
-	} else if usesClaudeLogin(sel) {
-		r.Identity = loginIdentity(configDir)
-	}
 	return r
 }
 
@@ -184,11 +174,7 @@ func (r *launchRecord) record(root string, pid int) func() {
 	r.PID = pid
 	r.ProcStart = procStartOf(pid)
 	r.LaunchedAt = rfc3339(launchRecordNow())
-	name := r.LaunchID
-	if name == "" {
-		name = strconv.Itoa(pid)
-	}
-	path := filepath.Join(dir, name+".json")
+	path := filepath.Join(dir, r.LaunchID+".json")
 	if err := writeLaunchRecord(dir, path, r); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: cannot record this launch's account (SHOW SESSIONS will not show it): %v\n", err)
 		return func() {}
@@ -249,6 +235,12 @@ func sweepLaunchRecords(dir string) {
 			if r, ok := readLaunchRecordFile(filepath.Join(dir, name)); !ok || !pidAlive(r.PID) {
 				_ = os.Remove(filepath.Join(dir, name))
 			}
+			continue
+		}
+		// A record named for its pid, as development builds before launch
+		// ids wrote it: never read, removed once its process is gone.
+		if pid, ok := pidFileName(name); ok && !pidAlive(pid) {
+			_ = os.Remove(filepath.Join(dir, name))
 		}
 	}
 }
@@ -284,7 +276,7 @@ func readLaunchRecordFile(path string) (launchRecord, bool) {
 	}
 	var r launchRecord
 	if json.Unmarshal(b, &r) != nil || r.V != launchRecordVersion || r.PID <= 0 || r.ProcStart == "" || !validRecordedAccount(r.Account) ||
-		(r.Key != "" && !validRecordedAccount(r.Key)) || (r.Identity != nil && !validRecordedAccount(*r.Identity)) {
+		(r.Key != "" && !validRecordedAccount(r.Key)) {
 		return launchRecord{}, false
 	}
 	return r, true
@@ -303,8 +295,7 @@ func readLaunchRecordByID(root, id string) (launchRecord, bool) {
 }
 
 // readLaunchRecords reads every record under root, by the pid it names.
-// A file named for a pid (a release before launch ids) must name that pid;
-// one named for a launch id must hold that id. Two records may name one
+// A record's file is named for its launch id and must hold that id. Two records may name one
 // pid (one left by a launch killed outright, the pid since reused): the
 // reader picks by start time.
 func readLaunchRecords(root string) map[int][]launchRecord {

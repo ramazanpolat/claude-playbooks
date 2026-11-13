@@ -123,6 +123,11 @@ func setsStatusLine(path string) (bool, error) {
 // statuslineStepFor decides the step of a launch of configDir from wd with
 // claudeArgs, whose launch record is named launchID.
 func statuslineStepFor(root, configDir, wd, launchID string, claudeArgs []string) statuslineStep {
+	// The step runs in whatever folder Claude Code runs it from: a root
+	// given relative to this one is made absolute before it is embedded.
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
 	if hasSettingsArg(claudeArgs) {
 		return statuslineStep{reason: stepSkipSettingsArg}
 	}
@@ -174,9 +179,11 @@ func statuslineStepFor(root, configDir, wd, launchID string, claudeArgs []string
 
 // stepCommand is the status line command of a launch: cpb's step, then the
 // playbook's own command as its last argument, every part quoted for the
-// shell Claude Code runs it with.
+// shell Claude Code runs it with. When cpb's binary is no longer there
+// (removed while the session runs), the original runs as it is.
 func stepCommand(self, root, launchID, original string) string {
-	return shell.QuoteArg(self) + " " + statuslineStepArg + " --root " + shell.QuoteArg(root) + " --launch " + launchID + " -- " + shell.QuoteArg(original)
+	return "if [ -x " + shell.QuoteArg(self) + " ]; then exec " + shell.QuoteArg(self) + " " + statuslineStepArg + " --root " + shell.QuoteArg(root) +
+		" --launch " + launchID + " -- " + shell.QuoteArg(original) + "; fi; exec /bin/sh -c " + shell.QuoteArg(original)
 }
 
 // explainLine is EXPLAIN's line for the step.

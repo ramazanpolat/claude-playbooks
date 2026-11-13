@@ -6,10 +6,13 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // The status line step (SPEC.md, "Status line and model"): a launch whose
@@ -76,9 +79,10 @@ func parseStepArgs(args []string) (stepArgs, bool) {
 	return a, false
 }
 
-// runStatuslineStep is the step. It returns only when the exec fails; a
-// command line it cannot read still runs the last argument, the original,
-// when there is one.
+// runStatuslineStep is the step. It returns when the exec fails, or with
+// the original's exit when the original ran as a child; a command line it
+// cannot read still runs the last argument, the original, when there is
+// one.
 func runStatuslineStep(args []string, stdin io.Reader) error {
 	in, rerr := io.ReadAll(stdin)
 	a, ok := parseStepArgs(args)
@@ -109,12 +113,11 @@ func stepRecord(a stepArgs, in []byte) []byte {
 	if len(in) <= 256<<10 {
 		if s, ok := snapshotOf(in); ok {
 			s.At = rfc3339(now)
-			s.ConfigDir, s.Playbook, s.Account, s.Key, s.Identity = rec.ConfigDir, rec.Playbook, rec.Account, rec.Key, rec.Identity
-			if appendSnapshot(a.root, s, now) {
-				writeLatest(a.root, s)
-			} else if len(s.RateLimits) > 0 {
-				// A render the write rule skipped still says the figure is
-				// current.
+			s.ConfigDir, s.Playbook, s.Account, s.Key = rec.ConfigDir, rec.Playbook, rec.Account, rec.Key
+			// Only figures new for this session update the account's
+			// latest: a re-render of an old figure never replaces a newer
+			// one another session saw.
+			if _, newFigures := appendSnapshot(a.root, s, now); newFigures {
 				writeLatest(a.root, s)
 			}
 		}
@@ -205,15 +208,29 @@ func execOriginal(original string, data []byte) error {
 	if original == "" {
 		return errors.New("the status line step has no command to run")
 	}
-	if fd, err := stdinFor(data); err == nil {
-		if err := syscall.Dup2(fd, 0); err != nil {
-			return err
-		}
-		if fd != 0 {
-			_ = syscall.Close(fd)
-		}
+	argv := []string{stepShell, "-c", original}
+	fd, err := stdinFor(data)
+	if err != nil {
+		// No descriptor can hold the input for an exec (the temporary
+		// folder cannot take it): the original runs as a child, fed the
+		// input, never on the input the step has already read.
+		return stepRun(stepShell, argv, os.Environ(), data)
 	}
-	return stepExec(stepShell, []string{stepShell, "-c", original}, os.Environ())
+	if err := unix.Dup2(fd, 0); err != nil {
+		return err
+	}
+	if fd != 0 {
+		_ = syscall.Close(fd)
+	}
+	return stepExec(stepShell, argv, os.Environ())
+}
+
+// stepRun runs the original as a child fed data, with the step's output
+// and error, and returns its exit; a variable for tests.
+var stepRun = func(argv0 string, argv, env []string, data []byte) error {
+	c := exec.Command(argv0, argv[1:]...)
+	c.Env, c.Stdin, c.Stdout, c.Stderr = env, bytes.NewReader(data), os.Stdout, os.Stderr
+	return preserveExitCode(c.Run())
 }
 
 // stepPipeBytes is what a pipe takes without a reader on every system cpb
@@ -233,7 +250,7 @@ func stdinFor(data []byte) (int, error) {
 			_ = r.Close()
 			return -1, werr
 		}
-		fd, err := syscall.Dup(int(r.Fd()))
+		fd, err := unix.Dup(int(r.Fd()))
 		_ = r.Close()
 		return fd, err
 	}
@@ -250,7 +267,7 @@ func stdinFor(data []byte) (int, error) {
 		_ = f.Close()
 		return -1, err
 	}
-	fd, err := syscall.Dup(int(f.Fd()))
+	fd, err := unix.Dup(int(f.Fd()))
 	_ = f.Close()
 	return fd, err
 }

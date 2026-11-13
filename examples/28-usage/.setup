@@ -1,5 +1,5 @@
-# The two tokens, stored the way the sample helper reads them: one file each,
-# mode 600. Placeholders here; for real, write each value without echoing it
+# The token, stored the way the sample helper reads it: one file, mode 600.
+# A placeholder here; for real, write the value without echoing it
 # (cpb-secret-file's header shows how).
 mkdir -p "$HOME/.config/cpb-secrets" && chmod 700 "$HOME/.config/cpb-secrets"
 (umask 077 && printf '%s' 'placeholder-work-token' > "$HOME/.config/cpb-secrets/claude-token-work")

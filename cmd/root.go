@@ -49,9 +49,14 @@ func Execute() {
 	// status line (statusline_step.go). It execs that command; it returns
 	// only when it cannot.
 	if len(os.Args) > 1 && os.Args[1] == statuslineStepArg {
-		if err := runStatuslineStep(os.Args[2:], os.Stdin); err != nil {
-			fmt.Fprintf(os.Stderr, "cpb status line step: %v\n", err)
+		err := runStatuslineStep(os.Args[2:], os.Stdin)
+		if err == nil {
+			os.Exit(0) // the original ran as a child, and succeeded
 		}
+		if code, ok := exitCode(err); ok {
+			os.Exit(code) // the original's own exit
+		}
+		fmt.Fprintf(os.Stderr, "cpb status line step: %v\n", err)
 		os.Exit(1)
 	}
 	// cpb's default secret helper, which a launch, a reference check or

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -103,10 +104,11 @@ func windowsOf(raw json.RawMessage) (five, seven *usageWindow, spend json.RawMes
 			Used   *float64 `json:"used_percentage"`
 			Resets *float64 `json:"resets_at"`
 		}
-		if !rawField(rl[k], &w) || w.Used == nil || w.Resets == nil {
+		if !rawField(rl[k], &w) || w.Used == nil || w.Resets == nil || math.IsNaN(*w.Used) || math.IsNaN(*w.Resets) ||
+			*w.Resets < 0 || *w.Resets > 1e11 {
 			return nil
 		}
-		return &usageWindow{UsedPercentage: *w.Used, ResetsAt: int64(*w.Resets)}
+		return &usageWindow{UsedPercentage: math.Max(0, math.Min(*w.Used, 1000)), ResetsAt: int64(*w.Resets)}
 	}
 	return win("five_hour"), win("seven_day"), capRaw(rl["spend_limit"])
 }
@@ -137,14 +139,18 @@ func usageRows(root string, latest map[string]latestFigure, opts usageRowsOpts) 
 			r.identity = &id
 		}
 	}
-	// Every key a session reported for, and every key a live session draws on.
-	for key, l := range latest {
+	// Every key a session reported for, and every key a live session draws
+	// on, in key order: a row's name never depends on map order.
+	latestKeys := make([]string, 0, len(latest))
+	for key := range latest {
+		latestKeys = append(latestKeys, key)
+	}
+	sort.Strings(latestKeys)
+	for _, key := range latestKeys {
+		l := latest[key]
 		r := add(key)
 		if !contains(r.accounts, l.Account) {
 			r.accounts = append(r.accounts, l.Account)
-		}
-		if r.identity == nil {
-			r.identity = l.Identity
 		}
 		r.claude = r.claude || isLoginKey(key)
 		r.fiveHour, r.sevenDay, r.spendLimit = windowsOf(l.RateLimits)

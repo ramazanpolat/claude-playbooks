@@ -1122,19 +1122,29 @@ func TestFailoverSkipsAccountsFullByUsage(t *testing.T) {
 	tokenAccount(t, "acc-a", "a")
 	tokenAccount(t, "acc-b", "b")
 	tokenAccount(t, "acc-c", "c")
-	if err := writeFailoverDefaults(root, failoverDefaults{Failover: "on", Accounts: []string{"acc-b", "acc-c"}}); err != nil {
+	// A named account on the Claude login: its figure is the login's
+	// (machine, for a shared playbook), not under its own name.
+	putAccount(t, account.Account{Name: "acc-login", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeLogin}})
+	if err := writeFailoverDefaults(root, failoverDefaults{Failover: "on", Accounts: []string{"acc-b", "acc-login", "acc-c"}}); err != nil {
 		t.Fatal(err)
 	}
 	future := time.Now().Add(time.Hour).Unix()
 	b, _ := json.Marshal(latestFigure{V: usageVersion, Key: "acc-b", Account: "acc-b", SeenAt: rfc3339(time.Now()),
 		RateLimits: json.RawMessage(fmt.Sprintf(`{"seven_day":{"used_percentage":100,"resets_at":%d}}`, future))})
-	p := latestPath(root, "acc-b")
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		t.Fatal(err)
+	put := func(key string, b []byte) {
+		t.Helper()
+		p := latestPath(root, key)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.WriteFile(p, b, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	put("acc-b", b)
+	m, _ := json.Marshal(latestFigure{V: usageVersion, Key: account.Machine, Account: "acc-login", SeenAt: rfc3339(time.Now()),
+		RateLimits: json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":100,"resets_at":%d}}`, future))})
+	put(account.Machine, m)
 	pb, err := playbook.Find(root, "alpha")
 	if err != nil || pb == nil {
 		t.Fatal(err)
@@ -1143,7 +1153,7 @@ func TestFailoverSkipsAccountsFullByUsage(t *testing.T) {
 	if err != nil || w == nil {
 		t.Fatalf("watch: %v %v", w, err)
 	}
-	if full := w.fullAccounts(); !full["acc-b"] || full["acc-c"] {
+	if full := w.fullAccounts(); !full["acc-b"] || !full["acc-login"] || full["acc-c"] {
 		t.Fatalf("full: %v", full)
 	}
 	w.canRunOn = nil
