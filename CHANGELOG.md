@@ -34,6 +34,15 @@
     `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
     one, so a cpb inside it uses the same root.
   - Guide: `docs/guides/labels.md`; example `29-labels`.
+- **A provider that speaks only the OpenAI API** (docs only, no change to
+  cpb): a guide and an example for running Claude Code on such a provider
+  through a translator on your machine, with Venice.ai through LiteLLM as
+  the worked case. The account is a `gateway` on the translator's local
+  address; the provider's key is lent to the translator alone for its life,
+  and the account sends a per-run token the translator makes. On request
+  only: `access = 'listed'`, the playbook's `failover = 'off'`. Guide:
+  `docs/guides/openai-compatible-provider.md`; example
+  `30-translated-gateway`.
 - **An account reference that does not resolve at launch is named.** When a
   launch through the secret helper ends with an error and a reference of the
   account's own cannot be resolved, cpb adds a last line, after the
@@ -42,6 +51,13 @@
   account whose address is on this machine it adds that the local server
   behind it may not be running, and that `SHOW ACCOUNT <name>` shows what
   the account points at. A launch that succeeds is not checked.
+
+### Changed
+
+- **The line printed before a launch on a sandbox host** (`Sandbox on
+  USER@HOST: cpb run …`) leaves each `--env` value out and keeps its name
+  (`--env=K=<your value>`), as the by-hand resume line does. The command
+  sent over ssh carries the values.
 
 ## [v4.8.0] -- 2026-11-13
 
