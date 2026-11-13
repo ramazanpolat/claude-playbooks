@@ -18,10 +18,12 @@ if cpb run --account venice other 2> "$HOME/listed.err"; then echo "a listed acc
 grep -q "access = 'listed'" "$HOME/listed.err"
 cpb DROP PLAYBOOK other --yes
 # With the translator stopped its token is gone, and the launch stops before
-# claude starts.
+# claude starts: the helper's message, then cpb's line, last, naming the
+# account and saying its local server may not be running.
 rm "$HOME/.config/cpb-secrets/translator-token" "$env"
 if cpb run venice-agent 2> "$HOME/down.err"; then echo "a launch ran with the translator down"; exit 1; fi
 grep -q 'no file for its reference' "$HOME/down.err"
+tail -n 1 "$HOME/down.err" | grep -q "account venice's auth_token (a file: reference).*the local server behind it may not be running"
 test ! -e "$env"
 (umask 077 && printf '%s' 'placeholder-translator-token' > "$HOME/.config/cpb-secrets/translator-token")
 # No token value is written under the playbooks root (the stand-in claude's

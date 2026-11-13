@@ -120,7 +120,10 @@ cpb run venice-agent                   # another
 ```
 
 With the translator stopped, its token is gone and the launch stops before
-claude starts: the helper cannot resolve `file:translator-token`.
+claude starts: the helper cannot resolve `file:translator-token`. cpb's last
+line names the account and says the local server behind it may not be
+running; whatever the helper itself suggests, the token is the script's to
+write.
 
 ## What to expect
 

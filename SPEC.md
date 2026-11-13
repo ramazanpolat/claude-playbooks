@@ -617,7 +617,17 @@ reference and in the playbook, env-set and account files that hold one).
   helper resolves the references, sets them in the environment of that one
   command, and execs it. cpb fetches no values; there is no value-returning
   call, and none may be built. A non-zero exit before `claude` starts means
-  cpb did not launch, and the helper's message says why.
+  cpb did not launch, and the helper's message says why. Since v4.9.0, when
+  a host launch through the helper ends with an error, cpb then checks each
+  of the account's own references (`--check`, in the environment the launch
+  gave the helper, its output not shown); for the
+  first that does not resolve it adds a last line naming the account, the
+  key (`auth_token`, `api_key`, `claude_token`, or `header <Name>`) and the
+  reference's scheme, never a value. When the account's `base_url` is on
+  this machine (`localhost`, `127.0.0.1`, `::1`), the line adds that the
+  local server behind it may not be running and that `SHOW ACCOUNT <name>`
+  shows what the account points at: a local server may write the very
+  secret the account reads. A launch that succeeds is not checked.
 - **Store** (optional, since v4.7.0): `<helper> --store REF`, the value on
   its stdin, never an argument. Exit 0 means it is stored. A helper without
   it exits non-zero (cpb then says to store the value with your own tool and

@@ -62,6 +62,14 @@
   only: `access = 'listed'`, the playbook's `failover = 'off'`. Guide:
   `docs/guides/openai-compatible-provider.md`; example
   `30-translated-gateway`.
+- **An account reference that does not resolve at launch is named.** When a
+  launch through the secret helper ends with an error and a reference of the
+  account's own cannot be resolved, cpb adds a last line, after the
+  helper's own message: the account, the key (`auth_token`, `api_key`,
+  `claude_token`, a header) and the reference's scheme, never a value. On an
+  account whose address is on this machine it adds that the local server
+  behind it may not be running, and that `SHOW ACCOUNT <name>` shows what
+  the account points at. A launch that succeeds is not checked.
 
 ### Changed
 
