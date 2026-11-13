@@ -348,7 +348,7 @@ func (w *failoverWatch) check(claudePID int) *failoverCandidate {
 		return decline("the folder the session's transcript belongs to is not known (its project directory matches none of the session's folders)")
 	}
 	if hasControl(folder) {
-		return decline(fmt.Sprintf("the session's folder %q has a control character", folder))
+		return decline(fmt.Sprintf("the session's folder %q holds a character cpb does not print as written", folder))
 	}
 	if err := w.resumeGuard(f.SessionID, folder, claudePID); err != nil {
 		return decline(err.Error())
@@ -416,11 +416,12 @@ func spellings(p string) []string {
 }
 
 // hidden reports whether c is a character cpb does not print as written:
-// a control character, a direction mark, embedding, override or isolate,
-// or a line or paragraph separator. Zero-width joiners and spaces stay:
-// folder names hold them, and a paste needs them.
+// a control character, a direction mark (U+061C, U+200E, U+200F), an
+// embedding, override or isolate, or a line or paragraph separator.
+// Zero-width joiners and spaces stay: folder names hold them, and a paste
+// needs them.
 func hidden(c rune) bool {
-	return unicode.IsControl(c) || c == 0x200E || c == 0x200F || c >= 0x202A && c <= 0x202E || c >= 0x2066 && c <= 0x2069 ||
+	return unicode.IsControl(c) || c == 0x061C || c == 0x200E || c == 0x200F || c >= 0x202A && c <= 0x202E || c >= 0x2066 && c <= 0x2069 ||
 		c == 0x2028 || c == 0x2029
 }
 

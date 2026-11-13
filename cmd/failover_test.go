@@ -1054,7 +1054,7 @@ func TestFailoverCheck(t *testing.T) {
 		moveWatched(t, dir, transcript, folder, me, bad, bad, bad)
 		w := newFailoverWatch(t, "acc-a", "acc-b")
 		w.configDir = dir
-		if c := w.check(me); c != nil || !strings.Contains(notes(w), `bad\x1bname" has a control character`) || strings.ContainsRune(notes(w), 0x1b) {
+		if c := w.check(me); c != nil || !strings.Contains(notes(w), `bad\x1bname" holds a character cpb does not print as written`) || strings.ContainsRune(notes(w), 0x1b) {
 			t.Fatalf("control character: %+v %q", c, w.episode.notes)
 		}
 	})
@@ -1618,5 +1618,39 @@ func TestFailoverSkipsAccountsFullByUsage(t *testing.T) {
 	w.canRunOn = nil
 	if to, why := w.pick(""); to != "acc-c" {
 		t.Fatalf("picked %q: %s", to, why)
+	}
+}
+
+// Every character of the set the by-hand line and folder notes do not
+// print is hidden; zero-width joiners and spaces are shown.
+func TestHiddenCharacters(t *testing.T) {
+	for _, r := range []rune{0x061C, 0x200E, 0x200F, 0x202A, 0x202E, 0x2066, 0x2069, 0x2028, 0x2029, 0x1b, 0x7f} {
+		if !mustHide("a"+string(r)+"b") || !strings.Contains(printable("a"+string(r)+"b"), "?") {
+			t.Errorf("U+%04X shown", r)
+		}
+	}
+	for _, r := range []rune{0x200B, 0x200C, 0x200D} {
+		if mustHide("a"+string(r)+"b") || printable("a"+string(r)+"b") != "a"+string(r)+"b" {
+			t.Errorf("U+%04X hidden", r)
+		}
+	}
+}
+
+// In a marked by-hand line a newline is hidden in an --env name and in an
+// inline value too, so the line stays one line.
+func TestResumeByHandNewlineInEnvNameAndInlineValue(t *testing.T) {
+	resetCommandTestState(t)
+	for _, c := range []struct {
+		args []string
+		flag string
+	}{
+		{[]string{"--env=K\nX=v", "alpha"}, "'--env=<a value"},
+		{[]string{"--env=K=v", "--append-system-prompt=one\ntwo", "alpha"}, "'--append-system-prompt=<a value"},
+	} {
+		args, flag := c.args, c.flag
+		line, filled := resumeByHand("/w", args)
+		if !filled || strings.Contains(line, "\n") || !strings.HasPrefix(line, "# ") || !strings.Contains(line, flag) {
+			t.Errorf("%q: %q %v", args, line, filled)
+		}
 	}
 }

@@ -76,6 +76,11 @@ The full shape is in [the SPEC](../../SPEC.md#the-usage-step).
 - Everything is mode 600. Nothing in it is a credential.
 - A session's log rotates at 1 MiB, and a launch removes files nobody wrote
   for 30 days.
+- **Managed settings win.** A status line set in managed settings (the
+  managed settings file, its `managed-settings.d` drop-ins, or
+  server-managed settings) outranks the playbook's, so there is no step;
+  `EXPLAIN PLAYBOOK` says so. One set through a macOS managed-preferences
+  profile is not checked, and EXPLAIN cannot tell.
 - **An edit to the playbook's status line applies from its next launch.**
   The launch hands Claude Code the status line, with the step in front, as
   a launch setting, which ranks above the playbook's own settings file.

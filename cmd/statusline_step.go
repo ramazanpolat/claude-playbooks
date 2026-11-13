@@ -124,8 +124,8 @@ func stepRecord(a stepArgs, in []byte) []byte {
 			// Only figures new for this session update the account's
 			// latest: a re-render of an old figure never replaces a newer
 			// one another session saw.
-			if _, newFigures := appendSnapshot(a.root, s, now); newFigures {
-				writeLatest(a.root, s)
+			if _, news := appendSnapshot(a.root, s, now); news != noFigures {
+				writeLatest(a.root, s, news == firstFigures)
 			}
 		}
 	}
