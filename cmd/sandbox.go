@@ -112,8 +112,8 @@ func launchLayers(tokens []launchToken) ([]*manifest.Env, error) {
 	// The labels together, as the launch record will hold them: a set over
 	// the caps is refused before anything starts, never written into a
 	// record no reader would accept.
-	if err := checkLabelSet(launchLabelsOf(tokens)); err != nil {
-		return nil, fmt.Errorf("--label: %w", err)
+	if err := checkLaunchLabels(tokens); err != nil {
+		return nil, err
 	}
 	return layers, nil
 }
@@ -345,6 +345,11 @@ func sandboxHost(sb *manifest.Sandbox, opts *sandboxOpts) string {
 func forwardToSandboxHost(host, subcommand string, original []string, opts *sandboxOpts, tokens []launchToken, wrapper []string, target string, claudeArgs []string) error {
 	if !manifest.ValidSandboxHost(host) {
 		return fmt.Errorf("--sandbox-host %q must be an ssh destination such as user@host", host)
+	}
+	// The labels are checked here, each and together, before any of them
+	// is printed or put in the ssh arguments.
+	if err := checkLaunchLabels(tokens); err != nil {
+		return err
 	}
 	for _, t := range tokens {
 		if t.flag == "--env-file" {

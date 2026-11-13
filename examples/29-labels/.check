@@ -20,7 +20,7 @@ PATH="$PWD/stand-in:$PATH" cpb run --label name=review-auth agent
 test "$(cat "$HOME/statusline.out")" = "review-auth: triage"
 
 # SHOW SESSIONS, run inside the session: both sources, kept apart; the
-# SESSION column shows the name label.
+# table's last column, LABELS, shows them.
 python3 -c 'import json,sys; r=[x for x in json.load(open(sys.argv[1])) if x["session_id"]==sys.argv[2]][0]; assert r["labels"]=={"launch":{"name":"review-auth"},"session":{"task":"triage"}}, r' "$HOME/sessions.json" "$sid"
 grep -q "review-auth" "$HOME/sessions.txt"
 

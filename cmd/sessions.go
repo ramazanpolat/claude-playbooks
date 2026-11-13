@@ -759,7 +759,7 @@ func showSessions(st *grammar.Stmt) error {
 		fmt.Println("No live Claude Code sessions.")
 		return leftOut(bad)
 	}
-	t := newTable("PLAYBOOK", "ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(10)
+	t := newTable("PLAYBOOK", "ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD", "LABELS").flexible(10)
 	for _, r := range rows {
 		status := deref(r.Status, "-")
 		switch {
@@ -769,23 +769,35 @@ func showSessions(st *grammar.Stmt) error {
 			status = "account " + limitLabel(r.AccountAtLimit)
 		}
 		t.add(r.Playbook, deref(r.Account, "-"), strconv.Itoa(r.PID), deref(r.TTY, "-"), r.Kind, status, ageOf(&r.StartedAt),
-			ageOf(r.LastActive), deref(r.Model, "-"), sessionShown(r), r.Cwd)
+			ageOf(r.LastActive), deref(r.Model, "-"), r.SessionID, r.Cwd, labelsCell(r.Labels))
 	}
 	t.render(os.Stdout)
 	return leftOut(bad)
 }
 
-// sessionShown is what the SESSION column shows: the session's name label
-// (its session label, else its launch label) when it has one, else its id.
-// --json always keeps session_id.
-func sessionShown(r sessionJSON) string {
-	if r.Labels != nil {
-		if n := r.Labels.Session["name"]; n != "" {
-			return n
-		}
-		if n := r.Labels.Launch["name"]; n != "" {
-			return n
-		}
+// labelsCell is the LABELS column, last so a value's spaces split nothing
+// before it: `launch k=v, k=v; session k=v`, each source left out when it
+// has none, "-" for no labels.
+func labelsCell(l *blockLabelsJSON) string {
+	if l == nil {
+		return "-"
 	}
-	return r.SessionID
+	var parts []string
+	for _, src := range []struct {
+		name string
+		m    map[string]string
+	}{{"launch", l.Launch}, {"session", l.Session}} {
+		if len(src.m) == 0 {
+			continue
+		}
+		pairs := make([]string, 0, len(src.m))
+		for _, k := range sortedLabelKeys(src.m) {
+			pairs = append(pairs, k+"="+src.m[k])
+		}
+		parts = append(parts, src.name+" "+strings.Join(pairs, ", "))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, "; ")
 }

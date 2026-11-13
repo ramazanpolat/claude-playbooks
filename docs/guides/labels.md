@@ -9,18 +9,19 @@ log.
 $ cpb run --label name=review-auth agent
 ...
 $ cpb SHOW SESSIONS
-PLAYBOOK  ACCOUNT      PID    TTY      KIND         STATUS  AGE  ACTIVE  MODEL            SESSION      CWD
---------  -------      ---    ---      ----         ------  ---  ------  -----            -------      ---
-agent     claude-work  41870  pts/3    interactive  busy    12m  1m      claude-opus-5-5  review-auth  /home/user/app
+PLAYBOOK  ACCOUNT      PID    TTY    KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD             LABELS
+--------  -------      ---    ---    ----         ------  ---  ------  -----            -------                               ---             ------
+agent     claude-work  41870  pts/3  interactive  busy    12m  1m      claude-opus-5-5  0e5c1a2b-0000-4000-8000-0000000000b1  /home/user/app  launch name=review-auth
 ```
 
 ## Two sources, kept apart
 
 - **Launch labels** are yours, given at launch: `--label KEY=VALUE` on `cpb
-  run`, a launcher or `cpb start`, as many as you like. A later one for the
-  same key wins. They are fixed for the launch, and travel with it like
-  `--env`: an account failover relaunch, the line cpb prints to resume by
-  hand, and a launch on a sandbox host carry them.
+  run`, a launcher or `cpb start`: up to 16, 4 KiB together. A later one
+  for the same key wins. They are fixed for the launch, and travel with it
+  like `--env`: an account failover relaunch, the line cpb prints to resume
+  by hand, and a launch on a sandbox host carry them. cpb checks them before
+  anything starts, and before it forwards a launch to a sandbox host.
 - **Session labels** are set from inside a live session, by a hook or a
   tool, with `cpb session label`:
 
@@ -33,8 +34,9 @@ cpb session label --list --json       # {"session_id": "...", "labels": {...}}
 
   `cpb session label` finds the session it runs in from its own process
   ancestry: the nearest ancestor that is a Claude Code session of a
-  playbook. `--session <id>` names a live session instead, one cpb can
-  confirm is running.
+  playbook. Inside a session, that is the only session it labels:
+  `--session` may name only that one. Outside any session, `--session <id>`
+  labels a live session by its id, one cpb can confirm is running.
 
 The two never mix: a session label does not change a launch label of the
 same key, and every place that shows labels shows both, apart.
@@ -80,8 +82,8 @@ In a playbook's `settings.json`, or a folder's `.claude/settings.json`:
 | Code | Meaning |
 |---|---|
 | 0 | done |
-| 1 | refused: a label it does not take, or another write of the same session's labels held the lock for 400 ms |
-| 3 | not in a session cpb launched (or, with `--session`, no such live session) |
+| 1 | refused: a label it does not take, a `--session` id of no live session (or of another session, from inside one), or another write of the same session's labels held the lock for 400 ms |
+| 3 | not in a session cpb launched |
 
 `|| [ $? -eq 3 ]` ignores exactly the last, so the same hook works under
 plain `claude`. A hook never waits long: a write that cannot get the
@@ -94,9 +96,10 @@ session's lock within 400 ms gives up.
   empty. A label set during the session shows from the next render. This
   needs the usage step, so a playbook status line of its own ([See how much
   of each account is used](usage.md)).
-- **`SHOW SESSIONS`.** `--json` has `labels`; the `SESSION` column shows the
-  `name` label (a session label first) instead of the id. `cpb "SELECT
-  session_id, labels FROM SESSIONS"` queries them.
+- **`SHOW SESSIONS`.** `--json` has `labels`, and the table's last column,
+  `LABELS`, shows them (`launch k=v, …; session k=v, …`). The `SESSION`
+  column stays the session's id. `cpb "SELECT session_id, labels FROM
+  SESSIONS"` queries them.
 - **The usage log.** Each line under `.state/usage/sessions/` has
   `launch_labels` and `session_labels`, and a change of either writes a new
   line.
@@ -105,16 +108,25 @@ session's lock within 400 ms gives up.
 
 - A key: `a-z`, `0-9`, `.`, `_`, `-`, starting with a letter or a digit, at
   most 32 characters.
-- A value: one line of UTF-8, at most 200 bytes.
+- A value: one line of plain visible text, not empty, at most 200 bytes.
+  `k=` is refused; `--unset k` removes a label.
 - At most 16 labels from each source, 4 KiB together.
 
-A label is printed on shared screens and written to the log, so cpb refuses
-a value that looks like an e-mail address or a credential, and any control,
-direction or invisible character. The refusal names the key, never the
-value. What cpb cannot recognise is yours to keep out: no secrets, no login
-identity, no home paths, host names or addresses, no prompt text. cpb takes
-a label from the environment only through `label_vars`, for the names you
-list.
+A label is plain visible text. cpb refuses any character a screen does not
+show as written: control and format characters (zero-width spaces and
+joiners, the soft hyphen, direction marks), separators, private-use
+characters and variation selectors. So a single emoji is fine, but not an
+emoji joined from several.
+
+A label is printed on shared screens and written to the log, so cpb also
+refuses a value that looks like an e-mail address, and a credential, judged
+on key and value together: `password=…`, `token=…`, `api_key=…`,
+`auth=Bearer …`, even `key=main`, since `key` names a secret. A hash after a
+key that names one, such as `commit=<40 hex>`, is fine. The refusal names a
+valid key, never a value, and an invalid key not at all. What cpb cannot
+recognise is yours to keep out: no secrets, no login identity, no home
+paths, host names or addresses, no prompt text. cpb takes a label from the
+environment only through `label_vars`, for the names you list.
 
 ## Another playbooks root
 

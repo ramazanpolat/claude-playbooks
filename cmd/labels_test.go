@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,39 +16,78 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
 
-// A label is key=value: a short key, and a one-line value that is never
-// an e-mail address, a credential or a character a terminal does not show
-// as written. A problem is refused, naming the key, never the value.
+// A label is key=value: a short key, and a one-line value of plain
+// visible text that is never empty, an e-mail address or a credential (key
+// and value checked together). A problem is refused naming a valid key,
+// never a value, and never an invalid key (a value typed where the key
+// goes).
 func TestParseTypedLabel(t *testing.T) {
 	if k, v, err := parseTypedLabel("task=review the auth PR"); err != nil || k != "task" || v != "review the auth PR" {
 		t.Fatalf("a plain label: %q %q %v", k, v, err)
 	}
-	if _, v, err := parseTypedLabel("empty="); err != nil || v != "" {
-		t.Fatalf("an empty value: %q %v", v, err)
+	for _, ok := range []string{"commit=0123456789abcdef0123456789abcdef01234567", "lang=Türkçe", "emoji=ok 🎉", "ok=" + strings.Repeat("x", 200)} {
+		if _, _, err := parseTypedLabel(ok); err != nil {
+			t.Errorf("%q refused: %v", ok, err)
+		}
 	}
 	for in, want := range map[string]string{
 		"no-equals":                        "no '='",
-		"Task=x":                           "a label key is",
-		"a b=x":                            "a label key is",
-		strings.Repeat("k", 33) + "=x":     "a label key is",
+		"Task=x":                           "the label key is not valid (4 characters)",
+		"a b=x":                            "the label key is not valid (3 characters)",
+		strings.Repeat("k", 33) + "=x":     "the label key is not valid (33 characters)",
+		"empty=":                           "is empty (--unset <key> removes a label)",
 		"long=" + strings.Repeat("x", 201): "at most 200",
-		"two=one\ntwo":                     "control, direction or invisible",
-		"bidi=a‮b":                         "control, direction or invisible",
+		"two=one\ntwo":                     "not plain visible text",
 		"mail=ask someone@example.com":     "e-mail",
-		"key=sk-ant-api03-abcdefghijklmnopqrstuv": "credential",
+		"tok=sk-ant-api03-abcdefghijklmnopqrstuv": "credential",
+		"password=hunter22":                       "credential (password=...)",
+		"token=abc123":                            "credential (token=...)",
+		"api_key=abc123":                          "credential (api_key=...)",
+		"secret=abc123":                           "credential (secret=...)",
+		"auth=Bearer abc123":                      "credential (auth=...)",
+		"key=main":                                "credential (key=...)",
 	} {
 		_, _, err := parseTypedLabel(in)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", in, err, want)
 		}
-		if err != nil && strings.Contains(in, "=") {
-			if _, v, _ := strings.Cut(in, "="); len(v) > 3 && strings.Contains(err.Error(), v) {
-				t.Errorf("%q: the error quotes the value: %v", in, err)
+		if err == nil {
+			continue
+		}
+		k, v, _ := strings.Cut(in, "=")
+		if len(v) > 3 && strings.Contains(err.Error(), v) {
+			t.Errorf("%q: the error quotes the value: %v", in, err)
+		}
+		if labelKeyProblem(k) != "" && strings.Contains(err.Error(), k) {
+			t.Errorf("%q: the error echoes an invalid key: %v", in, err)
+		}
+	}
+}
+
+// A label value is plain visible text: one test per class of what is not.
+func TestLabelValueInvisible(t *testing.T) {
+	for class, rs := range map[string][]rune{
+		"Cc, control":               {0x07, 0x1b, 0x7f, 0x85},
+		"Cf, format":                {0x00AD, 0x061C, 0x200B, 0x200C, 0x200D, 0x200E, 0x202E, 0x2060, 0x2066, 0xFEFF},
+		"tag characters":            {0xE0000, 0xE0001, 0xE0041, 0xE007F},
+		"Zl, line separator":        {0x2028},
+		"Zp, paragraph separator":   {0x2029},
+		"Co, private use":           {0xE000, 0xF8FF, 0xF0000},
+		"variation selectors":       {0xFE00, 0xFE0F, 0xE0100, 0xE01EF},
+		"combining grapheme joiner": {0x034F},
+		"Hangul fillers":            {0x115F, 0x1160, 0x3164, 0xFFA0},
+		"Mongolian variation, MVS":  {0x180B, 0x180C, 0x180D, 0x180E, 0x180F},
+	} {
+		for _, r := range rs {
+			if p := labelValueProblem("a" + string(r) + "b"); !strings.Contains(p, "not plain visible text") {
+				t.Errorf("%s U+%04X: %q", class, r, p)
 			}
 		}
 	}
-	if _, _, err := parseTypedLabel("ok=" + strings.Repeat("x", 200)); err != nil {
-		t.Fatalf("200 bytes: %v", err)
+	// Read from a file, the same: a labels file or a launch record holding
+	// one is not read.
+	if validLabels(map[string]string{"k": "a\u200bb"}) {
+		t.Fatal("a zero-width space read from a file")
 	}
 }
 
@@ -249,18 +289,36 @@ func TestSessionLabelFindsTheCallersSession(t *testing.T) {
 	if code, _ := run(nil, "bad key=x"); code != 1 {
 		t.Fatalf("a bad label: exit %d", code)
 	}
-	// --session names a live session instead of the caller's.
+	// Inside a session, --session may name only that session: another one,
+	// live or not, is refused (exit 1), and its labels are not touched.
 	if code, _ := run(func() { sessionLabelSession = sidLive }, "via=id"); code != 0 || readSessionLabels(root, sidLive)["via"] != "id" {
-		t.Fatalf("--session: exit %d", code)
+		t.Fatalf("--session of its own session: exit %d", code)
 	}
-	if code, _ := run(func() { sessionLabelSession = "99999999-9999-4999-8999-999999999999" }, "via=id"); code != exitNotASession {
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	const sidOther = "55555555-5555-4555-8555-555555555555"
+	writeSessionFile(t, cfg, other.Process.Pid, sidOther, root, "interactive", procStartOf(other.Process.Pid), time.Now())
+	if code, _ := run(func() { sessionLabelSession = sidOther }, "via=id"); code != 1 || readSessionLabels(root, sidOther) != nil {
+		t.Fatalf("--session of another session from inside one: exit %d", code)
+	}
+	// Outside any session, --session names a live session by its id; an id
+	// of no live session, or of one not confirmed live, is refused (exit 1:
+	// 3 stays "not in a session").
+	if err := os.Remove(filepath.Join(cfg, "sessions", fmt.Sprintf("%d.json", parent))); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := run(func() { sessionLabelSession = sidOther }, "via=id"); code != 0 || readSessionLabels(root, sidOther)["via"] != "id" {
+		t.Fatalf("--session from outside: exit %d", code)
+	}
+	if code, _ := run(func() { sessionLabelSession = "99999999-9999-4999-8999-999999999999" }, "via=id"); code != 1 {
 		t.Fatalf("--session of no live session: exit %d", code)
 	}
-	// A session whose file records no start time is not confirmed live
-	// (its pid may be reused): --session does not take it.
 	const unconfirmed = "44444444-4444-4444-8444-444444444444"
 	writeSessionFile(t, cfg, parent, unconfirmed, root, "interactive", "", time.Now())
-	if code, _ := run(func() { sessionLabelSession = unconfirmed }, "via=id"); code != exitNotASession || readSessionLabels(root, unconfirmed) != nil {
+	if code, _ := run(func() { sessionLabelSession = unconfirmed }, "via=id"); code != 1 || readSessionLabels(root, unconfirmed) != nil {
 		t.Fatalf("--session of an unconfirmed session: exit %d", code)
 	}
 }
@@ -295,19 +353,29 @@ func TestLabelsInTheStatusLine(t *testing.T) {
 	}
 }
 
-// SHOW SESSIONS: labels in --json; the SESSION column shows the name label.
-func TestSessionShownByName(t *testing.T) {
-	r := sessionJSON{SessionID: sidLive}
-	if sessionShown(r) != sidLive {
+// SHOW SESSIONS: the SESSION column is always the id; the labels are the
+// last column, so a value's spaces split nothing before it.
+func TestSessionsTableLabels(t *testing.T) {
+	if labelsCell(nil) != "-" || labelsCell(&blockLabelsJSON{}) != "-" {
 		t.Fatal("no labels")
 	}
-	r.Labels = &blockLabelsJSON{Launch: map[string]string{"name": "from launch"}}
-	if sessionShown(r) != "from launch" {
-		t.Fatal("launch name")
+	l := &blockLabelsJSON{Launch: map[string]string{"name": "review auth", "a": "1"}, Session: map[string]string{"task": "triage"}}
+	if got := labelsCell(l); got != "launch a=1, name=review auth; session task=triage" {
+		t.Fatalf("cell: %q", got)
 	}
-	r.Labels.Session = map[string]string{"name": "from session"}
-	if sessionShown(r) != "from session" {
-		t.Fatal("session name first")
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	writeSessionFile(t, filepath.Join(root, "alpha"), 301, sidLive, work, "interactive", liveStart, time.Now())
+	fakeProcInfo(t, map[int]procInfo{301: {start: liveStart}})
+	if _, err := updateSessionLabels(root, sidLive, map[string]string{"name": "fixing ci"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(mustStmt(t, "SHOW SESSIONS")), "\n")
+	head := strings.Fields(lines[0])
+	row := lines[len(lines)-1]
+	if head[len(head)-1] != "LABELS" || head[len(head)-3] != "SESSION" || !strings.Contains(row, " "+sidLive+" ") || !strings.HasSuffix(row, "session name=fixing ci") {
+		t.Fatalf("table:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
@@ -380,5 +448,53 @@ func TestSweepSessionLabels(t *testing.T) {
 	}
 	if strings.Join(left, " ") != "."+sidLive+".lock "+sidLive+".json" {
 		t.Fatalf("left: %v", left)
+	}
+}
+
+// A launch on a sandbox host checks its labels here, each and together,
+// before any is printed or handed to ssh: run and start alike.
+func TestSandboxHostChecksLabels(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	bin := t.TempDir()
+	marker := filepath.Join(bin, "ssh-ran")
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var many []string
+	for i := 0; i < labelsPerSource+1; i++ {
+		many = append(many, "--label", fmt.Sprintf("k%d=v", i))
+	}
+	dir := t.TempDir()
+	for _, bad := range [][]string{
+		{"--label", "owner=someone@example.com"},
+		{"--label", "tok=sk-ant-api03-abcdefghijklmnopqrstuv"},
+		{"--label", "password=hunter22"},
+		{"--label", "line=a\x1b[2Jb"},
+		many,
+	} {
+		for _, cmd := range []string{"run", "start"} {
+			args := append([]string{"--sandbox-host", "u@example-host"}, bad...)
+			var err error
+			msg := captureStderr(t, func() {
+				if cmd == "run" {
+					err = runRun(nil, append(args, "alpha"))
+				} else {
+					err = runStart(nil, append(args, dir))
+				}
+			})
+			if err == nil || !strings.Contains(err.Error(), "--label") || strings.Contains(msg, "Sandbox on") {
+				t.Errorf("%s %q: %v %q", cmd, bad[1], err, msg)
+			}
+			if _, serr := os.Stat(marker); serr == nil {
+				t.Fatalf("%s %q: ssh ran", cmd, bad[1])
+			}
+			for _, v := range []string{"someone@", "sk-ant-", "hunter22", "\x1b"} {
+				if strings.Contains(msg, v) || (err != nil && strings.Contains(err.Error(), v)) {
+					t.Errorf("%s: a value reached the output: %q %v", cmd, msg, err)
+				}
+			}
+		}
 	}
 }

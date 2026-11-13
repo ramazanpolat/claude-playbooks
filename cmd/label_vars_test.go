@@ -47,6 +47,9 @@ func TestLabelVarNames(t *testing.T) {
 			t.Errorf("%q: %q, want %q", n, p, want)
 		}
 	}
+	if p := labelVarNameProblem("sk-ant-api03-xyz"); strings.Contains(p, "sk-ant") || !strings.Contains(p, "16 characters") {
+		t.Fatalf("an entry that is not a name is echoed: %q", p)
+	}
 	if err := checkLabelVars([]string{"A", "B", "C", "D", "E", "F", "G", "H"}); err != nil {
 		t.Fatalf("8 names: %v", err)
 	}
@@ -63,19 +66,19 @@ func TestLabelVarNames(t *testing.T) {
 // the caps and a name no statement would set are left out, each noted by
 // key, never by value.
 func TestWithLabelVars(t *testing.T) {
-	env := map[string]string{"TERM_PROGRAM": "kitty", "OWNER": "someone@example.com", "MULTI": "a\nb", "TASK": "from env"}
+	env := map[string]string{"TERM_PROGRAM": "kitty", "OWNER": "someone@example.com", "MULTI": "a\nb", "TASK": "from env", "BLANK": ""}
 	lookup := func(n string) (string, bool) { v, ok := env[n]; return v, ok }
-	got, notes := withLabelVars(map[string]string{"env.task": "typed"}, []string{"TERM_PROGRAM", "OWNER", "MULTI", "MISSING", "TASK", "GITHUB_TOKEN", "term_program"}, lookup)
+	got, notes := withLabelVars(map[string]string{"env.task": "typed"}, []string{"TERM_PROGRAM", "OWNER", "MULTI", "MISSING", "TASK", "GITHUB_TOKEN", "term_program", "BLANK", "sk-ant-not-a-name"}, lookup)
 	if len(got) != 2 || got["env.term_program"] != "kitty" || got["env.task"] != "typed" {
 		t.Fatalf("labels: %v", got)
 	}
 	line := strings.Join(notes, ", ")
-	for _, want := range []string{"env.owner (the value looks like an e-mail address", "env.multi (the value holds a control", "env.missing (unset)", "github_token (not a name label_vars takes)"} {
+	for _, want := range []string{"env.owner (the value looks like an e-mail address", "env.multi (the value holds a character that is not plain visible text", "env.missing (unset)", "env.blank (empty)", "github_token (not a name label_vars takes)", "an entry of 17 characters (not a name label_vars takes)"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("notes lack %q: %s", want, line)
 		}
 	}
-	if strings.Contains(line, "someone@") || strings.Contains(line, "kitty") || strings.Contains(line, "a\nb") {
+	if strings.Contains(line, "someone@") || strings.Contains(line, "kitty") || strings.Contains(line, "a\nb") || strings.Contains(line, "sk-ant") {
 		t.Fatalf("a note shows a value: %s", line)
 	}
 	full := map[string]string{}
