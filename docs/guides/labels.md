@@ -112,8 +112,12 @@ the environment is passed on as it is.
 
 Session labels live in `.state/usage/labels/<session id>.json` under the
 playbooks root (mode 600). The file goes when its last label does, and with
-the other usage files nobody wrote for 30 days. Launch labels live in the
+the other usage files nobody wrote for 30 days, unless its session is still
+running. Launch labels live in the
 launch's record, which goes when the launch ends.
+
+Labels say what a session is for; they are not a boundary. Any process of
+yours can write a session's labels file.
 
 Reference: [Session labels](../../SPEC.md#session-labels). Example:
 [29-labels](../../examples/29-labels/README.md).

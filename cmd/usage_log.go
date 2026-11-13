@@ -613,19 +613,42 @@ func sweepUsage(root string, now time.Time) {
 		}
 	}
 	// Session labels, and their locks, nobody wrote for usageSweepAge (a
-	// write touches its lock), and a writer's temporary file left behind.
+	// write touches its lock), unless the session is still running, and a
+	// writer's temporary file left behind. The live sessions are read once,
+	// and only when an old labels file is found.
 	labels := labelsDir(root)
 	ents = nil
 	if realDirs(usageDir(root), labels) {
 		ents, _ = os.ReadDir(labels)
+	}
+	var running map[string]bool
+	isRunning := func(sessionID string) bool {
+		if running == nil {
+			running = map[string]bool{}
+			if dirs, err := knownSessionDirs(); err == nil {
+				for _, s := range readSessionFiles(dirs) {
+					running[s.f.SessionID] = true
+				}
+			}
+		}
+		return running[sessionID]
 	}
 	for _, e := range ents {
 		fi, err := e.Info()
 		if err != nil || !fi.Mode().IsRegular() {
 			continue
 		}
-		if (strings.HasPrefix(e.Name(), ".labels-") && old(fi, time.Minute)) || old(fi, usageSweepAge) {
-			_ = os.Remove(filepath.Join(labels, e.Name()))
+		name := e.Name()
+		switch {
+		case strings.HasPrefix(name, ".labels-"):
+			if old(fi, time.Minute) {
+				_ = os.Remove(filepath.Join(labels, name))
+			}
+		case old(fi, usageSweepAge):
+			sessionID := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(name, "."), ".lock"), ".json")
+			if !isRunning(sessionID) {
+				_ = os.Remove(filepath.Join(labels, name))
+			}
 		}
 	}
 }

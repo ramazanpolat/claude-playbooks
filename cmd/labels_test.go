@@ -237,7 +237,9 @@ func TestSessionLabelsLock(t *testing.T) {
 }
 
 // cpb session label finds the session it runs in from its ancestry: a
-// session file of an ancestor with a matching start time. A start time
+// session file of an ancestor with a matching start time. No launch record
+// is needed: a claude started without cpb in a playbook's directory counts,
+// as SHOW SESSIONS lists it. A start time
 // that does not match, or no session at all, is "not a cpb session",
 // with its own exit code.
 func TestSessionLabelFindsTheCallersSession(t *testing.T) {

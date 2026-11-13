@@ -3057,19 +3057,27 @@ cpb session label --session <id> task=x    # outside any session: a live session
 
   - **Which session.** The first ancestor of the calling process, at most 8
     up, whose Claude Code session file, in a config directory cpb knows,
-    names it and records the start time that process has (*Live*).
+    names it and records the start time that process has (*Live*). A claude
+    started without cpb in a playbook's directory (`CLAUDE_CONFIG_DIR` set
+    to it) counts too, as `SHOW SESSIONS` lists it. The ancestry is read
+    from one process table per call.
     Inside a session cpb launched, `--session` may name only that session:
     another is refused. Outside any session, `--session <id>` names a live
     session, one confirmed live: not one recorded in another pid domain, nor
     one whose file records no start time.
   - **Exit codes.** 0 done; 1 refused, an unknown or unconfirmed
-    `--session` id included; 3 not in a session cpb launched, so a hook can
-    ignore exactly that.
+    `--session` id included; 3 not in a session of a playbook (a registry
+    cpb cannot read included), so a hook can ignore exactly that.
   - **Kept** in `<playbooks root>/.state/usage/labels/<session id>.json`
     (mode `0600`), written whole under the session's lock, which a writer
     waits at most 400 ms for before it is refused (another label write of
     the session is in progress). The file goes when its last label does,
-    and is swept with the usage files nobody wrote for 30 days.
+    and is swept with the usage files nobody wrote for 30 days, unless its
+    session is still running.
+  - **Not a boundary.** Labels are not a boundary between processes of
+    one user: any of them can write a session's labels file, and outside a
+    session `cpb session label --session <id>` labels any live session.
+    They say what a session is for; they decide nothing.
   - **The playbooks root.** A launch whose root came from `--playbooks-dir`
     sets `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing one it
     inherited (the flag outranks it), so a cpb inside it reads and writes
