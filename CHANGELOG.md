@@ -53,6 +53,15 @@
   installed one, and a played recipe may not set it. `SHOW PLAYBOOK`,
   `SHOW DEFAULTS`, `SHOW CREATE` and `SELECT` (`PLAYBOOKS`, `DEFAULTS`)
   show it, and `EXPLAIN` says for each name what a launch would do.
+- **A provider that speaks only the OpenAI API** (docs only, no change to
+  cpb): a guide and an example for running Claude Code on such a provider
+  through a translator on your machine, with Venice.ai through LiteLLM as
+  the worked case. The account is a `gateway` on the translator's local
+  address; the provider's key is lent to the translator alone for its life,
+  and the account sends a per-run token the translator makes. On request
+  only: `access = 'listed'`, the playbook's `failover = 'off'`. Guide:
+  `docs/guides/openai-compatible-provider.md`; example
+  `30-translated-gateway`.
 
 ### Changed
 
