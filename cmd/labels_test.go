@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -496,5 +497,20 @@ func TestSandboxHostChecksLabels(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The one ps table cpb session label reads on macOS: every process's
+// parent and start time, in the form the session files record.
+func TestPsTable(t *testing.T) {
+	if _, err := exec.LookPath("ps"); err != nil {
+		t.Skip("no ps here")
+	}
+	info, ok := psTable()[os.Getpid()]
+	if !ok || info.ppid != os.Getppid() || len(strings.Fields(info.start)) != 5 {
+		t.Fatalf("this process: %+v %v", info, ok)
+	}
+	if runtime.GOOS != "linux" && !sameStart(info.start, procStartOf(os.Getpid())) {
+		t.Fatalf("start %q, ps -p says %q", info.start, procStartOf(os.Getpid()))
 	}
 }

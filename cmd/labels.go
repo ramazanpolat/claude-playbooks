@@ -320,8 +320,9 @@ func callerSession() (sessionFile, error) {
 		return sessionFile{}, err
 	}
 	pid := os.Getppid()
+	proc := procWalker()
 	for i := 0; i < labelSessionDepth && pid > 1; i++ {
-		info, ok := procStarts([]int{pid})[pid]
+		info, ok := proc(pid)
 		if !ok {
 			break
 		}
