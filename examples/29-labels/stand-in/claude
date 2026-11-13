@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+# A stand-in for claude that does what Claude Code does around labels:
+# it writes its session file (<config dir>/sessions/<pid>.json, as Claude
+# Code does for each live process), runs a SessionStart hook with sh -c as
+# its child, renders the launch's status line with the session's id, and
+# lists the live sessions as a tool inside the session would. No network,
+# no model.
+import json, os, subprocess, sys, time
+
+SID = "0e5c1a2b-0000-4000-8000-0000000000b1"
+cfg = os.environ["CLAUDE_CONFIG_DIR"]
+home = os.environ["HOME"]
+
+
+def proc_start(pid):
+    # As Claude Code records it: /proc's start time on Linux, ps's elsewhere.
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            return f.read().rsplit(")", 1)[1].split()[19]
+    except OSError:
+        env = dict(os.environ, TZ="UTC", LC_ALL="C")
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=env, capture_output=True, text=True).stdout
+        return " ".join(out.split())
+
+
+args = sys.argv[1:]
+settings = json.loads(args[args.index("--settings") + 1]) if "--settings" in args else {}
+os.makedirs(os.path.join(cfg, "sessions"), exist_ok=True)
+session_file = os.path.join(cfg, "sessions", "%d.json" % os.getpid())
+with open(session_file, "w") as f:
+    json.dump({"pid": os.getpid(), "sessionId": SID, "cwd": os.getcwd(), "startedAt": int(time.time() * 1000),
+               "procStart": proc_start(os.getpid()), "kind": "interactive", "status": "busy"}, f)
+try:
+    # Claude Code renders after it starts; cpb records the launch once the
+    # process runs, and the status line step reads that record.
+    launches = os.path.join(home, ".claude-playbooks", ".state", "launches")
+    for _ in range(50):
+        if os.path.isdir(launches) and any(n.endswith(".json") for n in os.listdir(launches)):
+            break
+        time.sleep(0.1)
+    # The hook. `|| [ $? -eq 3 ]` ignores exactly "not in a session cpb
+    # launched", so the same hook works under plain claude too.
+    subprocess.run(["/bin/sh", "-c", "cpb session label task=triage || [ $? -eq 3 ]"], check=True)
+    # The status line, rendered after the hook ran.
+    command = (settings.get("statusLine") or {}).get("command")
+    status_input = {"session_id": SID, "version": "2.1.322", "model": {"id": "claude-opus-5-5", "display_name": "Opus"},
+                    "workspace": {"current_dir": os.getcwd(), "project_dir": os.getcwd()}}
+    out = subprocess.run(["/bin/sh", "-c", command], input=json.dumps(status_input).encode(), capture_output=True)
+    with open(os.path.join(home, "statusline.out"), "wb") as f:
+        f.write(out.stdout)
+    # SHOW SESSIONS from inside, once cpb has recorded the launch.
+    rows = []
+    for _ in range(50):
+        r = subprocess.run(["cpb", "SHOW", "SESSIONS", "--json"], capture_output=True, text=True)
+        rows = json.loads(r.stdout or "[]")
+        if any(x["session_id"] == SID and x["account"] for x in rows):
+            break
+        time.sleep(0.1)
+    with open(os.path.join(home, "sessions.json"), "w") as f:
+        json.dump(rows, f)
+    table = subprocess.run(["cpb", "SHOW", "SESSIONS"], capture_output=True, text=True).stdout
+    with open(os.path.join(home, "sessions.txt"), "w") as f:
+        f.write(table)
+finally:
+    os.remove(session_file)

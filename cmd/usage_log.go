@@ -76,6 +76,10 @@ type usageSnapshot struct {
 	Repo          json.RawMessage `json:"repo"`
 	GitWorktree   *string         `json:"git_worktree"`
 	Agent         json.RawMessage `json:"agent"`
+	// LaunchLabels and SessionLabels are the session's labels as they
+	// were at this line (labels.go), apart from cpb's own fields.
+	LaunchLabels  map[string]string `json:"launch_labels,omitempty"`
+	SessionLabels map[string]string `json:"session_labels,omitempty"`
 }
 
 // capString keeps at most usageStringCap bytes of s, cut at a rune
@@ -187,7 +191,7 @@ func snapshotOf(in []byte) (usageSnapshot, bool) {
 // changeSignature is what makes a snapshot worth a line whenever it
 // changes: the usage figures and what the session runs.
 func (s usageSnapshot) changeSignature() string {
-	b, _ := json.Marshal([]any{s.RateLimits, s.Model, s.Effort, s.FastMode, s.SessionName, s.Account, s.Key})
+	b, _ := json.Marshal([]any{s.RateLimits, s.Model, s.Effort, s.FastMode, s.SessionName, s.Account, s.Key, s.LaunchLabels, s.SessionLabels})
 	return string(b)
 }
 
@@ -606,6 +610,22 @@ func sweepUsage(root string, now time.Time) {
 		}
 		if (strings.HasPrefix(e.Name(), ".latest-") && old(fi, time.Minute)) || old(fi, usageSweepAge) {
 			_ = os.Remove(filepath.Join(accounts, e.Name()))
+		}
+	}
+	// Session labels, and their locks, nobody wrote for usageSweepAge (a
+	// write touches its lock), and a writer's temporary file left behind.
+	labels := labelsDir(root)
+	ents = nil
+	if realDirs(usageDir(root), labels) {
+		ents, _ = os.ReadDir(labels)
+	}
+	for _, e := range ents {
+		fi, err := e.Info()
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		if (strings.HasPrefix(e.Name(), ".labels-") && old(fi, time.Minute)) || old(fi, usageSweepAge) {
+			_ = os.Remove(filepath.Join(labels, e.Name()))
 		}
 	}
 }

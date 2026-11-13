@@ -1,5 +1,40 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Session labels.** A session carries short `key=value` labels from two
+  sources, kept apart:
+  - **launch labels**, given at launch with `--label KEY=VALUE` on `cpb run`,
+    a launcher or `cpb start`. They are kept in the launch record, and every
+    launch cpb rebuilds carries them like `--env`: the failover relaunch,
+    the by-hand line, a sandbox host. They are checked, each and together,
+    before anything starts and before a launch is forwarded to a sandbox
+    host;
+  - **session labels**, set from inside a live session by a hook or a tool
+    with `cpb session label key=value` (`--unset`, `--list`, `--json`). It
+    finds the session from its own process ancestry, and labels only that
+    one; outside any session, `--session <id>` labels a live session by its
+    id. It exits 3 when it does not run in a session cpb launched, so a hook
+    can ignore exactly that. A write waits at most 400 ms for another
+    writer of the same session.
+  - Both reach the status line's `cpb` key (`labels`), `SHOW SESSIONS`
+    (`labels` in `--json`, a last `LABELS` column in the table, a `labels`
+    column in `SELECT … FROM SESSIONS`) and the usage log
+    (`launch_labels`, `session_labels`).
+  - A label value is one line of plain visible text, not empty. A
+    character a screen does not show as written (control, format,
+    separator, private-use, variation selector), a value that looks like
+    an e-mail address, and a credential, judged on key and value together
+    as `cpb ask` judges a request (`password=…`, `key=main`; a hash after
+    `commit=` is fine), are refused, with a message naming a valid key and
+    never a value. Labels are never taken from the environment.
+  - A launch whose playbooks root came from `--playbooks-dir` sets
+    `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
+    one, so a cpb inside it uses the same root.
+  - Guide: `docs/guides/labels.md`; example `29-labels`.
+
 ## [v4.8.0] -- 2026-11-13
 
 v4.8.0 lets a session outlive a usage limit and shows how much of each
