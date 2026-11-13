@@ -88,9 +88,10 @@
 
 - **SHOW USAGE after a failover:** a session moved to another account
   starts over there, so its first figures on the new account no longer
-  lower that account's stored use of the same window. The figures it still
-  shows from the old account until its first answer on the new one are
-  counted for neither account.
+  lower that account's stored use of the same window. When those are the
+  figures it still shows from the old account until its first answer on
+  the new one, they count for neither account, and the figures after them
+  are its later figures on the new account, which stand as they are.
 - **A worktree whose `.git` names its `gitdir` relative to the worktree**
   (git's `worktree.useRelativePaths`) has its main checkout's settings
   found from any folder below it.

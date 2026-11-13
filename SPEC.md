@@ -3280,8 +3280,9 @@ SELECT … FROM USAGE
   holds first figures, unless they are the very figures of its line
   before, on the old allowance, which Claude Code shows until its first
   answer on the new one: those are no figures for either allowance, and
-  the new allowance's own figures, when they come, count as new. It is
-  read only from the file its key's hash names, never
+  the figures that follow them are the session's later figures on the new
+  allowance, which stand as they are. It is read only from the file its
+  key's hash names, never
   one seen later than now, with each name checked as a launch writes it,
   use bounded to 0-1000% and a reset to its seen time plus the window's
   length. A stored figure that claims a seen time more than a minute
