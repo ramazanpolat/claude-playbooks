@@ -135,7 +135,9 @@ func usageRows(root string, latest map[string]latestFigure, opts usageRowsOpts) 
 		r := add(a.Name)
 		r.accounts = []string{a.Name}
 		r.claude = a.Auth.Kind == account.ClaudeToken
-		if id := strings.TrimSpace(a.Identity); id != "" {
+		// A label is shown as written only when it is one a terminal shows
+		// as written.
+		if id := strings.TrimSpace(a.Identity); id != "" && validRecordedAccount(id) {
 			r.identity = &id
 		}
 	}

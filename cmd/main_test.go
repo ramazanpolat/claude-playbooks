@@ -32,10 +32,7 @@ func TestMain(m *testing.M) {
 	// The status line step, likewise: a launch's status line command names
 	// cpb's own binary (statusline_step.go).
 	if len(os.Args) > 1 && os.Args[1] == statuslineStepArg {
-		if err := runStatuslineStep(os.Args[2:], os.Stdin); err != nil {
-			os.Stderr.WriteString("Error: " + err.Error() + "\n")
-		}
-		os.Exit(1)
+		os.Exit(statuslineStepMain(os.Args[2:], os.Stdin))
 	}
 	auth.KeychainProbe = func(string, string) auth.KeychainState { return auth.KeychainAbsent }
 	auth.SetKeychainSecretForTest(func(string) ([]byte, error) { return nil, errKeychainStubbed })

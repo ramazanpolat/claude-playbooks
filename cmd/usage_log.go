@@ -263,7 +263,7 @@ func lastSnapshot(f *os.File) *usageSnapshot {
 // figure (an idle session re-rendering an old figure is not).
 func appendSnapshot(root string, s usageSnapshot, now time.Time) (wrote, newFigures bool) {
 	path := sessionLogPath(root, s.SessionID, now)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil || !realDirs(usageDir(root), filepath.Dir(filepath.Dir(path)), filepath.Dir(path)) {
+	if !mkdirsReal(usageDir(root), filepath.Dir(filepath.Dir(path)), filepath.Dir(path)) {
 		return false, false
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
@@ -314,6 +314,18 @@ func appendSnapshot(root string, s usageSnapshot, now time.Time) (wrote, newFigu
 // appendOpened runs between opening a log and locking it; a hook for tests.
 var appendOpened = func(string) {}
 
+// mkdirsReal makes each folder in turn, each inside the one before, and
+// reports whether all are folders themselves: a symbolic link at any of
+// them stops it before anything is made through the link.
+func mkdirsReal(paths ...string) bool {
+	for _, p := range paths {
+		if os.MkdirAll(p, 0o700) != nil || !realDirs(p) {
+			return false
+		}
+	}
+	return true
+}
+
 // realDirs reports whether every path is a directory itself, not a
 // symbolic link to one: cpb writes and sweeps under .state/usage only.
 func realDirs(paths ...string) bool {
@@ -358,11 +370,20 @@ func writeLatest(root string, s usageSnapshot) {
 	}
 	path := latestPath(root, s.Key)
 	rates := s.RateLimits
+	at, err := time.Parse(time.RFC3339Nano, s.At)
+	if err != nil {
+		return
+	}
+	// A figure there that claims to be seen later than now (a clock that
+	// was ahead) is no figure: it never holds back a real one.
 	if old, ok := readLatest(path); ok {
-		if old.SeenAt > s.At {
-			return
+		oldAt, _ := time.Parse(time.RFC3339Nano, old.SeenAt)
+		if !oldAt.After(at.Add(time.Minute)) {
+			if oldAt.After(at) {
+				return
+			}
+			rates = keepNewerWindow(old.RateLimits, oldAt, rates)
 		}
-		rates = keepHigher(old.RateLimits, rates)
 	}
 	b, err := json.Marshal(latestFigure{V: usageVersion, Key: s.Key, Account: s.Account,
 		SeenAt: s.At, SessionID: s.SessionID, Playbook: s.Playbook, ConfigDir: s.ConfigDir, RateLimits: rates})
@@ -370,7 +391,7 @@ func writeLatest(root string, s usageSnapshot) {
 		return
 	}
 	dir := filepath.Dir(path)
-	if os.MkdirAll(dir, 0o700) != nil || !realDirs(usageDir(root), dir) {
+	if !mkdirsReal(usageDir(root), dir) {
 		return
 	}
 	tmp, err := os.CreateTemp(dir, ".latest-*")
@@ -392,19 +413,23 @@ func writeLatest(root string, s usageSnapshot) {
 	}
 }
 
-// keepHigher is now's rate limits, with each window that resets when old's
-// does and was higher in old kept from old.
-func keepHigher(old, now json.RawMessage) json.RawMessage {
+// keepNewerWindow is now's rate limits, with each window of old's kept
+// where old's is the newer: it resets later (a session's first render may
+// carry a window that has already reset), or at the same time with a
+// higher use. old's reset counts only up to its seen time plus the
+// window's length.
+func keepNewerWindow(old json.RawMessage, oldSeen time.Time, now json.RawMessage) json.RawMessage {
 	var o, n map[string]json.RawMessage
 	if json.Unmarshal(old, &o) != nil || json.Unmarshal(now, &n) != nil {
 		return now
 	}
-	for _, k := range []string{"five_hour", "seven_day"} {
+	for k, length := range usageWindowLength {
 		var ow, nw usageWindow
 		if json.Unmarshal(o[k], &ow) != nil || json.Unmarshal(n[k], &nw) != nil {
 			continue
 		}
-		if ow.ResetsAt == nw.ResetsAt && ow.UsedPercentage > nw.UsedPercentage {
+		oldReset := min(ow.ResetsAt, oldSeen.Add(length).Unix())
+		if oldReset > nw.ResetsAt || (ow.ResetsAt == nw.ResetsAt && ow.UsedPercentage > nw.UsedPercentage) {
 			n[k] = o[k]
 		}
 	}
@@ -469,10 +494,11 @@ func readLatestFigures(root string) map[string]latestFigure {
 		if !ok || e.Name() != filepath.Base(latestPath(root, l.Key)) {
 			continue
 		}
-		if at, _ := time.Parse(time.RFC3339Nano, l.SeenAt); at.After(now.Add(time.Minute)) {
+		at, _ := time.Parse(time.RFC3339Nano, l.SeenAt)
+		if at.After(now.Add(time.Minute)) {
 			continue
 		}
-		l.RateLimits = boundRates(l.RateLimits, now)
+		l.RateLimits = boundRates(l.RateLimits, at)
 		out[l.Key] = l
 	}
 	return out
@@ -481,10 +507,11 @@ func readLatestFigures(root string) map[string]latestFigure {
 // usageWindowLength is how long a window Claude Code names lasts.
 var usageWindowLength = map[string]time.Duration{"five_hour": 5 * time.Hour, "seven_day": 7 * 24 * time.Hour}
 
-// boundRates is raw with each window's numbers bounded: use between 0 and
-// 1000 percent, and a reset no later than now plus the window's length (a
-// figure cannot hold an account full past its window). Other keys pass.
-func boundRates(raw json.RawMessage, now time.Time) json.RawMessage {
+// boundRates is raw, seen at seen, with each window's numbers bounded: use
+// between 0 and 1000 percent, and a reset no later than seen plus the
+// window's length (a figure cannot hold an account full past its window).
+// Other keys pass.
+func boundRates(raw json.RawMessage, seen time.Time) json.RawMessage {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(raw, &m) != nil {
 		return raw
@@ -501,7 +528,7 @@ func boundRates(raw json.RawMessage, now time.Time) json.RawMessage {
 			continue
 		}
 		used = math.Max(0, math.Min(used, 1000))
-		resets = math.Max(0, math.Min(resets, float64(now.Add(length).Unix())))
+		resets = math.Max(0, math.Min(resets, float64(seen.Add(length).Unix())))
 		w["used_percentage"], _ = json.Marshal(used)
 		w["resets_at"], _ = json.Marshal(int64(resets))
 		m[k], _ = json.Marshal(w)

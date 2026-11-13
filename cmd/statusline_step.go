@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"syscall"
@@ -226,11 +228,53 @@ func execOriginal(original string, data []byte) error {
 }
 
 // stepRun runs the original as a child fed data, with the step's output
-// and error, and returns its exit; a variable for tests.
+// and error, and returns its exit as a shell reports it (128 plus the
+// signal for one a signal ended). A SIGTERM, SIGINT or SIGHUP to the step
+// goes on to the child, so no original outlives it. A variable for tests.
 var stepRun = func(argv0 string, argv, env []string, data []byte) error {
 	c := exec.Command(argv0, argv[1:]...)
 	c.Env, c.Stdin, c.Stdout, c.Stderr = env, bytes.NewReader(data), os.Stdout, os.Stderr
-	return preserveExitCode(c.Run())
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	defer signal.Stop(sigs)
+	if err := c.Start(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case s := <-sigs:
+				_ = c.Process.Signal(s)
+			case <-done:
+				return
+			}
+		}
+	}()
+	err := c.Wait()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			return &commandExitError{code: 128 + int(ws.Signal())}
+		}
+	}
+	return preserveExitCode(err)
+}
+
+// statuslineStepMain runs the step and is the exit code cpb ends with: 0
+// when the original ran as a child and succeeded, the original's own code
+// otherwise, 1 when the step could not run it.
+func statuslineStepMain(args []string, stdin io.Reader) int {
+	err := runStatuslineStep(args, stdin)
+	if err == nil {
+		return 0
+	}
+	if code, ok := exitCode(err); ok {
+		return code
+	}
+	fmt.Fprintf(os.Stderr, "cpb status line step: %v\n", err)
+	return 1
 }
 
 // stepPipeBytes is what a pipe takes without a reader on every system cpb

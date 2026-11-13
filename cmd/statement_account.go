@@ -69,6 +69,9 @@ func accountStatement(r *stmtRun, st *grammar.Stmt) error {
 		old = &c
 	}
 	lines := applyAccountClauses(a, st.Clauses)
+	if a.Identity != "" && !validRecordedAccount(a.Identity) {
+		return fmt.Errorf("account %q: identity %q holds a control or invisible character", st.Name, a.Identity)
+	}
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("account %s: %w", st.Name, err)
 	}
@@ -446,10 +449,19 @@ type accountJSON struct {
 	Default bool     `json:"default"`
 }
 
+// shownLabel is a label as SHOW prints it: as written, or none when it
+// holds a character a terminal would not show as written.
+func shownLabel(s string) string {
+	if s == "" || validRecordedAccount(s) {
+		return s
+	}
+	return ""
+}
+
 func describeAccount(a *account.Account, users []string, def bool) accountJSON {
 	v := accountJSON{
 		Name: a.Name, Description: optStr(a.Description), Provider: a.Provider,
-		BaseURL: optStr(a.BaseURL), Identity: optStr(a.Identity),
+		BaseURL: optStr(a.BaseURL), Identity: optStr(shownLabel(a.Identity)),
 		Auth: a.Auth.Kind, AuthRef: optStr(a.Auth.Ref), AuthPlaintext: a.Auth.Value != "",
 		Helper: optStr(a.Auth.Helper), Access: account.AccessAny,
 		ClaudeLoginTrusted: a.ClaudeLoginTrusted, Models: map[string]string{},

@@ -2071,9 +2071,11 @@ usage (*SHOW USAGE*). The playbook changes nothing.
   8 KiB): the original is the same process from then on, its output, exit
   code and timeout as without the step. When neither can hold the input
   (no usable temporary folder), the original runs as the step's child, fed
-  the same input, and the step ends with its exit code. The account, the identity and the rest come from the
+  the same input, and the step ends with its exit code (128 plus the
+  signal for one a signal ended; a SIGTERM, SIGINT or SIGHUP to the step
+  goes on to it). The account, its usage key and the rest come from the
   launch record the id names, never from argv or the session's
-  environment.
+  environment; the step knows no identity.
 - **What it adds: the `cpb` key**, version 1. Names only: never an
   identity, never a credential.
 
@@ -2088,8 +2090,12 @@ usage (*SHOW USAGE*). The playbook changes nothing.
 ```
 
   - `account.name` is the name of the session's own usage entry (null when
-    cpb has none); `usage` has one entry per row of `SHOW USAGE`, the
-    session's own first and then by name, at most 16.
+    cpb has none); `usage` has one entry per usage key, except that
+    stored accounts sharing an `identity` label are one entry. The step
+    reads no login's identity, so `machine` and each `playbook:<name>` are
+    entries of their own even where *SHOW USAGE* shows them as one row.
+    The session's own entry comes first, then the others by name, at most
+    16.
   - A name is lower case `a-z`, digits and `._:@-`, at most 64 characters:
     a stored account's name, `machine` (the machine's login),
     `playbook:<name>` (an isolated playbook's own login), a layer route's
@@ -3038,7 +3044,10 @@ SELECT … FROM USAGE
   newer one); for a window that resets at the same time the higher use
   stands. It is read only from the file its key's hash names, never one
   seen later than now, with each name checked as a launch writes it, use
-  bounded to 0-1000% and a reset to now plus the window's length. `DROP
+  bounded to 0-1000% and a reset to its seen time plus the window's
+  length. A stored figure that claims a seen time later than now is
+  replaced by the next real one, and a window of the stored figure that
+  resets later than the new one's is kept. `DROP
   ACCOUNT`, and a change of an account's provider, address or credential,
   remove the account's figure.
 - A launch removes files nobody wrote for 30 days. cpb neither writes nor

@@ -341,11 +341,18 @@ func validRecordedAccount(name string) bool {
 		return false
 	}
 	for _, c := range name {
-		if unicode.IsControl(c) {
+		if unicode.IsControl(c) || invisible(c) {
 			return false
 		}
 	}
 	return true
+}
+
+// invisible reports whether c changes how text around it is shown
+// without being seen itself: direction marks and overrides, zero-width
+// characters, line and paragraph separators.
+func invisible(c rune) bool {
+	return c >= 0x200B && c <= 0x200F || c >= 0x202A && c <= 0x202E || c >= 0x2066 && c <= 0x2069 || c == 0x2028 || c == 0x2029
 }
 
 // sameStart reports whether two start times, as procStarts and the record
