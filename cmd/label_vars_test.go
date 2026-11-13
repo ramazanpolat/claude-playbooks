@@ -392,3 +392,37 @@ func TestFailoverRelaunchCarriesTheLaunchLabels(t *testing.T) {
 		t.Fatalf("the relaunch's labels: %v (switches %d)\n%s", rec.Labels, len(rec.Switches), msg)
 	}
 }
+
+// label_vars takes the names as written: an entry with spaces around it,
+// or an empty one, is refused and named by its length, never trimmed or
+// dropped. Spaces between items are only separators.
+func TestLabelVarsEntriesAsWritten(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	for stmt, length := range map[string]string{
+		"ALTER PLAYBOOK alpha SET label_vars = [' TERM_PROGRAM ']":   "14 characters",
+		"ALTER PLAYBOOK alpha SET label_vars = ['TERM_PROGRAM ']":    "13 characters",
+		"ALTER PLAYBOOK alpha SET label_vars = ['', 'TERM_PROGRAM']": "0 characters",
+		"ALTER PLAYBOOK alpha SET label_vars = ['TERM_PROGRAM', '']": "0 characters",
+		"ALTER PLAYBOOK alpha SET label_vars = 'TERM_PROGRAM,,HC_X'": "0 characters",
+		"ALTER DEFAULTS SET label_vars = [' TERM_PROGRAM']":          "13 characters",
+	} {
+		err := stmtErr(t, stmt)
+		if err == nil || !strings.Contains(err.Error(), "an entry of "+length) || strings.Contains(err.Error(), "TERM_PROGRAM") {
+			t.Errorf("%s: %v", stmt, err)
+		}
+	}
+	if m, _ := manifest.Read(filepath.Join(root, "alpha")); m != nil && len(m.LabelVars) != 0 {
+		t.Fatalf("a refused entry was stored: %v", m.LabelVars)
+	}
+	for _, stmt := range []string{"ALTER PLAYBOOK alpha SET label_vars = ['TERM_PROGRAM',   'HC_TERMINAL_ID']", "ALTER PLAYBOOK alpha SET label_vars = 'TERM_PROGRAM,HC_TERMINAL_ID'"} {
+		mustStmt(t, stmt)
+		if m, _ := manifest.Read(filepath.Join(root, "alpha")); strings.Join(m.LabelVars, "|") != "TERM_PROGRAM|HC_TERMINAL_ID" {
+			t.Fatalf("%s: %q", stmt, m.LabelVars)
+		}
+	}
+	mustStmt(t, "ALTER PLAYBOOK alpha RESET label_vars")
+	if m, _ := manifest.Read(filepath.Join(root, "alpha")); len(m.LabelVars) != 0 {
+		t.Fatalf("RESET kept %v", m.LabelVars)
+	}
+}

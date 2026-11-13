@@ -633,6 +633,9 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 // comma; SHOW CREATE writes the [ ] form.
 func (p *parser) listValue(t Token, k, first string, ft Token) ([]string, *Error) {
 	hint := k + " takes a list: ['a', 'b'], or 'a,b'"
+	// label_vars takes only the names as written: an empty item is kept,
+	// for the command to refuse, never dropped.
+	keepEmpty := k == "label_vars"
 	split := func(text string) ([]string, *Error) {
 		var items []string
 		for _, item := range strings.Split(text, ",") {
@@ -640,7 +643,7 @@ func (p *parser) listValue(t Token, k, first string, ft Token) ([]string, *Error
 			if strings.ContainsAny(item, "\r\n") {
 				return nil, errAt(t.Pos, hint)
 			}
-			if item != "" {
+			if item != "" || keepEmpty {
 				items = append(items, item)
 			}
 		}
@@ -651,7 +654,7 @@ func (p *parser) listValue(t Token, k, first string, ft Token) ([]string, *Error
 			first = strings.TrimSuffix(first, ",")
 		}
 		items, err := split(unquoteArg(first))
-		if err == nil && len(items) == 0 {
+		if err == nil && (len(items) == 0 || len(items) == 1 && items[0] == "") {
 			return nil, errAt(t.Pos, hint+"; RESET "+k+" empties it")
 		}
 		return items, err

@@ -304,15 +304,11 @@ func checkLabelVars(names []string) error {
 // labelVarKey is the launch label a name of label_vars gives.
 func labelVarKey(n string) string { return "env." + strings.ToLower(n) }
 
-// splitLabelVars reads a list property's value ('A, B') into its names.
+// splitLabelVars reads a list property's value (the grammar's items,
+// comma-joined) into its entries as written: nothing trimmed, an empty one
+// kept, so the check refuses what the person did not write as a name.
 func splitLabelVars(v string) []string {
-	var out []string
-	for _, n := range strings.Split(v, ",") {
-		if n = strings.TrimSpace(n); n != "" {
-			out = append(out, n)
-		}
-	}
-	return out
+	return strings.Split(v, ",")
 }
 
 // labelVarState is what a launch does with one name of label_vars: Name

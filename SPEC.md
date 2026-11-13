@@ -3067,7 +3067,9 @@ cpb "ALTER PLAYBOOK reviewer SET label_vars = ['HC_TERMINAL_ID']" # this playboo
   - **Only names listed.** A name is a variable's exact name (letters,
     digits and `_`, not starting with a digit, at most 28 characters): no
     pattern, no prefix, no "all". At most 8 in each list, none twice in any
-    case. Refused when the list is set, whatever the value:
+    case. Each entry is taken as written: one with spaces around it, or an
+    empty one, is refused, never trimmed or dropped. Refused when the list
+    is set, whatever the value:
     - cpb's own (`CPB_*`, `CLAUDE_CONFIG_DIR`) and an account's variables;
     - a name that may hold a credential: one *Secrets* masks (`TOKEN`,
       `SECRET`, `PASSWORD`, `AUTH`, a `*KEY` segment and the rest), any name

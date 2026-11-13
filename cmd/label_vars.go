@@ -72,15 +72,22 @@ func writeLabelVarsDefaults(root string, names []string) error {
 // labelVarsAfter is a label_vars list after the SET and RESET clauses that
 // name it, whether they do, and the list checked.
 func labelVarsAfter(cur []string, clauses []grammar.Clause) ([]string, bool, error) {
-	v, ok := grammar.PropertyValue(clauses, "label_vars")
-	if !ok {
-		return cur, false, nil
+	for _, c := range clauses {
+		for _, v := range c.Settings {
+			if v.Key != "label_vars" {
+				continue
+			}
+			if c.Kind == grammar.ResetProperties {
+				return nil, true, nil
+			}
+			next := splitLabelVars(v.Value)
+			if err := checkLabelVars(next); err != nil {
+				return cur, true, err
+			}
+			return next, true, nil
+		}
 	}
-	next := splitLabelVars(v)
-	if err := checkLabelVars(next); err != nil {
-		return cur, true, err
-	}
-	return next, true, nil
+	return cur, false, nil
 }
 
 // labelVarsLine says what a label_vars list does.
