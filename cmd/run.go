@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -54,16 +55,18 @@ var onLaunch func(*os.Process)
 
 // runAttached runs a session's command, telling onLaunch its process: a
 // host launch, or a sandbox backend's attach.
-func runAttached(c *exec.Cmd) error { return runRecorded(c, nil) }
+func runAttached(c *exec.Cmd) error { return runRecorded(c, nil, nil) }
 
 // runRecorded is runAttached for a host launch: rec, when given, is written
 // for the process once it starts and removed when it ends, so SHOW SESSIONS
 // can tell the session's account (launch_record.go). A sandbox's attach
 // records nothing: its sessions are not on the host.
-func runRecorded(c *exec.Cmd, rec *launchRecord) error {
+func runRecorded(c *exec.Cmd, rec *launchRecord, watch *failoverWatch) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
+	// The next claude of a switch has started: a Ctrl-C is its own again.
+	releaseHandover()
 	// A token run stays live for as long as this session does, even if
 	// cpb is killed first (internal/auth/own_login.go).
 	auth.SessionStarted(c.Process.Pid)
@@ -73,10 +76,127 @@ func runRecorded(c *exec.Cmd, rec *launchRecord) error {
 	if onLaunch != nil {
 		onLaunch(c.Process)
 	}
-	return c.Wait()
+	if watch == nil {
+		return c.Wait()
+	}
+	// Account failover (failover.go): the watcher may end this claude to
+	// resume its session on another account; then the launch reports the
+	// switch instead of claude's exit.
+	done := make(chan struct{})
+	result := make(chan *failoverSwitch, 1)
+	go func() { result <- watch.watch(done, c.Process) }()
+	err := c.Wait()
+	close(done)
+	if sw := <-result; sw != nil {
+		return sw
+	}
+	return err
 }
 
+// failoverRelaunch is what runRunOnce returns when its session moved to
+// another account: the cpb run command line that resumes it there. runRun
+// runs it after the launch that ended has returned, its clean-up done.
+type failoverRelaunch struct {
+	args []string
+	sw   *failoverSwitch
+	// back resumes the session on the account it came from, for when the
+	// launch on the new one is refused before claude starts.
+	back []string
+}
+
+func (r *failoverRelaunch) Error() string { return r.sw.Error() }
+
+// runRun launches a playbook, and launches it again on another account
+// each time its session moves there (account failover). The resume runs
+// from the folder the session ran in. A launch on the new account that
+// never ran the session (refused, or its secret helper failing before
+// claude starts: the transcript is as it was) resumes the session on the
+// account it came from instead, so a switch never leaves it ended.
 func runRun(cmd *cobra.Command, args []string) error {
+	// A Ctrl-C between two claudes of a switch is caught (handoverSigs in
+	// failover.go); cpb run stops catching it when it returns, whatever
+	// happened.
+	defer releaseHandover()
+	err := runRunOnce(cmd, args)
+	for {
+		var rl *failoverRelaunch
+		if !errors.As(err, &rl) {
+			return err
+		}
+		sw := rl.sw
+		fmt.Fprintf(os.Stderr, "cpb: account %s hit its %s limit (resets %s); resuming this session on %s\n",
+			sw.From, windowWords(sw.Window), sw.resetsAt.Local().Format("Mon 2 Jan 15:04"), sw.To)
+		pinPlaybooksDir()
+		if sw.folder != "" {
+			_ = os.Chdir(sw.folder)
+		}
+		failoverHandover = sw
+		err = runRunOnce(cmd, rl.args)
+		var again *failoverRelaunch
+		if !errors.As(err, &again) && sw.notRun(err) {
+			sw.Outcome = "failed"
+			fmt.Fprintf(os.Stderr, "cpb: could not resume this session on %s (%s); resuming it on %s instead\n", sw.To, printable(firstLine(err.Error())), sw.From)
+			err = runRunOnce(cmd, rl.back)
+			if !errors.As(err, &again) && sw.notRun(err) {
+				sw.stranded = true
+				printFailoverSummary()
+				fmt.Fprintf(os.Stderr, "cpb: could not resume it on %s either (%s); to resume it by hand:\n  %s\n", sw.From, printable(firstLine(err.Error())), resumeByHand(sw.folder, rl.back))
+			}
+		}
+		failoverHandover = nil
+	}
+}
+
+// pinPlaybooksDir makes a relative playbooks root absolute before a
+// relaunch changes folder, so the relaunch reads the same root.
+func pinPlaybooksDir() {
+	if v := os.Getenv(config.PlaybooksDirEnv); v != "" && !filepath.IsAbs(v) {
+		_ = os.Setenv(config.PlaybooksDirEnv, absPath(v))
+	}
+	if root := config.ResolvePlaybooksDir(); !filepath.IsAbs(root) {
+		config.PlaybooksDir = absPath(root)
+	}
+}
+
+// resumeByHand is the command line that resumes a session with args from
+// folder, quoted for a POSIX shell. An --env value is not shown: it may be
+// a credential.
+func resumeByHand(folder string, args []string) string {
+	words := []string{"cpb", "run"}
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, "--env="); ok {
+			k, _, _ := strings.Cut(v, "=")
+			a = "--env=" + k + "=<your value>"
+		}
+		words = append(words, shellWord(a))
+	}
+	line := strings.Join(words, " ")
+	if folder != "" {
+		line = "cd " + shellWord(folder) + " && " + line
+	}
+	return printable(line)
+}
+
+// shellWord is s as one word for a POSIX shell.
+func shellWord(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@%+,", r))
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// fileSize is a file's size, -1 when it cannot be read.
+func fileSize(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return -1
+	}
+	return fi.Size()
+}
+
+func runRunOnce(cmd *cobra.Command, args []string) error {
 	original := args
 	rest, err := takePlaybooksDirArg(args)
 	if err != nil {
@@ -86,7 +206,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// directly (`name --env K=V ...`, which is what a launcher passes). The
 	// --sandbox family is scanned in the same leading runs.
 	var sopts sandboxOpts
-	rest, tokens, err := takeRunFlags(rest, &sopts, nil)
+	var failoverFlag, noFailoverFlag bool
+	failoverFlags := map[string]*bool{"--failover": &failoverFlag, "--no-failover": &noFailoverFlag}
+	rest, tokens, err := takeRunFlags(rest, &sopts, failoverFlags)
 	if err != nil {
 		return err
 	}
@@ -103,6 +225,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("  --env KEY=VALUE      set one variable")
 		fmt.Println("  --block KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
+		fmt.Println("  --failover           at a usage limit, resume the session on the next account of failover_accounts")
+		fmt.Println("  --no-failover        not this launch, whatever the playbook or DEFAULTS say")
 		fmt.Println("Sandbox flags (experimental) run the playbook inside a sandbox (backend sbx, Docker Sandboxes).")
 		fmt.Println("Experimental: the sandbox works and is supported in v4, but its flags and sandbox.* keys may change or move to a separate runner without the usual notice.")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use)")
@@ -120,11 +244,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("playbook name required\nUsage: cpb run " + runFlagsUsage + " <name> [claude-flags...]")
 	}
 	name := rest[0]
-	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts, nil)
+	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts, failoverFlags)
 	if err != nil {
 		return err
 	}
 	tokens = append(tokens, more...)
+	if failoverFlag && noFailoverFlag {
+		return fmt.Errorf("--failover and --no-failover together: pick one")
+	}
 
 	// A caller-supplied config directory, resolved before any sandbox
 	// decision so the refusal below happens whatever shape the sandbox
@@ -140,6 +267,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if sopts.host != "" {
 		if sopts.disabled {
 			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+		}
+		if failoverFlag {
+			return errFailoverSandbox
 		}
 		if override {
 			return errConfigDirOverrideSandbox()
@@ -177,6 +307,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if sandboxed {
 		if override {
 			return errConfigDirOverrideSandbox()
+		}
+		if failoverFlag {
+			return errFailoverSandbox
 		}
 		resumeNote(claudeArgs)
 		if host := sandboxHost(sbm, &sopts); host != "" {
@@ -310,6 +443,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err := guardResume(sd, claudeArgs); err != nil {
 		return err
 	}
+	// Account failover: decided before anything is changed, so a refusal
+	// (a setting that cannot be read, a flag a resume would not keep) costs
+	// nothing.
+	watch, err := failoverWatchFor(failoverWatchInput{
+		pb: pb, configDir: configDir, tokens: tokens, claudeArgs: claudeArgs, wd: wd, from: acct.sel.Name,
+		flagOn: failoverFlag, flagOff: noFailoverFlag, skip: override || playSessionRunning,
+	})
+	if err != nil {
+		return err
+	}
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
@@ -353,7 +496,34 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if exitLine {
 		before = transcriptStamps(sd.path)
 	}
-	err = preserveExitCode(runRecorded(c, newLaunchRecord(pb.Name, configDir, acct.sel)))
+	rec := newLaunchRecord(pb.Name, configDir, acct.sel)
+	if watch != nil {
+		rec.Switches = activeEpisode.switchesCopy()
+	}
+	err = runRecorded(c, rec, watch)
+	var sw *failoverSwitch
+	if errors.As(err, &sw) {
+		activeEpisode.mu.Lock()
+		activeEpisode.switches = append(activeEpisode.switches, sw)
+		activeEpisode.mu.Unlock()
+		var switches []string
+		if failoverFlag {
+			switches = append(switches, "--failover")
+		}
+		if sopts.disabled {
+			switches = append(switches, "--no-sandbox")
+		}
+		return &failoverRelaunch{args: relaunchArgs(switches, tokens, pb.Name, claudeArgs, sw), sw: sw, back: relaunchArgs(switches, tokens, pb.Name, claudeArgs,
+			&failoverSwitch{From: sw.To, To: sw.From, sessionID: sw.sessionID, model: sw.model, folder: sw.folder, noPrompt: true})}
+	}
+	err = preserveExitCode(err)
+	if h := failoverHandover; h != nil && h.notRun(err) {
+		// The launch on the new account never ran the session: runRun
+		// resumes it on the account it came from, and that launch's end
+		// reports the switch as not made.
+		return err
+	}
+	printFailoverSummary()
 	if exitLine {
 		printResumeLine(sd, before)
 	}

@@ -97,11 +97,30 @@ var playbookPropertyTable = []playbookProperty{
 	// model_picker_defaults). A key of its own, not of the model_picker
 	// table: RESET model_picker stays the picker's mode.
 	{key: "model_picker_defaults", values: []string{"inherited", "excluded"}},
+	// failover: at a usage limit, a launch resumes its session on the next
+	// account of DEFAULTS' failover_accounts. inherited follows DEFAULTS'
+	// failover; on and off decide for this playbook (the manifest's
+	// failover).
+	{key: "failover", values: []string{"inherited", "on", "off"}},
 }
 
-// defaultsPropertyTable is DEFAULTS' one property: the secret helper.
+// defaultsPropertyTable is DEFAULTS' properties: the secret helper, and
+// account failover for every playbook that inherits it. failover is a key
+// of the playbook's table too; DEFAULTS' takes off or on, and RESET removes
+// it (off).
 var defaultsPropertyTable = []playbookProperty{
 	{key: "secret_helper", kind: kindString, check: checkHelper, set: SetHelper, del: UnsetHelper, placeholder: "<command>"},
+	{key: "failover", values: []string{"off", "on"}},
+	{key: "failover_accounts", kind: kindList},
+	{key: "failover_max_context", kind: kindString, check: checkTokenCount, placeholder: "<tokens>"},
+}
+
+// checkTokenCount judges failover_max_context: a whole number of tokens.
+func checkTokenCount(v string) string {
+	if n, err := strconv.ParseInt(v, 10, 64); err != nil || n < 1 {
+		return "failover_max_context takes a whole number of tokens, at least 1 (RESET failover_max_context removes the cap)"
+	}
+	return ""
 }
 
 func checkStatusline(v string) string {
@@ -744,6 +763,15 @@ func propertyWords(c *Clause, withValues bool) []string {
 			continue
 		}
 		val := quote(v.Value)
+		if pr, ok := propertyOf(v.Key); ok && pr.kind == kindList {
+			var items []string
+			for _, item := range strings.Split(v.Value, ",") {
+				if item != "" {
+					items = append(items, quote(item))
+				}
+			}
+			val = "[" + strings.Join(items, ", ") + "]"
+		}
 		if !last {
 			val += ","
 		}

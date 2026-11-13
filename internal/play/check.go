@@ -154,6 +154,10 @@ func (r *Result) clause(c grammar.Clause) {
 		// A recipe may isolate more, never less: the login and ~/.claude's
 		// instructions stay apart unless play itself lets them in.
 		for _, v := range c.Settings {
+			if v.Key == "failover" {
+				r.refuse(line, "SET failover = '"+v.Value+"'", "moving sessions between your accounts is yours to turn on, not a recipe's")
+				return
+			}
 			switch v.Value {
 			case "shared":
 				r.refuse(line, "SET "+v.Key+" = 'shared'", "sharing the "+v.Key+" is play's decision, not the recipe's")

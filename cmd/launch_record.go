@@ -51,6 +51,9 @@ type launchRecord struct {
 	// file is the user's own state, mode 0600; it is never printed.
 	Identity   *string `json:"identity"`
 	LaunchedAt string  `json:"launched_at"`
+	// Switches are the account switches that led to this launch (account
+	// failover), oldest first.
+	Switches []*failoverSwitch `json:"switches,omitempty"`
 }
 
 // launchRecordsDir is where launch records live.

@@ -155,6 +155,13 @@ func doInstall(o installOpts, args []string) error {
 		mPre.Env = nil
 		needsManifestWrite = true
 	}
+	if mPre.Failover != "" {
+		// failover is install-local: a published manifest must not be able
+		// to move this machine's sessions between its accounts.
+		fmt.Fprintf(os.Stderr, "Note: ignoring failover = %q in the source's %s; account failover is install-local. Set it with: cpb ALTER PLAYBOOK %s SET failover = 'on'\n", mPre.Failover, manifest.FileName, targetName)
+		mPre.Failover = ""
+		needsManifestWrite = true
+	}
 	if !mPre.Sandbox.Empty() {
 		// [sandbox] is install-local too: a published manifest must not be
 		// able to mount host paths or widen the sandbox's network.

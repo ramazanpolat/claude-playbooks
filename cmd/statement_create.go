@@ -246,6 +246,24 @@ func createDefaultsBlocks(dir string) (helper, defaults createBlock, err error) 
 		clauses = append(clauses, rows...)
 		comments = notes
 	}
+	// DEFAULTS' account failover, as one SET of its keys.
+	fd, err := readFailoverDefaults(filepath.Dir(dir))
+	if err != nil {
+		return createBlock{}, createBlock{}, fmt.Errorf("DEFAULTS' failover settings cannot be read: %w", err)
+	}
+	var fo []grammar.Var
+	if fd.Failover != "" {
+		fo = append(fo, grammar.Var{Key: "failover", Value: fd.Failover})
+	}
+	if len(fd.Accounts) > 0 {
+		fo = append(fo, grammar.Var{Key: "failover_accounts", Value: strings.Join(fd.Accounts, ",")})
+	}
+	if fd.MaxContext > 0 {
+		fo = append(fo, grammar.Var{Key: "failover_max_context", Value: strconv.FormatInt(fd.MaxContext, 10)})
+	}
+	if len(fo) > 0 {
+		clauses = append(clauses, grammar.Clause{Kind: grammar.SetProperties, Settings: fo})
+	}
 	if len(clauses) > 0 {
 		st := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Defaults, Clauses: clauses}
 		defaults = createBlock{text: joinComments(comments, st.Pretty()+";")}
@@ -309,6 +327,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		if m.ExcludesModelPickerDefaults() {
 			props = append(props, grammar.Var{Key: "model_picker_defaults", Value: manifest.ModelPickerDefaultsExcluded})
 		}
+		if m != nil && (m.Failover == failoverOn || m.Failover == failoverOff) {
+			props = append(props, grammar.Var{Key: "failover", Value: m.Failover})
+		}
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetProperties, Settings: props})
 		// Exact convergence (D2): every key that is not set is RESET, so
 		// the statement brings a playbook back to exactly this, and the
@@ -320,8 +341,15 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %w", pb.Name, err)
 		}
 		st.Clauses = append(st.Clauses, settingsResetClauses(sf.Root)...)
+		var resets []grammar.Var
 		if !m.ExcludesModelPickerDefaults() {
-			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.ResetProperties, Settings: []grammar.Var{{Key: "model_picker_defaults"}}})
+			resets = append(resets, grammar.Var{Key: "model_picker_defaults"})
+		}
+		if m == nil || (m.Failover != failoverOn && m.Failover != failoverOff) {
+			resets = append(resets, grammar.Var{Key: "failover"})
+		}
+		if len(resets) > 0 {
+			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.ResetProperties, Settings: resets})
 		}
 		var sets, accounts []string
 		if m != nil && m.Env != nil {

@@ -454,7 +454,12 @@ func transcriptPath(configDir, cwd, id string) string {
 // the usage limit its last assistant line reports, if that line is one.
 type transcriptTail struct {
 	model, cwd, title string
-	limit             *quotaStop
+	// cwds are the distinct cwd values in the tail, the last first.
+	cwds  []string
+	limit *quotaStop
+	// context is the size of the context at the last answer: its input,
+	// cache reads and cache writes, in tokens; 0 when unknown.
+	context int64
 }
 
 // quotaStop is a usage limit a session ran into: the window Claude Code
@@ -462,6 +467,9 @@ type transcriptTail struct {
 type quotaStop struct {
 	window   string
 	resetsAt time.Time
+	// at is when Claude Code wrote the line (its timestamp); zero when the
+	// line has none.
+	at time.Time
 }
 
 // limitWindow is the shape of a window name cpb shows: Claude Code's own
@@ -520,6 +528,7 @@ func readTranscriptTail(path string) transcriptTail {
 			Cwd        json.RawMessage `json:"cwd"`
 			AITitle    json.RawMessage `json:"aiTitle"`
 			IsAPIError json.RawMessage `json:"isApiErrorMessage"`
+			Timestamp  json.RawMessage `json:"timestamp"`
 			Error      json.RawMessage `json:"error"`
 			Quota      json.RawMessage `json:"quotaLimits"`
 			Message    json.RawMessage `json:"message"`
@@ -529,6 +538,15 @@ func readTranscriptTail(path string) transcriptTail {
 		}
 		if c := rawString(line.Cwd); c != "" {
 			t.cwd = c
+			if len(t.cwds) == 0 || t.cwds[0] != c {
+				kept := []string{c}
+				for _, o := range t.cwds {
+					if o != c {
+						kept = append(kept, o)
+					}
+				}
+				t.cwds = kept
+			}
 		}
 		if a := rawString(line.AITitle); a != "" {
 			t.title = a
@@ -539,12 +557,28 @@ func readTranscriptTail(path string) transcriptTail {
 			var isErr bool
 			apiErr := json.Unmarshal(line.IsAPIError, &isErr) == nil && isErr
 			t.limit = quotaStopOf(apiErr, rawString(line.Error), line.Quota)
+			if t.limit != nil {
+				if at, err := time.Parse(time.RFC3339Nano, rawString(line.Timestamp)); err == nil {
+					t.limit.at = at
+				}
+			}
 			var msg struct {
 				Model json.RawMessage `json:"model"`
+				Usage json.RawMessage `json:"usage"`
 			}
 			if json.Unmarshal(line.Message, &msg) == nil {
 				if m := rawString(msg.Model); m != "" && !strings.HasPrefix(m, "<") {
 					t.model = m
+				}
+				var u struct {
+					Input       int64 `json:"input_tokens"`
+					CacheRead   int64 `json:"cache_read_input_tokens"`
+					CacheCreate int64 `json:"cache_creation_input_tokens"`
+				}
+				if len(msg.Usage) > 0 && json.Unmarshal(msg.Usage, &u) == nil {
+					if n := u.Input + u.CacheRead + u.CacheCreate; n > 0 {
+						t.context = n
+					}
 				}
 			}
 		}

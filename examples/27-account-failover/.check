@@ -1,0 +1,46 @@
+# What a launch would do at a usage limit.
+cpb EXPLAIN PLAYBOOK agent | grep -q "Failover: on (DEFAULTS); at a usage limit, the session moves to acct-work, acct-personal"
+cpb EXPLAIN PLAYBOOK scratch | grep -q "Failover: off (the playbook's failover)"
+cpb SHOW DEFAULTS | grep -q "Failover: *on; accounts acct-work, acct-personal"
+
+# A switch, on a real process. A stand-in claude stops at a weekly limit
+# that resets in two hours and waits, as Claude Code does: the limit line
+# carries its time and folder, the session file its status, kind and start
+# time. The transcript's clock is set back, so the two quiet minutes have
+# passed. The launch ends it and resumes the same session on acct-personal,
+# with that account's token and the continue prompt; the stand-in records
+# what the resume was given.
+mkdir -p "$HOME/hold" "$HOME/work"
+cat > "$HOME/hold/claude" <<'EOF'
+#!/bin/sh
+for a in "$@"; do [ "$a" = --resume ] && resumed=1; done
+if [ -n "$resumed" ]; then
+  printf '%s\n' "$@" > "$HOME/resumed.args"
+  printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" > "$HOME/resumed.token"
+  exit 0
+fi
+sid=0e5c1a2b-0000-4000-8000-0000000000f0
+enc=$(printf %s "$(pwd -P)" | sed 's/[^A-Za-z0-9]/-/g')
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/$enc" "$CLAUDE_CONFIG_DIR/sessions"
+t="$CLAUDE_CONFIG_DIR/projects/$enc/$sid.jsonl"
+if [ -r "/proc/$$/stat" ]; then st=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}'); else st=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}'); fi
+sleep 1
+printf '{"type":"assistant","cwd":"%s","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$(pwd -P)" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" $(( $(date +%s) + 7200 )) > "$t"
+touch -t 202001010000 "$t"
+sf="$CLAUDE_CONFIG_DIR/sessions/$$.json"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"procStart":"%s","kind":"interactive","status":"idle"}' $$ "$sid" "$(pwd -P)" "$st" > "$sf"
+trap 'rm -f "$sf"; exit 143' TERM
+while :; do sleep 1; done
+EOF
+chmod +x "$HOME/hold/claude"
+cd "$HOME/work"
+PATH="$HOME/hold:$PATH" cpb run --account acct-work agent 2> "$HOME/failover.err"
+grep -q "cpb: account acct-work hit its weekly limit" "$HOME/failover.err"
+grep -q "resuming this session on acct-personal" "$HOME/failover.err"
+grep -qx -- "--resume" "$HOME/resumed.args"
+grep -qx "0e5c1a2b-0000-4000-8000-0000000000f0" "$HOME/resumed.args"
+grep -q "^\[cpb: this session moved from account acct-work (weekly limit" "$HOME/resumed.args"
+test "$(cat "$HOME/resumed.token")" = placeholder-personal-token
+
+# scratch never moves: --no-failover is the same for one launch.
+cpb run --no-failover scratch

@@ -135,6 +135,48 @@ echo sessions-account-ok'''
 contains = "sessions-account-ok"
 
 [[verify.commands]]
+# Account failover (v4.8.0), on a real process: a stand-in claude stops at a
+# weekly limit that resets in two hours and waits, as Claude Code does (the
+# limit line with its time and folder, the session file with its status,
+# kind and start time), its transcript old enough that the quiet minutes
+# have passed. The launch ends it and resumes the same
+# session on the next listed account, through the secret helper, with that
+# account's token and the continue prompt; EXPLAIN says it would. No
+# resolved value is written in cpb's state; the setting is reset after.
+command = '''
+H="$HOME/fobin"; mkdir -p "$H" "$HOME/fowork"
+cat > "$H/claude" <<'EOF'
+#!/bin/sh
+if [ "$1" = --version ]; then echo "2.1.322 (Claude Code)"; exit 0; fi
+for a in "$@"; do [ "$a" = --resume ] && resumed=1; done
+if [ -n "$resumed" ]; then printf '%s\n' "$@" > "$HOME/fo.args"; printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" > "$HOME/fo.token"; exit 0; fi
+sid=0e5c1a2b-0000-4000-8000-0000000000f1
+enc=$(printf %s "$(pwd -P)" | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$CLAUDE_CONFIG_DIR/projects/$enc" "$CLAUDE_CONFIG_DIR/sessions"
+t="$CLAUDE_CONFIG_DIR/projects/$enc/$sid.jsonl"
+if [ -r "/proc/$$/stat" ]; then st=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}'); else st=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}'); fi
+sleep 1
+printf '{"type":"assistant","cwd":"%s","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","message":{"model":"<synthetic>"},"quotaLimits":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%s}}\n' "$(pwd -P)" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" $(( $(date +%s) + 7200 )) > "$t"
+touch -t 202001010000 "$t"
+sf="$CLAUDE_CONFIG_DIR/sessions/$$.json"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1,"procStart":"%s","kind":"interactive","status":"idle"}' $$ "$sid" "$(pwd -P)" "$st" > "$sf"
+trap 'rm -f "$sf"; exit 143' TERM
+while :; do sleep 1; done
+EOF
+chmod 755 "$H/claude"
+cpb CREATE PLAYBOOK fo SET launcher = '', login = 'isolated' >/dev/null || exit 1
+cpb ALTER DEFAULTS SET failover = 'on', failover_accounts = ['acct-work', 'acct-personal'] >/dev/null || exit 1
+cpb EXPLAIN PLAYBOOK fo | grep -qF 'Failover: on (DEFAULTS); at a usage limit, the session moves to acct-work, acct-personal' || { echo explain-wrong; exit 1; }
+cd "$HOME/fowork" && PATH="$H:$PATH" cpb run --account acct-work fo 2> "$HOME/fo.err" & R=$!
+i=0; while kill -0 $R 2>/dev/null; do i=$((i+1)); if [ $i -ge 180 ]; then kill $R; pkill -f "$H/claude"; echo failover-timeout; cat "$HOME/fo.err"; exit 1; fi; sleep 0.5; done
+wait $R || { echo run-failed; cat "$HOME/fo.err"; exit 1; }
+grep -q 'resuming this session on acct-personal' "$HOME/fo.err" && grep -qx -- '--resume' "$HOME/fo.args" && grep -qx '0e5c1a2b-0000-4000-8000-0000000000f1' "$HOME/fo.args" && [ "$(cat "$HOME/fo.token")" = secret-personal ] || { echo switch-wrong; cat "$HOME/fo.err"; exit 1; }
+grep -q '^\[cpb: this session moved from account acct-work (weekly limit' "$HOME/fo.args" || { echo prompt-wrong; exit 1; }
+! grep -rq 'secret-' "$HOME/.claude-playbooks/.state" "$HOME/.claude-playbooks/.env-sets" 2>/dev/null || { echo value-in-state; exit 1; }
+cpb ALTER DEFAULTS RESET failover, failover_accounts >/dev/null || exit 1
+echo failover-ok'''
+contains = "failover-ok"
+
+[[verify.commands]]
 # After every launch above: no resolved value (secret-<name>) was ever
 # written under the playbooks root.
 command = '! grep -rq "secret-" "$HOME/.claude-playbooks" && echo no-value-on-disk'
