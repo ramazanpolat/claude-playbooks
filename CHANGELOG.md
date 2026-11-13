@@ -48,7 +48,10 @@
   - **The TUI** has a Usage view (`6`).
   - **When there is no step.** Only the playbook's own status line is
     wrapped. A working folder's status line runs as it is, and a launch with
-    its own `--settings`, or a playbook with no status line, records nothing.
+    its own `--settings`, a playbook with no status line, or one whose
+    status line managed settings outrank (the managed file, its
+    `managed-settings.d` drop-ins, server-managed settings), records
+    nothing. A macOS managed-preferences profile is not checked.
   - **Where it is kept.** The log is `.state/usage/` under the playbooks
     root (mode 600): one append-only file per session per month, each line
     describing itself. A file rotates at 1 MiB and is swept after 30 days.
@@ -76,6 +79,16 @@
 - **`SELECT … FROM SESSIONS`** has the two new columns, `account` and
   `at_limit`, after `tty`; the TUI's Sessions view and a playbook's
   Sessions tab show both.
+
+### Changed
+
+- **The reserved-key check of settings files reads every folder-level
+  file Claude Code reads** for the working folder: its own
+  `.claude/settings.json` and `settings.local.json`, and those of its
+  repository's root and of a worktree's main checkout.
+- **`SHOW CREATE ACCOUNT` leaves out an identity label no statement could
+  set** (a hand-edited one holding a control or invisible character), with
+  a comment saying so, instead of printing it raw.
 
 ### Fixed
 

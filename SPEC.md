@@ -1216,8 +1216,10 @@ when a cloud switch is on, and only a cloud account turns one on.
   `BLOCK VAR` of a reserved variable is accepted: cpb removes it anyway.
   On `machine` alone, `BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` still keeps the
   machine's token file out, as before accounts.
-- **Settings files too.** The playbook's `settings.json` and the working
-  folder's `.claude/settings.json` and `.claude/settings.local.json` apply
+- **Settings files too.** The playbook's `settings.json` and the
+  folder-level `.claude/settings.json` and `.claude/settings.local.json`
+  Claude Code reads for the working folder (the folder's own, its
+  repository root's, and a worktree's main checkout's) apply
   their `env` over the environment cpb hands Claude Code, and may name an
   `apiKeyHelper`. A launch is refused when any of them sets a reserved
   variable or an `apiKeyHelper` (one that cannot be read or parsed refuses
@@ -1413,7 +1415,7 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     show becomes a placeholder after its flag's name: an `--env` value, an
     inline `--settings` JSON, and a value holding a control character
     (other than a newline or a tab), a direction mark, embedding, override
-    or isolate (U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) or a line or
+    or isolate (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) or a line or
     paragraph separator. Such a line starts with `# ` and stays one line
     (a value holding a newline is then not shown either), so pasted as it
     is it runs nothing, and cpb says to replace each placeholder and remove
@@ -2070,7 +2072,12 @@ usage (*SHOW USAGE*). The playbook changes nothing.
     so cpb never copies it into a `--settings` of its own, where it would
     run at once; those files are read for the key alone, and one that cannot
     be read means no step;
-  - managed settings set a status line;
+  - managed settings set a status line: the managed settings file, a
+    `managed-settings.d/*.json` drop-in beside it, or server-managed
+    settings cached in the config directory (`remote-settings.json`). A
+    status line set through a macOS managed-preferences profile (the
+    `com.anthropic.claudecode` domain) is not checked: there `EXPLAIN` says
+    recorded while the profile's status line runs instead;
   - the playbook has no status line: the launch adds none.
   `EXPLAIN PLAYBOOK` says which (`Usage at launch: recorded by cpb's status
   line step`, or `not recorded (<reason>)`; `--json` `usage_at_launch`).
@@ -2091,7 +2098,10 @@ usage (*SHOW USAGE*). The playbook changes nothing.
   (no usable temporary folder), the original runs as the step's child, fed
   the same input, and the step ends with its exit code (128 plus the
   signal for one a signal ended; a SIGTERM, SIGINT or SIGHUP to the step
-  goes on to it). The account, its usage key and the rest come from the
+  goes on to it). On that path the original runs in a process group of its
+  own, so every command of it gets the signal; a command of it that reads
+  the terminal or changes the terminal's settings is stopped there, as a
+  background job is. The account, its usage key and the rest come from the
   launch record the id names, never from argv or the session's
   environment. The step reads no login's identity; it reads stored
   accounts' `identity` labels, to merge their entries in the `cpb` key.
@@ -3062,13 +3072,16 @@ SELECT … FROM USAGE
 - `accounts/<hash of the key>.json`: the latest figure per allowance,
   replaced whole, written only when a session's figures differ from its
   own line before (a session re-rendering an old figure never replaces a
-  newer one); for a window that resets at the same time the higher use
-  stands. It is read only from the file its key's hash names, never one
-  seen later than now, with each name checked as a launch writes it, use
-  bounded to 0-1000% and a reset to its seen time plus the window's
-  length. A stored figure that claims a seen time later than now is
-  replaced by the next real one, and a window of the stored figure that
-  resets later than the new one's is kept. `DROP
+  newer one). A stored window is kept over the new figure's only when the
+  new window had already reset when it was seen and the stored one resets
+  later, or, for a session's first figures (which may be ones Claude Code
+  had from before the session's first answer), when both reset at the
+  same time and the stored use is higher; a session's later figures stand
+  as they are. It is read only from the file its key's hash names, never
+  one seen later than now, with each name checked as a launch writes it,
+  use bounded to 0-1000% and a reset to its seen time plus the window's
+  length. A stored figure that claims a seen time more than a minute
+  later than now is replaced by the next real one. `DROP
   ACCOUNT`, and a change of an account's provider, address or credential,
   remove the account's figure.
 - A launch removes files nobody wrote for 30 days. cpb neither writes nor
@@ -3560,7 +3573,7 @@ A **bare inherited `CLAUDE_CONFIG_DIR` is discarded**. The opt-in is deliberatel
 
 `CPB_CONFIG_DIR` is a **reserved key**, like `CLAUDE_CONFIG_DIR`: a manifest `[env]` block, an env set, `--env` and `--env-file` all refuse it (`CPB_CONFIG_DIR is managed by cpb and cannot be overridden`). Declaring it could never redirect the launch that declares it — the request is read from the process environment before any layer is applied — but it would place the variable in the child's environment, from where it *would* redirect a further launch made inside the session. A key that cannot do the thing it names, yet silently affects the next launch, is refused outright.
 
-`CPB_SECRET_FILE_STORE` and every `CPB_SECRET_STORE_*` are reserved keys too (since v4.7.0), refused the same way with `<key> is cpb's own secret-store setting and cannot be declared: set CPB_SECRET_FILE_STORE=1 in the environment of the one machine that needs it, never in a playbook`. A launch drops both from the environment of every helper and every launched program, whatever set them, so the file-store opt-in is not passed into a session: a cpb started inside one has none. `CPB_SECRET_HELPER` is reserved too (since v4.7.0), refused with `CPB_SECRET_HELPER is yours to set and cannot be declared in a playbook, a recipe or an env set: set it in your own shell, or use ALTER DEFAULTS SET secret_helper`. It is not dropped: what your own environment holds reaches the session. A settings file's `env` (the playbook's `settings.json`, the working folder's `.claude/settings.json` and `settings.local.json`, `--settings`) that sets a reserved key refuses the launch. A launch never applies a layer's value or block for a reserved key. `CPB_PLAYBOOKS_DIR` is reserved too (since v4.7.0), refused with `CPB_PLAYBOOKS_DIR is yours to set and cannot be declared in a playbook, a recipe or an env set: set it in your own shell`; like `CPB_SECRET_HELPER` it is not dropped, so what your own environment holds reaches the session. A `.playbook` or env set that already holds `CPB_SECRET_HELPER`, `CPB_SECRET_FILE_STORE`, a `CPB_SECRET_STORE_*` or `CPB_PLAYBOOKS_DIR` (an earlier release let a layer declare them) still reads, so it can be shown, changed and dropped: in a block list the name has no effect, is not shown, and is gone on the next write; as a value or a reference it refuses a launch that would use it, naming the file and the statement that removes it (`ALTER PLAYBOOK <name> UNSET VAR <key>`, `ALTER ENV <name> UNSET <key>`), which takes these names. A file holding any other reserved key is refused when read, as before.
+`CPB_SECRET_FILE_STORE` and every `CPB_SECRET_STORE_*` are reserved keys too (since v4.7.0), refused the same way with `<key> is cpb's own secret-store setting and cannot be declared: set CPB_SECRET_FILE_STORE=1 in the environment of the one machine that needs it, never in a playbook`. A launch drops both from the environment of every helper and every launched program, whatever set them, so the file-store opt-in is not passed into a session: a cpb started inside one has none. `CPB_SECRET_HELPER` is reserved too (since v4.7.0), refused with `CPB_SECRET_HELPER is yours to set and cannot be declared in a playbook, a recipe or an env set: set it in your own shell, or use ALTER DEFAULTS SET secret_helper`. It is not dropped: what your own environment holds reaches the session. A settings file's `env` (the playbook's `settings.json`, the folder-level `.claude/settings.json` and `settings.local.json` of the working folder, its repository root and a worktree's main checkout, `--settings`) that sets a reserved key refuses the launch. A launch never applies a layer's value or block for a reserved key. `CPB_PLAYBOOKS_DIR` is reserved too (since v4.7.0), refused with `CPB_PLAYBOOKS_DIR is yours to set and cannot be declared in a playbook, a recipe or an env set: set it in your own shell`; like `CPB_SECRET_HELPER` it is not dropped, so what your own environment holds reaches the session. A `.playbook` or env set that already holds `CPB_SECRET_HELPER`, `CPB_SECRET_FILE_STORE`, a `CPB_SECRET_STORE_*` or `CPB_PLAYBOOKS_DIR` (an earlier release let a layer declare them) still reads, so it can be shown, changed and dropped: in a block list the name has no effect, is not shown, and is gone on the next write; as a value or a reference it refuses a launch that would use it, naming the file and the statement that removes it (`ALTER PLAYBOOK <name> UNSET VAR <key>`, `ALTER ENV <name> UNSET <key>`), which takes these names. A file holding any other reserved key is refused when read, as before.
 
 The override is **consumed**: the same step that binds `CLAUDE_CONFIG_DIR` removes `CPB_CONFIG_DIR`, on every path and whether or not this launch used it. It happens **after** the authentication branch and after every override layer, so a layer that names the key cannot reintroduce it; the reservation above and this binding are the same two-layer arrangement `CLAUDE_CONFIG_DIR` already has, where the binding is what makes the refusal unnecessary to trust. Every other subprocess the tool starts with an explicitly chosen `CLAUDE_CONFIG_DIR` — the declared `[update] migrate` step, the `claude auth status` probe — drops the variable too: that choice is authoritative, and a migration script that called `cpb run` would otherwise be redirected. Left in place it would reach `claude` and every process below, so an agent inside the session running `cpb run <other>` would have that launch redirected into this one's directory -- the wrong playbook writing into the wrong state. Stripping is an omission while building the child's environment array, not a mutation with a matching restore: a process environment is copied at spawn, is private to that process, and dies with it, so no signal, kill or crash can leave it half-done, and the tool cannot alter its parent's environment at all. One consequence worth stating: an override `export`ed interactively persists in that shell for later commands, since nothing can un-export a parent's variable, so every launch from that shell honours it -- the pilot's explicit request, not a leak.
 

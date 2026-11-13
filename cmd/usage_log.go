@@ -261,55 +261,76 @@ func lastSnapshot(f *os.File) *usageSnapshot {
 // line was written, and whether that line's figures differ from this
 // session's line before: only then is it news for the account's latest
 // figure (an idle session re-rendering an old figure is not).
-func appendSnapshot(root string, s usageSnapshot, now time.Time) (wrote, newFigures bool) {
+func appendSnapshot(root string, s usageSnapshot, now time.Time) (wrote bool, news figureNews) {
 	path := sessionLogPath(root, s.SessionID, now)
 	if !mkdirsReal(usageDir(root), filepath.Dir(filepath.Dir(path)), filepath.Dir(path)) {
-		return false, false
+		return false, noFigures
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
-		return false, false
+		return false, noFigures
 	}
 	defer f.Close()
 	appendOpened(path)
 	if syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
-		return false, false
+		return false, noFigures
 	}
 	// A render that opened the log just before another rotated it holds
 	// the old file: it writes nothing rather than renaming the new one.
 	if held, err := f.Stat(); err != nil {
-		return false, false
+		return false, noFigures
 	} else if cur, err := os.Lstat(path); err != nil || !os.SameFile(held, cur) {
-		return false, false
+		return false, noFigures
 	}
 	last := lastSnapshot(f)
 	if !worthWriting(s, last) {
-		return false, false
+		return false, noFigures
 	}
-	newFigures = len(s.RateLimits) > 0 && (last == nil || string(last.RateLimits) != string(s.RateLimits))
+	if len(s.RateLimits) > 0 {
+		switch {
+		case last == nil || len(capRaw(last.RateLimits)) == 0:
+			news = firstFigures
+		case string(last.RateLimits) != string(s.RateLimits):
+			news = changedFigures
+		}
+	}
 	if fi, err := f.Stat(); err == nil && fi.Size() >= usageRotateBytes {
 		// Under the lock, so no other render appends to the old file after
 		// the rename; the new file is opened with the same rules.
 		if os.Rename(path, strings.TrimSuffix(path, ".jsonl")+".1.jsonl") != nil {
-			return false, false
+			return false, noFigures
 		}
 		nf, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
 		if err != nil {
-			return false, false
+			return false, noFigures
 		}
 		defer nf.Close()
 		f = nf
 	}
 	line, err := json.Marshal(s)
 	if err != nil {
-		return false, false
+		return false, noFigures
 	}
 	// One write: a line is whole or absent.
 	if _, err = f.Write(append(line, '\n')); err != nil {
-		return false, false
+		return false, noFigures
 	}
-	return true, newFigures
+	return true, news
 }
+
+// figureNews is what a written line's figures are to its account's latest
+// figure.
+type figureNews int
+
+const (
+	// noFigures: none, or the same as the session's line before.
+	noFigures figureNews = iota
+	// firstFigures: the session's first figures, which may be ones Claude
+	// Code had from before the session's first answer.
+	firstFigures
+	// changedFigures: figures that differ from the session's line before.
+	changedFigures
+)
 
 // appendOpened runs between opening a log and locking it; a hook for tests.
 var appendOpened = func(string) {}
@@ -358,13 +379,11 @@ func latestPath(root, key string) string {
 	return filepath.Join(usageDir(root), "accounts", hex.EncodeToString(h[:8])+".json")
 }
 
-// writeLatest records s, a session's new figures, as its key's newest
-// figure, unless the one there is newer. For a window that resets at the
-// same time, the higher use stands: two sessions of one account seeing the
-// window at different moments never lower it. A race between two sessions
-// of one key costs at most a figure a moment older; the file is always
-// whole.
-func writeLatest(root string, s usageSnapshot) {
+// writeLatest records s, a session's new figures (first: its first ones),
+// as its key's newest figure, unless the one there is newer
+// (keepNewerWindow). A race between two sessions of one key costs at most
+// a figure a moment older; the file is always whole.
+func writeLatest(root string, s usageSnapshot, first bool) {
 	if len(s.RateLimits) == 0 || s.Key == "" {
 		return
 	}
@@ -376,7 +395,7 @@ func writeLatest(root string, s usageSnapshot) {
 	if old, ok := readLatest(path); ok {
 		oldAt, _ := time.Parse(time.RFC3339Nano, old.SeenAt)
 		if !oldAt.After(at.Add(time.Minute)) {
-			rates = keepNewerWindow(old.RateLimits, oldAt, rates, at)
+			rates = keepNewerWindow(old.RateLimits, oldAt, rates, at, first)
 		}
 	}
 	b, err := json.Marshal(latestFigure{V: usageVersion, Key: s.Key, Account: s.Account,
@@ -414,13 +433,15 @@ func pathShown(p string) bool {
 	return utf8.ValidString(p) && !hasControl(p)
 }
 
-// keepNewerWindow is now's rate limits (seen at nowSeen), with each window
-// of old's kept where old's is the newer: now's window had already reset
-// when now was seen (a session's first render may carry such a window)
-// and old's resets later, or both reset at the same time and old's use is
-// higher. old's reset counts only up to its seen time plus the window's
+// keepNewerWindow is now's rate limits (seen at nowSeen; first: a
+// session's first figures), with each window of old's kept where old's is
+// the newer: now's window had already reset when now was seen (a session's
+// first render may carry such a window) and old's resets later; or, for a
+// session's first figures, both reset at the same time and old's use is
+// higher. A session's later figures for the same window stand as they
+// are. old's reset counts only up to its seen time plus the window's
 // length.
-func keepNewerWindow(old json.RawMessage, oldSeen time.Time, now json.RawMessage, nowSeen time.Time) json.RawMessage {
+func keepNewerWindow(old json.RawMessage, oldSeen time.Time, now json.RawMessage, nowSeen time.Time, first bool) json.RawMessage {
 	var o, n map[string]json.RawMessage
 	if json.Unmarshal(old, &o) != nil || json.Unmarshal(now, &n) != nil {
 		return now
@@ -432,7 +453,8 @@ func keepNewerWindow(old json.RawMessage, oldSeen time.Time, now json.RawMessage
 		}
 		oldReset := min(ow.ResetsAt, oldSeen.Add(length).Unix())
 		stale := nw.ResetsAt <= nowSeen.Unix() && oldReset > nw.ResetsAt
-		if stale || (ow.ResetsAt == nw.ResetsAt && ow.UsedPercentage > nw.UsedPercentage) {
+		higher := first && ow.ResetsAt == nw.ResetsAt && ow.UsedPercentage > nw.UsedPercentage
+		if stale || higher {
 			n[k] = o[k]
 		}
 	}
