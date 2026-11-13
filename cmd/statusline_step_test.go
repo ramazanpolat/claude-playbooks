@@ -340,7 +340,7 @@ func TestUsageRowsGroupAndCap(t *testing.T) {
 	}
 	_, rec := stepFixture(t, "x19", "x19", nil)
 	_ = rec
-	b, _ := statuslineBlock(root, launchRecord{Account: "x19", Key: "x19"}, time.Now())
+	b, _ := statuslineBlock(root, launchRecord{Account: "x19", Key: "x19"}, nil, time.Now())
 	var blk statuslineBlockJSON
 	if err := json.Unmarshal(b, &blk); err != nil || len(blk.Usage) != statuslineBlockMax || blk.Usage[0].Account != "x19" || !blk.Usage[0].Self || blk.Account.Name != "x19" {
 		t.Fatalf("block: %v %s", err, b)
