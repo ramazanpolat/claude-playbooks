@@ -21,6 +21,7 @@ Pages are grouped by what you came for:
 | [Installation](guides/installation.md) | install script, devbox/Nix, npx, source builds, updating, uninstalling |
 | [Managing playbooks](guides/managing-playbooks.md) | create, install, link, launch, rename, update, delete |
 | [Accounts](guides/accounts.md) | where a playbook's requests go and how they authenticate: one record per account, chosen per playbook or per launch |
+| [A provider that speaks only the OpenAI API](guides/openai-compatible-provider.md) | a translator on your machine in front of it, a gateway account on the translator, on request only (Venice.ai through LiteLLM) |
 | [Authentication](guides/authentication.md) | shared logins, long-lived tokens, isolated accounts |
 | [Environment overrides](guides/environment.md) | per-playbook variables and shared env sets |
 | [Sandboxed sessions](guides/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
