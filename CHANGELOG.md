@@ -35,6 +35,18 @@
     one, so a cpb inside it uses the same root.
   - Guide: `docs/guides/labels.md`; example `29-labels`.
 
+### Fixed
+
+- **SHOW USAGE after a failover:** a session moved to another account
+  starts over there, so its first figures on the new account no longer
+  lower that account's stored use of the same window.
+- **A worktree whose `.git` names its `gitdir` relative to the worktree**
+  (git's `worktree.useRelativePaths`) has its main checkout's settings
+  found from any folder below it.
+- **A folder whose `.claude` is a file** holds no settings, as for Claude
+  Code: the launch is no longer refused, and the usage step no longer
+  dropped, over it.
+
 ## [v4.8.0] -- 2026-11-13
 
 v4.8.0 lets a session outlive a usage limit and shows how much of each

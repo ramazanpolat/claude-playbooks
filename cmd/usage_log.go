@@ -292,7 +292,9 @@ func appendSnapshot(root string, s usageSnapshot, now time.Time) (wrote bool, ne
 	}
 	if len(s.RateLimits) > 0 {
 		switch {
-		case last == nil || len(capRaw(last.RateLimits)) == 0:
+		case last == nil || len(capRaw(last.RateLimits)) == 0 || last.Key != s.Key:
+			// A session moved to another allowance (an account
+			// switch keeps its id) starts over there.
 			news = firstFigures
 		case string(last.RateLimits) != string(s.RateLimits):
 			news = changedFigures

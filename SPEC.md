@@ -1221,7 +1221,7 @@ when a cloud switch is on, and only a cloud account turns one on.
   their `env` over the environment cpb hands Claude Code, and may name an
   `apiKeyHelper`. A launch is refused when any of them sets a reserved
   variable or an `apiKeyHelper` (one that cannot be read or parsed refuses
-  too): routing and credentials come from the account, never from a file a
+  too; a `.claude` that is a file holds none): routing and credentials come from the account, never from a file a
   repository carries. So is a `--settings` passed through to `claude`
   (`--settings <file>`, `--settings=<file>` or inline JSON) that does the
   same, keys matched exactly as Claude Code reads them; one whose file
@@ -2065,11 +2065,13 @@ usage (*SHOW USAGE*). The playbook changes nothing.
   - the launch passes its own `--settings` (Claude Code takes one);
   - any folder-level file Claude Code reads sets `statusLine`: the working
     folder's `.claude/settings.json` and `.claude/settings.local.json`, the
-    same at its repository's root, and at the main checkout of a worktree.
-    Claude Code runs a folder's status line only once the folder is trusted,
-    so cpb never copies it into a `--settings` of its own, where it would
-    run at once; those files are read for the key alone, and one that cannot
-    be read means no step;
+    same at its repository's root, and at the main checkout of a worktree
+    (its `.git` file's `gitdir`, read relative to the worktree when it is
+    relative). Claude Code runs a folder's status line only once the folder
+    is trusted, so cpb never copies it into a `--settings` of its own, where
+    it would run at once; those files are read for the key alone, and one
+    that cannot be read means no step. A `.claude` that is a file holds no
+    settings, as for Claude Code;
   - managed settings set a status line: the managed settings file, a
     `managed-settings.d/*.json` drop-in beside it, or server-managed
     settings cached in the config directory (`remote-settings.json`). A
@@ -3180,7 +3182,9 @@ SELECT … FROM USAGE
   later, or, for a session's first figures (which may be ones Claude Code
   had from before the session's first answer), when both reset at the
   same time and the stored use is higher; a session's later figures stand
-  as they are. It is read only from the file its key's hash names, never
+  as they are. A session moved to another allowance (account failover
+  keeps its id) starts over there: its first line on the new allowance
+  holds first figures. It is read only from the file its key's hash names, never
   one seen later than now, with each name checked as a launch writes it,
   use bounded to 0-1000% and a reset to its seen time plus the window's
   length. A stored figure that claims a seen time more than a minute

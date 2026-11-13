@@ -844,3 +844,55 @@ func groupRunning(pgid int) bool {
 	}
 	return false
 }
+
+// After an account switch inside one session id (failover resumes the same
+// session on another account), the session's first figures on the new
+// account are first figures there: they do not lower that account's
+// stored use of the same window.
+func TestUsageFirstFiguresAfterAnAccountSwitch(t *testing.T) {
+	root, rec := stepFixture(t, "work", "work", nil)
+	home := rec
+	home.LaunchID, home.Account, home.Key = "fedcba9876543210", "home", "home"
+	dir := launchRecordsDir(root)
+	if err := writeLaunchRecord(dir, filepath.Join(dir, home.LaunchID+".json"), &home); err != nil {
+		t.Fatal(err)
+	}
+	onWork := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+	onHome := stepArgs{root: root, launch: home.LaunchID, original: "true"}
+	five, seven := time.Now().Add(time.Hour).Unix(), time.Now().Add(72*time.Hour).Unix()
+	stepRecord(onHome, rateInput("d9c690fc-1a83-4be9-b6aa-00000000000a", 70, five, 1, seven)) // another session on home
+	moved := "d9c690fc-1a83-4be9-b6aa-00000000000b"
+	stepRecord(onWork, rateInput(moved, 50, five, 1, seven))
+	stepRecord(onHome, rateInput(moved, 30, five, 1, seven)) // the same session, resumed on home
+	if got := latestFive(t, root, "home"); got != 70 {
+		t.Fatalf("the moved session's first figures on home lowered its use: %v", got)
+	}
+	stepRecord(onHome, rateInput(moved, 35, five, 1, seven)) // its later figure there stands
+	if got := latestFive(t, root, "home"); got != 35 {
+		t.Fatalf("a later figure did not stand: %v", got)
+	}
+}
+
+// A stored window's reset counts only up to its seen time plus the
+// window's length: a stored figure claiming a later reset does not keep
+// itself over a new window that has reset since.
+func TestKeepNewerWindowCapsTheStoredReset(t *testing.T) {
+	now := time.Now()
+	oldSeen := now.Add(-6 * time.Hour)
+	win := func(used float64, resets time.Time) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`{"five_hour":{"used_percentage":%v,"resets_at":%d}}`, used, resets.Unix()))
+	}
+	// Stored: seen 6 hours ago, claiming a reset 20 hours after that, past
+	// its window's 5. New: its window reset a minute ago.
+	got := keepNewerWindow(win(90, oldSeen.Add(20*time.Hour)), oldSeen, win(5, now.Add(-time.Minute)), now, false)
+	five, _, _ := windowsOf(got)
+	if five == nil || five.UsedPercentage != 5 {
+		t.Fatalf("the stored figure kept itself past its window: %s", got)
+	}
+	// Within its window's length, a stored later reset is kept over a new
+	// figure whose window already reset when it was seen.
+	got = keepNewerWindow(win(90, now.Add(2*time.Hour)), now.Add(-2*time.Hour), win(5, now.Add(-time.Minute)), now, false)
+	if five, _, _ = windowsOf(got); five == nil || five.UsedPercentage != 90 {
+		t.Fatalf("a stored window within its length was not kept: %s", got)
+	}
+}
