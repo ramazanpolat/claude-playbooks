@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Session labels.** A session carries short `key=value` labels from two
+  sources, kept apart:
+  - **launch labels**, given at launch with `--label KEY=VALUE` on `cpb run`,
+    a launcher or `cpb start`. They are kept in the launch record, and every
+    launch cpb rebuilds carries them like `--env`: the failover relaunch,
+    the by-hand line, a sandbox host;
+  - **session labels**, set from inside a live session by a hook or a tool
+    with `cpb session label key=value` (`--unset`, `--list`, `--json`,
+    `--session <id>`). It finds the session from its own process ancestry,
+    and exits 3 when it does not run in a session cpb launched, so a hook
+    can ignore exactly that. A write waits at most 400 ms for another
+    writer of the same session.
+  - Both reach the status line's `cpb` key (`labels`), `SHOW SESSIONS`
+    (`labels` in `--json`, a `labels` column in `SELECT … FROM SESSIONS`,
+    and the `name` label in the `SESSION` column) and the usage log
+    (`launch_labels`, `session_labels`).
+  - A value that looks like an e-mail address or a credential, or holds a
+    control, direction or invisible character, is refused, with a message
+    naming the key and never the value. Labels are never taken from the
+    environment.
+  - A launch whose playbooks root came from `--playbooks-dir` sets
+    `CPB_PLAYBOOKS_DIR` (absolute) in the session, so a cpb inside it uses
+    the same root.
+  - Guide: `docs/guides/labels.md`; example `29-labels`.
+
 ## [v4.8.0] -- 2026-11-13
 
 v4.8.0 lets a session outlive a usage limit and shows how much of each
