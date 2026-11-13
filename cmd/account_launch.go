@@ -340,11 +340,14 @@ func reservedInSettings(configDir, workdir string) error {
 		files = append(files, filepath.Join(workdir, ".claude", "settings.json"), filepath.Join(workdir, ".claude", "settings.local.json"))
 	}
 	for _, f := range files {
-		data, err := os.ReadFile(f)
+		data, err := settings.ReadFile(f)
 		if absentPath(err) {
 			// None there, or .claude is a file: Claude Code reads no
 			// settings from it either.
 			continue
+		}
+		if errors.Is(err, settings.ErrNotRegular) {
+			return fmt.Errorf("%s is not a regular file: it may route or authenticate this launch, so it is refused", f)
 		}
 		if err != nil {
 			return fmt.Errorf("%s cannot be read (%v): it may route or authenticate this launch, so it is refused", f, err)
@@ -390,11 +393,14 @@ func reservedInSettingsArgs(claudeArgs []string, workdir string, sandboxed bool)
 		if !filepath.IsAbs(f) && workdir != "" {
 			f = filepath.Join(workdir, f)
 		}
-		data, err := os.ReadFile(f)
+		data, err := settings.ReadFile(f)
 		if err != nil {
 			why := "it cannot be read"
-			if errors.Is(err, os.ErrNotExist) {
+			switch {
+			case errors.Is(err, os.ErrNotExist):
 				why = "no such file"
+			case errors.Is(err, settings.ErrNotRegular):
+				why = "not a regular file"
 			}
 			return fmt.Errorf("--settings names a file that cannot be checked (%s): it may route or authenticate this launch, so it is refused", why)
 		}

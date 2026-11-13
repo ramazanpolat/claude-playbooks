@@ -873,6 +873,43 @@ func TestUsageFirstFiguresAfterAnAccountSwitch(t *testing.T) {
 	}
 }
 
+// A session moved to another account shows the figures it had on the one
+// before until its first answer there: those are not the new account's,
+// and change neither account's latest figure. Its own figures there do.
+func TestUsageCarriedFiguresAfterAnAccountSwitch(t *testing.T) {
+	root, rec := stepFixture(t, "work", "work", nil)
+	home := rec
+	home.LaunchID, home.Account, home.Key = "fedcba9876543210", "home", "home"
+	dir := launchRecordsDir(root)
+	if err := writeLaunchRecord(dir, filepath.Join(dir, home.LaunchID+".json"), &home); err != nil {
+		t.Fatal(err)
+	}
+	onWork := stepArgs{root: root, launch: rec.LaunchID, original: "true"}
+	onHome := stepArgs{root: root, launch: home.LaunchID, original: "true"}
+	five, seven := time.Now().Add(time.Hour).Unix(), time.Now().Add(72*time.Hour).Unix()
+	moved := "d9c690fc-1a83-4be9-b6aa-00000000000c"
+	stepRecord(onWork, rateInput(moved, 50, five, 1, seven))
+	stepRecord(onHome, rateInput(moved, 50, five, 1, seven)) // resumed on home, work's figures still shown
+	if _, ok := readLatestFigures(root)["home"]; ok {
+		t.Fatal("work's figures, carried over, became home's")
+	}
+	stepRecord(onHome, rateInput(moved, 50, five, 1, seven)) // a re-render before the first answer
+	if _, ok := readLatestFigures(root)["home"]; ok {
+		t.Fatal("a re-render of the carried figures became home's")
+	}
+	if got := latestFive(t, root, "work"); got != 50 {
+		t.Fatalf("work's figure changed: %v", got)
+	}
+	homeFive := time.Now().Add(3 * time.Hour).Unix()
+	stepRecord(onHome, rateInput(moved, 20, homeFive, 4, seven)) // its first answer on home
+	if got := latestFive(t, root, "home"); got != 20 {
+		t.Fatalf("home's own figure: %v", got)
+	}
+	if got := latestFive(t, root, "work"); got != 50 {
+		t.Fatalf("work's figure changed: %v", got)
+	}
+}
+
 // A stored window's reset counts only up to its seen time plus the
 // window's length: a stored figure claiming a later reset does not keep
 // itself over a new window that has reset since.

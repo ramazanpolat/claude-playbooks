@@ -45,10 +45,12 @@
   `DSN`, `SALT`, `SIGNING` and the rest, or shaped like a key), and one
   that says who or where someone is (`USER`, `HOSTNAME`, the git author
   and committer names, `GITHUB_ACTOR` and the like). Each value is checked
-  as any label is, and a URL, a path or an address is refused too. A
-  refused value is left out and the launch says so in one line on stderr,
-  by key and kind, never by value; an unset variable is left out quietly.
-  An entry that is not a variable's name is shown by its length only.
+  as any label is, and a URL, a path (a word starting with `/`, `~` or
+  `\` anywhere in the value) or an address is refused too. A refused value
+  is left out and the launch says so in one line on stderr, by key and
+  kind, never by value; an unset variable is left out quietly. An entry
+  that is not a variable's name is shown by its length only, and a name a
+  statement would refuse, in a file edited by hand, is shown as left out.
   Install-local: an install ignores a source's, `cpb update` keeps the
   installed one, and a played recipe may not set it. `SHOW PLAYBOOK`,
   `SHOW DEFAULTS`, `SHOW CREATE` and `SELECT` (`PLAYBOOKS`, `DEFAULTS`)
@@ -77,19 +79,31 @@
   USER@HOST: cpb run …`) leaves each `--env` value out and keeps its name
   (`--env=K=<your value>`), as the by-hand resume line does. The command
   sent over ssh carries the values.
+- **`ALTER DEFAULTS SET IF UNSET …`** is refused with a message that says
+  `SET IF UNSET` is for playbook properties, not DEFAULTS, and names every
+  key DEFAULTS takes. `SET IF UNSET` stays a playbook form: a recipe, which
+  is what offers values, may not change DEFAULTS.
 
 ### Fixed
 
 - **SHOW USAGE after a failover:** a session moved to another account
   starts over there, so its first figures on the new account no longer
-  lower that account's stored use of the same window.
+  lower that account's stored use of the same window. When those are the
+  figures it still shows from the old account until its first answer on
+  the new one, they count for neither account, and the figures after them
+  are its later figures on the new account, which stand as they are.
 - **A worktree whose `.git` names its `gitdir` relative to the worktree**
   (git's `worktree.useRelativePaths`) has its main checkout's settings
   found from any folder below it.
 - **A folder whose `.claude` is a file** holds no settings, as for Claude
   Code: the launch is no longer refused, and the usage step no longer
   dropped, over it.
-
+- **A settings file that is a FIFO no longer hangs cpb.** A settings path
+  that is not a regular file (a FIFO, a device, a folder) is refused at
+  once, without waiting on it: the playbook's `settings.json` and the
+  working folder's settings refuse the launch, as one that cannot be read
+  does, and so does a `--settings` file; the usage step adds no step over
+  it.
 ## [v4.8.0] -- 2026-11-13
 
 v4.8.0 lets a session outlive a usage limit and shows how much of each
