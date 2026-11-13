@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
@@ -290,4 +291,23 @@ func sortedLabelKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// withPlaybooksRoot is env with the launch's playbooks root as
+// CPB_PLAYBOOKS_DIR (absolute) when the root came from --playbooks-dir:
+// a cpb inside the session (cpb session label, SHOW SESSIONS) then reads
+// the same root. A root from the environment is there already; the
+// default needs nothing. Layers can never set the variable (it is
+// reserved); this is cpb's own.
+func withPlaybooksRoot(env []string) []string {
+	if config.PlaybooksDir == "" || os.Getenv(config.PlaybooksDirEnv) != "" {
+		return env
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, config.PlaybooksDirEnv+"=") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, config.PlaybooksDirEnv+"="+absPath(config.PlaybooksDir))
 }

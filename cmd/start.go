@@ -294,7 +294,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	rec := newLaunchRecord(absPath, absPath, acct.sel)
 	rec.Labels = launchLabelsOf(tokens)
 	acct.statusline = statuslineStepFor(config.ResolvePlaybooksDir(), absPath, wd, rec.LaunchID, claudeArgs).wrapped
-	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), launchEnv)
+	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), withPlaybooksRoot(launchEnv))
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
