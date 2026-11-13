@@ -388,17 +388,30 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	for _, m := range opts.mounts {
 		f = append(f, pair("--mount", m)...)
 	}
+	// shown is f as the line printed here shows it: an --env value is
+	// left out, its name kept, as in the by-hand line, since it may hold
+	// a credential. The command sent is f itself.
+	shown := append([]string(nil), f...)
 	for _, t := range tokens {
 		f = append(f, pair(t.flag, t.value)...)
+		if t.flag == "--env" {
+			k, _, _ := strings.Cut(t.value, "=")
+			shown = append(shown, "--env="+k+"=<your value>")
+			continue
+		}
+		shown = append(shown, pair(t.flag, t.value)...)
 	}
-	f = append(f, wrapper...)
-	f = append(f, target)
-	f = append(f, claudeArgs...)
-	quoted := []string{"cpb", subcommand}
-	for _, a := range f {
-		quoted = append(quoted, shell.QuoteArg(a))
+	rest := append(append(append([]string(nil), wrapper...), target), claudeArgs...)
+	f = append(f, rest...)
+	shown = append(shown, rest...)
+	quote := func(words []string) string {
+		quoted := []string{"cpb", subcommand}
+		for _, a := range words {
+			quoted = append(quoted, shell.QuoteArg(a))
+		}
+		return strings.Join(quoted, " ")
 	}
-	command := strings.Join(quoted, " ")
+	command := quote(f)
 	// ssh hands the command text to the remote user's login shell, whose
 	// family is unknown (tcsh breaks POSIX single quotes on a newline and
 	// expands "!"), and whose non-interactive PATH lacks ~/.local/bin. So
@@ -419,7 +432,7 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 		sshArgs = append(sshArgs, "-t")
 	}
 	sshArgs = append(sshArgs, "--", host, remote)
-	fmt.Fprintf(os.Stderr, "Sandbox on %s: %s\n", host, command)
+	fmt.Fprintf(os.Stderr, "Sandbox on %s: %s\n", host, quote(shown))
 	c := exec.Command(sshBin, sshArgs...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout

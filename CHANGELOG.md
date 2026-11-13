@@ -54,6 +54,13 @@
   `SHOW DEFAULTS`, `SHOW CREATE` and `SELECT` (`PLAYBOOKS`, `DEFAULTS`)
   show it, and `EXPLAIN` says for each name what a launch would do.
 
+### Changed
+
+- **The line printed before a launch on a sandbox host** (`Sandbox on
+  USER@HOST: cpb run …`) leaves each `--env` value out and keeps its name
+  (`--env=K=<your value>`), as the by-hand resume line does. The command
+  sent over ssh carries the values.
+
 ## [v4.8.0] -- 2026-11-13
 
 v4.8.0 lets a session outlive a usage limit and shows how much of each
