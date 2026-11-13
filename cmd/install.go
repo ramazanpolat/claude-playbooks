@@ -162,6 +162,14 @@ func doInstall(o installOpts, args []string) error {
 		mPre.Failover = ""
 		needsManifestWrite = true
 	}
+	if len(mPre.LabelVars) > 0 {
+		// label_vars is install-local: which of this machine's environment
+		// variables reach its labels is the person's to list, never a
+		// published manifest's.
+		fmt.Fprintf(os.Stderr, "Note: ignoring label_vars in the source's %s; label_vars is install-local. Set it with: cpb ALTER PLAYBOOK %s SET label_vars = ['<NAME>']\n", manifest.FileName, targetName)
+		mPre.LabelVars = nil
+		needsManifestWrite = true
+	}
 	if !mPre.Sandbox.Empty() {
 		// [sandbox] is install-local too: a published manifest must not be
 		// able to mount host paths or widen the sandbox's network.

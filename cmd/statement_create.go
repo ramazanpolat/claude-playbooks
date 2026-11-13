@@ -261,6 +261,17 @@ func createDefaultsBlocks(dir string) (helper, defaults createBlock, err error) 
 	if fd.MaxContext > 0 {
 		fo = append(fo, grammar.Var{Key: "failover_max_context", Value: strconv.FormatInt(fd.MaxContext, 10)})
 	}
+	// DEFAULTS' label_vars, in the same SET; a name a statement would
+	// refuse (a file edited by hand) is left out with a note.
+	lv, err := readLabelVarsDefaults(filepath.Dir(dir))
+	if err != nil {
+		return createBlock{}, createBlock{}, fmt.Errorf("DEFAULTS' label_vars cannot be read: %w", err)
+	}
+	names, lvNotes := createLabelVars(lv)
+	if len(names) > 0 {
+		fo = append(fo, grammar.Var{Key: "label_vars", Value: strings.Join(names, ",")})
+	}
+	comments = append(comments, lvNotes...)
 	if len(fo) > 0 {
 		clauses = append(clauses, grammar.Clause{Kind: grammar.SetProperties, Settings: fo})
 	}
@@ -282,6 +293,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook, Name: pb.Name, OrAlter: true}
 	v := describePlaybook(pb)
 	m := pb.Manifest
+	var labelVarNotes []string
 	switch {
 	case v.Linked != nil:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Link, Arg: *v.Linked})
@@ -330,6 +342,13 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		if m != nil && (m.Failover == failoverOn || m.Failover == failoverOff) {
 			props = append(props, grammar.Var{Key: "failover", Value: m.Failover})
 		}
+		var labelVars []string
+		if m != nil {
+			labelVars, labelVarNotes = createLabelVars(m.LabelVars)
+		}
+		if len(labelVars) > 0 {
+			props = append(props, grammar.Var{Key: "label_vars", Value: strings.Join(labelVars, ",")})
+		}
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetProperties, Settings: props})
 		// Exact convergence (D2): every key that is not set is RESET, so
 		// the statement brings a playbook back to exactly this, and the
@@ -347,6 +366,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		}
 		if m == nil || (m.Failover != failoverOn && m.Failover != failoverOff) {
 			resets = append(resets, grammar.Var{Key: "failover"})
+		}
+		if len(labelVars) == 0 {
+			resets = append(resets, grammar.Var{Key: "label_vars"})
 		}
 		if len(resets) > 0 {
 			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.ResetProperties, Settings: resets})
@@ -445,6 +467,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}
+	notes = append(notes, labelVarNotes...)
 	return withPlugins(createBlock{text: joinComments(append(notes, comments...), text), withheld: len(comments)/2 + withheldSource}), nil
 }
 

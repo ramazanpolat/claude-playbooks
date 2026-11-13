@@ -52,3 +52,4 @@ helper, `cpb-secret-file`, which examples 04, 09, 19 and 23 use.
 | [27-account-failover](27-account-failover/) | account failover: a session at a usage limit resumes on the next listed account by itself; DEFAULTS, a playbook's own setting, one launch |
 | [28-usage](28-usage/) | how much of each account is used: the usage step in front of a playbook's status line, the `cpb` key it reads, `SHOW USAGE` |
 | [29-labels](29-labels/) | session labels: `--label` at launch, `cpb session label` from a hook, the labels in the status line and `SHOW SESSIONS` |
+| [30-translated-gateway](30-translated-gateway/) | a provider that speaks only the OpenAI API, through a translator on this machine: its account, the per-run token, on request only |

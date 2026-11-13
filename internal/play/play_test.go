@@ -184,6 +184,7 @@ func TestCheckRefusals(t *testing.T) {
 		"ALTER PLAYBOOK ADD ENV work;":                                             "your env sets, and your keys",
 		"ALTER PLAYBOOK SET login = 'shared';":                                     "play's decision",
 		"ALTER PLAYBOOK SET failover = 'on';":                                      "not a recipe's",
+		"ALTER PLAYBOOK SET label_vars = ['TERM_PROGRAM'];":                        "yours to list",
 		"ALTER PLAYBOOK SET global_instructions = 'inherited';":                    "play's decision",
 		"ALTER PLAYBOOK SET IF UNSET login = 'shared', model = 'm';":               "never unset",
 		"ALTER PLAYBOOK SET IF UNSET launcher = 'x';":                              "never unset",

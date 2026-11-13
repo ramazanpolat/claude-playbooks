@@ -1,0 +1,15 @@
+-- A provider that speaks only the OpenAI API (Venice.ai here), reached
+-- through a translator on this machine (translator/). The account points at
+-- the translator, never at the provider: the provider's key stays with the
+-- translator, and the account holds only the translator's per-run token.
+-- On request only: listed for one playbook, failover off.
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
+CREATE OR REPLACE ACCOUNT venice
+  SET provider = 'gateway', base_url = 'http://127.0.0.1:4100',
+      auth_token FROM 'file:translator-token',
+      model = 'claude-sonnet-5-5', opus_model = 'claude-opus-5-5',
+      sonnet_model = 'claude-sonnet-5-5', haiku_model = 'claude-haiku-5-5',
+      access = 'listed', description = 'Venice.ai, pay per token, through the local translator';
+CREATE OR ALTER PLAYBOOK venice-agent
+  SET launcher = '', login = 'isolated', failover = 'off'
+  USE ACCOUNT venice;

@@ -155,7 +155,7 @@ origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a sourc
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, global_instructions, model, agent, sandbox.<key>,
                                            statusline.command, statusline.refresh, model_picker.mode,
-                                           model_picker_defaults
+                                           model_picker_defaults, failover, label_vars
                                            see "Playbook properties"
 value      := '<string>' | <word> | <integer> | true | false | [ '<string>', ... ] | '<item>,<item>'
                                            a one-word value bare or quoted; a list also comma-joined
@@ -182,6 +182,9 @@ defaults-clause := set-clause
             | SET failover = 'off' | 'on', failover_accounts = ['<account>', ...],
                   failover_max_context = <tokens>   account failover (see Account failover)
             | RESET failover, failover_accounts, failover_max_context
+            | SET label_vars = ['<NAME>', ...]   launch labels from the environment
+                                           (see Session labels)
+            | RESET label_vars
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
                                            a row every launch offers; see "Model picker"
             | DROP MODEL '<id>'

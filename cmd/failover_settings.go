@@ -229,6 +229,8 @@ func applyFailoverDefaults(root string, cur failoverDefaults, clauses []grammar.
 				if !reset {
 					next.MaxContext, _ = strconv.ParseInt(v.Value, 10, 64)
 				}
+			case "label_vars":
+				// label_vars.go: a DEFAULTS property of its own file.
 			default:
 				return cur, nil, fmt.Errorf("DEFAULTS has no property %s", v.Key)
 			}
