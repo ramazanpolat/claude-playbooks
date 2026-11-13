@@ -1,0 +1,5 @@
+# What translator/start.sh leaves while the translator runs: its per-run
+# token, where the sample helper reads file: references. A placeholder here;
+# no translator runs in this check.
+mkdir -p "$HOME/.config/cpb-secrets" && chmod 700 "$HOME/.config/cpb-secrets"
+(umask 077 && printf '%s' 'placeholder-translator-token' > "$HOME/.config/cpb-secrets/translator-token")

@@ -1,0 +1,34 @@
+p="$HOME/.claude-playbooks"
+env="$p/venice-agent/.fake-claude/launch-env"
+# The CLAUDE.md cpb writes imports nothing: everything in it goes to the provider.
+if grep -q '^@' "$p/venice-agent/CLAUDE.md"; then echo "CLAUDE.md imports something"; exit 1; fi
+# The route is the account; the login is the playbook's own; failover is off.
+cpb EXPLAIN PLAYBOOK venice-agent | grep -q "Account: venice (gateway http://127.0.0.1:4100, auth_token from a reference; the playbook's first)"
+cpb SHOW PLAYBOOK venice-agent --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["login"] == "isolated" and v["accounts"] == ["venice"] and v["failover"] == "off", v'
+# A launch goes to the translator with its per-run token and the provider's
+# model names, and no Anthropic credential the shell exports.
+ANTHROPIC_API_KEY=from-the-shell CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run venice-agent
+grep -qx 'ANTHROPIC_BASE_URL=http://127.0.0.1:4100' "$env"
+grep -qx 'ANTHROPIC_AUTH_TOKEN=placeholder-translator-token' "$env"
+grep -qx 'ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5-5' "$env"
+if grep -q 'from-the-shell' "$env"; then echo "a shell credential reached the route"; exit 1; fi
+# On request only: a playbook that does not list the account cannot run on it.
+cpb CREATE PLAYBOOK IF NOT EXISTS other SET launcher = ''
+if cpb run --account venice other 2> "$HOME/listed.err"; then echo "a listed account ran for a playbook that does not list it"; exit 1; fi
+grep -q "access = 'listed'" "$HOME/listed.err"
+cpb DROP PLAYBOOK other --yes
+# With the translator stopped its token is gone, and the launch stops before
+# claude starts.
+rm "$HOME/.config/cpb-secrets/translator-token" "$env"
+if cpb run venice-agent 2> "$HOME/down.err"; then echo "a launch ran with the translator down"; exit 1; fi
+grep -q 'no file for its reference' "$HOME/down.err"
+test ! -e "$env"
+(umask 077 && printf '%s' 'placeholder-translator-token' > "$HOME/.config/cpb-secrets/translator-token")
+# No token value is written under the playbooks root (the stand-in claude's
+# own record of its environment aside).
+if grep -rq --exclude-dir=.fake-claude 'placeholder-' "$p"; then echo "a token reached a file"; exit 1; fi
+# The translator's files: the script parses, and the configuration holds no
+# key, only the names of the variables start.sh sets.
+sh -n translator/start.sh
+grep -E '^ *(api_key|master_key):' translator/litellm.yaml > "$HOME/keys.out"
+if grep -v 'os.environ/' "$HOME/keys.out"; then echo "a key is written in the configuration"; exit 1; fi
