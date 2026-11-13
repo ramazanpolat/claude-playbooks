@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -340,7 +341,7 @@ func TestUsageRowsGroupAndCap(t *testing.T) {
 	}
 	_, rec := stepFixture(t, "x19", "x19", nil)
 	_ = rec
-	b, _ := statuslineBlock(root, launchRecord{Account: "x19", Key: "x19"}, time.Now())
+	b, _ := statuslineBlock(root, launchRecord{Account: "x19", Key: "x19"}, nil, time.Now())
 	var blk statuslineBlockJSON
 	if err := json.Unmarshal(b, &blk); err != nil || len(blk.Usage) != statuslineBlockMax || blk.Usage[0].Account != "x19" || !blk.Usage[0].Self || blk.Account.Name != "x19" {
 		t.Fatalf("block: %v %s", err, b)
@@ -392,5 +393,60 @@ func TestStatuslineStepFallsBackToAChild(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(out); string(got) != string(data) {
 		t.Fatalf("the original read %d bytes of %d", len(got), len(data))
+	}
+}
+
+// A worktree whose .git file names its gitdir relative to the worktree
+// (git's worktree.useRelativePaths), launched from a folder below it: the
+// main checkout's settings are found where they are, not relative to the
+// launch's folder.
+func TestFolderSettingsRelativeGitdir(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	main := filepath.Join(base, "repo")
+	wt := filepath.Join(base, "wt", "feature")
+	sub := filepath.Join(wt, "app", "src")
+	for _, d := range []string{filepath.Join(main, ".git", "worktrees", "feature"), filepath.Join(main, ".claude"), sub} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: ../../repo/.git/worktrees/feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+	want := filepath.Join(main, ".claude", "settings.json")
+	if files := folderSettingsFiles(sub); !slices.Contains(files, want) {
+		t.Fatalf("files: %v", files)
+	}
+	if err := os.WriteFile(want, []byte(`{"statusLine":{"type":"command","command":"x"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if set, err := setsStatusLine(want); !set || err != nil {
+		t.Fatalf("the main checkout's status line: %v %v", set, err)
+	}
+}
+
+// A folder whose .claude is a file holds no settings, as Claude Code
+// reads none from it: no reason to drop the step, and no reason to refuse
+// a launch.
+func TestDotClaudeFileIsNoSettings(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".claude"), []byte("not a folder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(repo, "app")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range folderSettingsFiles(sub) {
+		if set, err := setsStatusLine(p); set || err != nil {
+			t.Fatalf("%s: %v %v", p, set, err)
+		}
+	}
+	if err := reservedInSettings(t.TempDir(), repo); err != nil {
+		t.Fatalf("a .claude file refused the launch: %v", err)
 	}
 }

@@ -437,11 +437,15 @@ type Manifest struct {
 	// Failover is the failover property: "on" or "off" decide this
 	// playbook's launches; empty (or "inherited") follows DEFAULTS
 	// (SPEC.md, "Account failover").
-	Failover string   `toml:"failover"`
-	Source   *Source  `toml:"source,omitempty"`
-	Update   *Update  `toml:"update,omitempty"`
-	Env      *Env     `toml:"env,omitempty"`
-	Sandbox  *Sandbox `toml:"sandbox,omitempty"`
+	Failover string `toml:"failover"`
+	// LabelVars is the label_vars property: the exact names of environment
+	// variables whose values a launch copies into launch labels, as
+	// env.<name in lower case> (SPEC.md, "Session labels").
+	LabelVars []string `toml:"label_vars"`
+	Source    *Source  `toml:"source,omitempty"`
+	Update    *Update  `toml:"update,omitempty"`
+	Env       *Env     `toml:"env,omitempty"`
+	Sandbox   *Sandbox `toml:"sandbox,omitempty"`
 
 	// MCP records, per MCP server a statement declared, the variables cpb
 	// derived for its secret references, so dropping the server forgets
@@ -778,6 +782,13 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.Failover == "on" || m.Failover == "off" {
 		fmt.Fprintf(&b, "failover = %s\n", QuoteTOML(m.Failover))
+	}
+	if len(m.LabelVars) > 0 {
+		q := make([]string, len(m.LabelVars))
+		for i, n := range m.LabelVars {
+			q[i] = QuoteTOML(n)
+		}
+		fmt.Fprintf(&b, "label_vars = [%s]\n", strings.Join(q, ", "))
 	}
 	if m.Source != nil {
 		b.WriteString("\n[source]\n")

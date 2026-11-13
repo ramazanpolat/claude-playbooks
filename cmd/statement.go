@@ -453,6 +453,24 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		lines = append(lines, failoverLines...)
 	}
 
+	// DEFAULTS' label_vars (label_vars.go).
+	var labelVarsNew []string
+	labelVarsSame := true
+	if len(failoverClauses) > 0 {
+		cur, err := readLabelVarsDefaults(root)
+		if err != nil {
+			return fmt.Errorf("DEFAULTS' label_vars cannot be read: %w", err)
+		}
+		next, named, err := labelVarsAfter(cur, failoverClauses)
+		if err != nil {
+			return fmt.Errorf("DEFAULTS: %w", err)
+		}
+		if named && !slices.Equal(next, cur) {
+			labelVarsNew, labelVarsSame = next, false
+			lines = append(lines, labelVarsLine(next))
+		}
+	}
+
 	// Unchanged when the list and the helper setting would stay as they are.
 	listSame := len(listClauses) == 0 || slices.Equal(current, names)
 	helperSame := true
@@ -462,7 +480,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		helperSame = (c.Kind == grammar.SetHelper && stored == c.Arg) || (c.Kind == grammar.UnsetHelper && stored == "")
 	}
 	switch {
-	case listSame && helperSame && accountSame && pickerSame && failoverSame:
+	case listSame && helperSame && accountSame && pickerSame && failoverSame && labelVarsSame:
 		r.outcome = outUnchanged
 		r.say("DEFAULTS unchanged", nil)
 		return nil
@@ -535,6 +553,12 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		if err := writeFailoverDefaults(root, failoverNew); err != nil {
 			restore()
 			return fmt.Errorf("cannot write DEFAULTS' failover settings: %w", err)
+		}
+	}
+	if !labelVarsSame {
+		if err := writeLabelVarsDefaults(root, labelVarsNew); err != nil {
+			restore()
+			return fmt.Errorf("cannot write DEFAULTS' label_vars: %w", err)
 		}
 	}
 	r.say("Altered DEFAULTS", lines)
@@ -749,6 +773,17 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if failoverChange {
 		lines = append(lines, "failover  "+nowFailover+failoverMeaning(nowFailover))
 	}
+	// label_vars (SPEC.md, "Session labels"), in the same manifest write.
+	beforeLabelVars := append([]string(nil), m.LabelVars...)
+	nowLabelVars, named, err := labelVarsAfter(beforeLabelVars, st.Clauses)
+	if err != nil {
+		return fmt.Errorf("PLAYBOOK %s: %w", st.Name, err)
+	}
+	labelVarsChange := named && !slices.Equal(nowLabelVars, beforeLabelVars)
+	m.LabelVars = nowLabelVars
+	if labelVarsChange {
+		lines = append(lines, labelVarsLine(nowLabelVars))
+	}
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
 	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
@@ -795,7 +830,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && !pickerDefaultsChange && !failoverChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && !pickerDefaultsChange && !failoverChange && !labelVarsChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		head := "PLAYBOOK " + st.Name + " unchanged"
 		if r.exists {
@@ -849,7 +884,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return nil
 	}
-	if envChange || mcpRecordChange || loginChange || sandboxChange || pickerDefaultsChange || failoverChange {
+	if envChange || mcpRecordChange || loginChange || sandboxChange || pickerDefaultsChange || failoverChange || labelVarsChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}

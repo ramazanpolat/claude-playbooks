@@ -216,6 +216,70 @@ echo usage-ok'''
 contains = "usage-ok"
 
 [[verify.commands]]
+# Session labels (v4.9.0): a launch label from --label, and a session label
+# a hook sets from inside the session (cpb session label finds the session
+# from its own ancestry). Both reach the status line's cpb key and SHOW
+# SESSIONS, kept apart. Outside a session cpb launched it exits 3; a value
+# shaped like an e-mail address is refused without being echoed. A launch
+# from another playbooks root hands that root, absolute, to the session.
+command = '''
+H="$HOME/lbbin"; mkdir -p "$H" "$HOME/lbwork"
+cat > "$H/claude" <<'EOF'
+#!/usr/bin/env python3
+import json, os, subprocess, sys, time
+if sys.argv[1:2] == ["--version"]:
+    print("2.1.322 (Claude Code)"); sys.exit(0)
+sid, pid, h = "0e5c1a2b-0000-4000-8000-0000000000a3", os.getpid(), os.environ["HOME"]
+try:
+    st = open("/proc/%d/stat" % pid).read().rsplit(")", 1)[1].split()[19]
+except OSError:
+    st = " ".join(subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=dict(os.environ, TZ="UTC", LC_ALL="C"), capture_output=True, text=True).stdout.split())
+d = os.environ["CLAUDE_CONFIG_DIR"] + "/sessions"; os.makedirs(d, exist_ok=True); f = d + "/%d.json" % pid
+json.dump({"pid": pid, "sessionId": sid, "cwd": os.getcwd(), "startedAt": int(time.time() * 1000), "procStart": st, "kind": "interactive", "status": "busy"}, open(f, "w"))
+try:
+    # Claude Code renders after it starts; cpb records the launch once the process runs.
+    L = h + "/.claude-playbooks/.state/launches"
+    for _ in range(50):
+        if os.path.isdir(L) and any(n.endswith(".json") for n in os.listdir(L)):
+            break
+        time.sleep(0.1)
+    subprocess.run(["/bin/sh", "-c", "cpb session label task=triage"], check=True)
+    a = sys.argv[1:]
+    s = json.loads(a[a.index("--settings") + 1]) if "--settings" in a else {}
+    c = (s.get("statusLine") or {}).get("command") or "true"
+    subprocess.run(["/bin/sh", "-c", c], input=json.dumps({"session_id": sid, "version": "2.1.322", "model": {"id": "claude-opus-5-5"}}).encode())
+    r = ""
+    for _ in range(50):
+        r = subprocess.run(["cpb", "SHOW", "SESSIONS", "--json"], capture_output=True, text=True).stdout
+        if sid in r and '"account": "acct-work"' in r:
+            break
+        time.sleep(0.1)
+    open(h + "/lb-sessions.json", "w").write(r)
+finally:
+    os.remove(f)
+EOF
+chmod 755 "$H/claude"
+cpb CREATE PLAYBOOK lbp SET launcher = '', login = 'isolated', statusline.command = 'cat > "$HOME/lb.in"' USE ACCOUNT acct-work >/dev/null || exit 1
+code=0; cpb session label task=x 2>/dev/null || code=$?; [ "$code" = 3 ] || { echo outside-wrong "$code"; exit 1; }
+if cpb run --label 'owner=someone@example.com' lbp 2> "$HOME/lb.err"; then echo email-taken; exit 1; fi
+grep -q 'label owner' "$HOME/lb.err" && ! grep -q 'someone@' "$HOME/lb.err" || { echo email-refusal-wrong; exit 1; }
+cd "$HOME/lbwork" && PATH="$H:$PATH" cpb run --label name=review-auth lbp >/dev/null 2>&1 || { echo run-failed; exit 1; }
+want='"labels":{"launch":{"name":"review-auth"},"session":{"task":"triage"}}'
+grep -qF "$want" "$HOME/lb.in" || { echo key-wrong; cat "$HOME/lb.in"; exit 1; }
+tr -d ' \n' < "$HOME/lb-sessions.json" | grep -qF "$want" || { echo sessions-wrong; cat "$HOME/lb-sessions.json"; exit 1; }
+cpb --playbooks-dir "$HOME/lbroot" CREATE PLAYBOOK lbo SET launcher = '' >/dev/null || exit 1
+cd "$HOME" && cpb --playbooks-dir lbroot run lbo >/dev/null 2>&1 || { echo root-run-failed; exit 1; }
+grep -qx "CPB_PLAYBOOKS_DIR=$HOME/lbroot" "$HOME/claude-env" || { echo root-not-handed; exit 1; }
+cpb "ALTER PLAYBOOK lbp SET label_vars = ['LB_TAG']" >/dev/null || { echo label-vars-set-failed; exit 1; }
+cpb "ALTER PLAYBOOK lbp SET label_vars = ['GITHUB_TOKEN']" 2>/dev/null && { echo credential-name-taken; exit 1; }
+cd "$HOME/lbwork" && LB_TAG=nightly PATH="$H:$PATH" cpb run lbp >/dev/null 2>&1 || { echo vars-run-failed; exit 1; }
+grep -qF '"launch":{"env.lb_tag":"nightly"}' "$HOME/lb.in" || { echo label-vars-wrong; cat "$HOME/lb.in"; exit 1; }
+env -u LB_TAG PATH="$H:$PATH" cpb run lbp 2> "$HOME/lbv.err" >/dev/null; ! grep -q label_vars "$HOME/lbv.err" || { echo unset-said-something; exit 1; }
+LB_TAG=https://example.com/hook PATH="$H:$PATH" cpb run lbp 2> "$HOME/lbv.err" >/dev/null; grep -qF "label_vars left out: env.lb_tag (the value is a URL)" "$HOME/lbv.err" && ! grep -q example.com "$HOME/lbv.err" || { echo url-note-wrong; exit 1; }
+echo labels-ok'''
+contains = "labels-ok"
+
+[[verify.commands]]
 # After every launch above: no resolved value (secret-<name>) was ever
 # written under the playbooks root.
 command = '! grep -rq "secret-" "$HOME/.claude-playbooks" && echo no-value-on-disk'

@@ -2,14 +2,99 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Session labels.** A session carries short `key=value` labels from two
+  sources, kept apart:
+  - **launch labels**, given at launch with `--label KEY=VALUE` on `cpb run`,
+    a launcher or `cpb start`. They are kept in the launch record, and every
+    launch cpb rebuilds carries them like `--env`: the failover relaunch,
+    the by-hand line, a sandbox host. They are checked, each and together,
+    before anything starts and before a launch is forwarded to a sandbox
+    host;
+  - **session labels**, set from inside a live session by a hook or a tool
+    with `cpb session label key=value` (`--unset`, `--list`, `--json`). It
+    finds the session from its own process ancestry, and labels only that
+    one; outside any session, `--session <id>` labels a live session by its
+    id. It exits 3 when it does not run in a session cpb launched, so a hook
+    can ignore exactly that. A write waits at most 400 ms for another
+    writer of the same session.
+  - Both reach the status line's `cpb` key (`labels`), `SHOW SESSIONS`
+    (`labels` in `--json`, a last `LABELS` column in the table, a `labels`
+    column in `SELECT … FROM SESSIONS`) and the usage log
+    (`launch_labels`, `session_labels`).
+  - A label value is one line of plain visible text, not empty. A
+    character a screen does not show as written (control, format,
+    separator, private-use, variation selector), a value that looks like
+    an e-mail address, and a credential, judged on key and value together
+    as `cpb ask` judges a request (`password=…`, `key=main`; a hash after
+    `commit=` is fine), are refused, with a message naming a valid key and
+    never a value. A label is taken from the environment only through
+    `label_vars` (below), for the names listed.
+  - A launch whose playbooks root came from `--playbooks-dir` sets
+    `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
+    one, so a cpb inside it uses the same root.
+  - Guide: `docs/guides/labels.md`; example `29-labels`.
+- **`label_vars`**, a PLAYBOOK and a DEFAULTS property: the exact names of
+  environment variables whose values a launch copies into launch labels,
+  as `env.<name in lower case>` (DEFAULTS' names first, then the
+  playbook's), read once per run: the failover relaunch keeps the
+  launch's labels. At most 8 names in each list, no patterns. Refused when
+  the list is set: a name that is cpb's own or an account's, one that may
+  hold a credential (`TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `WEBHOOK`,
+  `DSN`, `SALT`, `SIGNING` and the rest, or shaped like a key), and one
+  that says who or where someone is (`USER`, `HOSTNAME`, the git author
+  and committer names, `GITHUB_ACTOR` and the like). Each value is checked
+  as any label is, and a URL, a path or an address is refused too. A
+  refused value is left out and the launch says so in one line on stderr,
+  by key and kind, never by value; an unset variable is left out quietly.
+  An entry that is not a variable's name is shown by its length only.
+  Install-local: an install ignores a source's, `cpb update` keeps the
+  installed one, and a played recipe may not set it. `SHOW PLAYBOOK`,
+  `SHOW DEFAULTS`, `SHOW CREATE` and `SELECT` (`PLAYBOOKS`, `DEFAULTS`)
+  show it, and `EXPLAIN` says for each name what a launch would do.
+- **A provider that speaks only the OpenAI API** (docs only, no change to
+  cpb): a guide and an example for running Claude Code on such a provider
+  through a translator on your machine, with Venice.ai through LiteLLM as
+  the worked case. The account is a `gateway` on the translator's local
+  address; the provider's key is lent to the translator alone for its life,
+  and the account sends a per-run token the translator makes. On request
+  only: `access = 'listed'`, the playbook's `failover = 'off'`. Guide:
+  `docs/guides/openai-compatible-provider.md`; example
+  `30-translated-gateway`.
+- **An account reference that does not resolve at launch is named.** When a
+  launch through the secret helper ends with an error and a reference of the
+  account's own cannot be resolved, cpb adds a last line, after the
+  helper's own message: the account, the key (`auth_token`, `api_key`,
+  `claude_token`, a header) and the reference's scheme, never a value. On an
+  account whose address is on this machine it adds that the local server
+  behind it may not be running, and that `SHOW ACCOUNT <name>` shows what
+  the account points at. A launch that succeeds is not checked.
+
 ### Changed
 
+- **The line printed before a launch on a sandbox host** (`Sandbox on
+  USER@HOST: cpb run …`) leaves each `--env` value out and keeps its name
+  (`--env=K=<your value>`), as the by-hand resume line does. The command
+  sent over ssh carries the values.
 - **`cpb update <name> --dry-run` compares the files.** Next to the
   versions it lists what the update would replace, each top-level entry
   the source ships that is new or differs from the install's (preserved
   files left out, the manifest compared as the update would write it). It
   says `up to date` only when the versions match and nothing would be
   replaced; the same version with other files says so.
+
+### Fixed
+
+- **SHOW USAGE after a failover:** a session moved to another account
+  starts over there, so its first figures on the new account no longer
+  lower that account's stored use of the same window.
+- **A worktree whose `.git` names its `gitdir` relative to the worktree**
+  (git's `worktree.useRelativePaths`) has its main checkout's settings
+  found from any folder below it.
+- **A folder whose `.claude` is a file** holds no settings, as for Claude
+  Code: the launch is no longer refused, and the usage step no longer
+  dropped, over it.
 
 ## [v4.8.0] -- 2026-11-13
 

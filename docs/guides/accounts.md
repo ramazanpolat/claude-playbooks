@@ -11,7 +11,8 @@ another provider.
 The contract is [SPEC, CREATE / ALTER / DROP ACCOUNT](../../SPEC.md#create--alter--drop-account);
 [example 23](../../examples/23-accounts/) runs two Claude accounts on one
 playbook; [example 15](../../examples/15-third-party-route/) runs a gateway
-account.
+account. A provider that serves only OpenAI's API needs a translator in
+front of it: [A provider that speaks only the OpenAI API](openai-compatible-provider.md).
 
 ## Make one
 

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -109,6 +108,11 @@ func mainCheckoutOf(gitFile string) string {
 		return ""
 	}
 	dir = strings.TrimSpace(dir)
+	// A relative gitdir (git's worktree.useRelativePaths) is relative to
+	// the worktree, where the .git file is, not to the launch's folder.
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(filepath.Dir(gitFile), dir)
+	}
 	i := strings.Index(dir, string(filepath.Separator)+".git"+string(filepath.Separator)+"worktrees"+string(filepath.Separator))
 	if i < 0 {
 		return ""
@@ -120,7 +124,9 @@ func mainCheckoutOf(gitFile string) string {
 // it cannot be read or parsed (then cpb cannot tell, and adds no step).
 func setsStatusLine(path string) (bool, error) {
 	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if absentPath(err) {
+		// None there, or .claude is a file: Claude Code reads no
+		// settings from it either.
 		return false, nil
 	}
 	if err != nil {

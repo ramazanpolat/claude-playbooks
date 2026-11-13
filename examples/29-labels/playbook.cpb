@@ -1,0 +1,12 @@
+-- A playbook with a status line of its own, which prints the session's
+-- labels from the cpb key: the launch label (cpb run --label), then the one
+-- a hook set from inside the session (cpb session label).
+CREATE OR ALTER PLAYBOOK agent
+  SET launcher = '',
+      statusline.command = 'sed -n ''s/.*"labels":{"launch":{"name":"\([^"]*\)"},"session":{"task":"\([^"]*\)"}}.*/\1: \2/p''';
+
+-- A second playbook copies one environment variable into its launch labels
+-- (label_vars): the value becomes the label env.term_program. Only names
+-- listed here are read, and never one that may hold a credential.
+CREATE OR ALTER PLAYBOOK tagged
+  SET launcher = '', statusline.command = 'cat > "$HOME/tagged.in"', label_vars = ['TERM_PROGRAM'];

@@ -147,7 +147,7 @@ origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a sourc
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, global_instructions, model, agent, sandbox.<key>,
                                            statusline.command, statusline.refresh, model_picker.mode,
-                                           model_picker_defaults
+                                           model_picker_defaults, failover, label_vars
                                            see "Playbook properties"
 value      := '<string>' | <word> | <integer> | true | false | [ '<string>', ... ] | '<item>,<item>'
                                            a one-word value bare or quoted; a list also comma-joined
@@ -174,6 +174,9 @@ defaults-clause := set-clause
             | SET failover = 'off' | 'on', failover_accounts = ['<account>', ...],
                   failover_max_context = <tokens>   account failover (see Account failover)
             | RESET failover, failover_accounts, failover_max_context
+            | SET label_vars = ['<NAME>', ...]   launch labels from the environment
+                                           (see Session labels)
+            | RESET label_vars
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
                                            a row every launch offers; see "Model picker"
             | DROP MODEL '<id>'
@@ -314,6 +317,8 @@ stores commands; files store the result.
 | `ALTER DEFAULTS SET / RESET secret_helper` | `<root>/.env-sets/.secret-helper`, one line: the command |
 | `ALTER DEFAULTS SET / RESET failover, failover_accounts, failover_max_context` | `<root>/.env-sets/.failover`, TOML (`failover`, `accounts`, `max_context`), mode `0600`; removed when nothing is set |
 | `ALTER PLAYBOOK … SET failover` | the playbook's `.playbook`, `failover = "on"` or `"off"` (none for `'inherited'`) |
+| `ALTER DEFAULTS SET / RESET label_vars` | `<root>/.env-sets/.label_vars`, TOML (`names`), mode `0600`; removed when empty |
+| `ALTER PLAYBOOK … SET label_vars` | the playbook's `.playbook`, `label_vars = [...]` (none when empty) |
 | `CREATE / ALTER / DROP ACCOUNT` | `<root>/.accounts/<name>.toml` |
 | `ALTER PLAYBOOK … USE ACCOUNT` | the playbook's `.playbook`, `[env] accounts = [...]` |
 | `ALTER DEFAULTS USE ACCOUNT` | `<root>/.accounts/.default`, one name |
@@ -612,7 +617,17 @@ reference and in the playbook, env-set and account files that hold one).
   helper resolves the references, sets them in the environment of that one
   command, and execs it. cpb fetches no values; there is no value-returning
   call, and none may be built. A non-zero exit before `claude` starts means
-  cpb did not launch, and the helper's message says why.
+  cpb did not launch, and the helper's message says why. Since v4.9.0, when
+  a host launch through the helper ends with an error, cpb then checks each
+  of the account's own references (`--check`, in the environment the launch
+  gave the helper, its output not shown); for the
+  first that does not resolve it adds a last line naming the account, the
+  key (`auth_token`, `api_key`, `claude_token`, or `header <Name>`) and the
+  reference's scheme, never a value. When the account's `base_url` is on
+  this machine (`localhost`, `127.0.0.1`, `::1`), the line adds that the
+  local server behind it may not be running and that `SHOW ACCOUNT <name>`
+  shows what the account points at: a local server may write the very
+  secret the account reads. A launch that succeeds is not checked.
 - **Store** (optional, since v4.7.0): `<helper> --store REF`, the value on
   its stdin, never an argument. Exit 0 means it is stored. A helper without
   it exits non-zero (cpb then says to store the value with your own tool and
@@ -1221,7 +1236,7 @@ when a cloud switch is on, and only a cloud account turns one on.
   their `env` over the environment cpb hands Claude Code, and may name an
   `apiKeyHelper`. A launch is refused when any of them sets a reserved
   variable or an `apiKeyHelper` (one that cannot be read or parsed refuses
-  too): routing and credentials come from the account, never from a file a
+  too; a `.claude` that is a file holds none): routing and credentials come from the account, never from a file a
   repository carries. So is a `--settings` passed through to `claude`
   (`--settings <file>`, `--settings=<file>` or inline JSON) that does the
   same, keys matched exactly as Claude Code reads them; one whose file
@@ -1485,13 +1500,15 @@ ALTER PLAYBOOK <name> RESET login, global_instructions       -- back to the defa
 | `statusline.refresh` | whole seconds, at least 1 | none | `statusLine.refreshInterval` |
 | `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `RESET model_picker` is the mode too: the rows are a collection, which `DROP MODEL` empties |
 | `failover` | `'inherited'`, `'on'`, `'off'` | `'inherited'` | Whether a launch moves its session to another account at a usage limit (see *Account failover*); `'inherited'` follows DEFAULTS' `failover`. The manifest's `failover`, written only when `'on'` or `'off'`. `CREATE … FROM` ignores a source manifest's, as it ignores `[env]`; `cpb update` keeps the installed one. A plain directory refuses it |
+| `label_vars` | a list of environment variable names, `['TERM_PROGRAM', 'HC_TERMINAL_ID']` | none | The variables whose values a launch copies into launch labels, after DEFAULTS' (see *Session labels*). The manifest's `label_vars`. Install-local, as `failover` is: `CREATE … FROM` ignores a source manifest's, `cpb update` keeps the installed one, a played recipe may not set it. A plain directory refuses it |
 | `model_picker_defaults` | `'inherited'`, `'excluded'` | `'inherited'` | Whether the playbook's launches offer the DEFAULTS model rows (see *Model picker*); the manifest's `model_picker_defaults`, written only when `'excluded'`. A key of its own: `RESET model_picker` stays the mode. A plain directory has no manifest and refuses it, as it refuses `login` |
 
 `DEFAULTS` has the property `secret_helper` (`ALTER DEFAULTS SET
 secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*), and
 `failover` (`'off'` or `'on'`), `failover_accounts` (a list, `['a', 'b
 (any provider)']`) and `failover_max_context` (a whole number of tokens),
-each removed by `RESET` (see *Account failover*).
+each removed by `RESET` (see *Account failover*), and `label_vars` (a list
+of environment variable names; see *Session labels*).
 
 - **The form.** A pair is one word (`global_instructions='inherited'`) or three
   (`global_instructions = 'inherited'`); pairs are separated by commas, which may be left
@@ -2065,11 +2082,13 @@ usage (*SHOW USAGE*). The playbook changes nothing.
   - the launch passes its own `--settings` (Claude Code takes one);
   - any folder-level file Claude Code reads sets `statusLine`: the working
     folder's `.claude/settings.json` and `.claude/settings.local.json`, the
-    same at its repository's root, and at the main checkout of a worktree.
-    Claude Code runs a folder's status line only once the folder is trusted,
-    so cpb never copies it into a `--settings` of its own, where it would
-    run at once; those files are read for the key alone, and one that cannot
-    be read means no step;
+    same at its repository's root, and at the main checkout of a worktree
+    (its `.git` file's `gitdir`, read relative to the worktree when it is
+    relative). Claude Code runs a folder's status line only once the folder
+    is trusted, so cpb never copies it into a `--settings` of its own, where
+    it would run at once; those files are read for the key alone, and one
+    that cannot be read means no step. A `.claude` that is a file holds no
+    settings, as for Claude Code;
   - managed settings set a status line: the managed settings file, a
     `managed-settings.d/*.json` drop-in beside it, or server-managed
     settings cached in the config directory (`remote-settings.json`). A
@@ -2133,13 +2152,17 @@ usage (*SHOW USAGE*). The playbook changes nothing.
     in epoch seconds, `used_percentage` as Claude Code reported it (normally
     0 to 100, not clamped); a window that has reset keeps its last figure,
     and null means cpb never had one. `seen_at` is epoch seconds.
+  - `labels` (since v4.9.0): `{"launch": {...}, "session": {...}}`, the
+    session's labels (*Session labels*), each left out when it has none,
+    and `labels` left out when both are. A session label set during the
+    session shows from the next render.
   - A new optional key does not change `v`; a change a reader would notice
     does. Input that is not one JSON object, or holds a `cpb` key, or any
     failure, passes through as it came.
 - **When it writes.** No timer: the step runs when Claude Code renders the
   status line, after replies and on its own refresh. A line is written when
-  the figures, the model, the effort, fast mode or the session's name
-  differ from the session's last line; cost or context alone, at most once a
+  the figures, the model, the effort, fast mode, the session's name or its
+  labels differ from the session's last line; cost or context alone, at most once a
   minute. An account's figure is as fresh as the last reply any of its
   sessions got.
 - **Limits.** The record's lock is taken without waiting (a busy render is
@@ -2405,7 +2428,8 @@ a, b`, with `at most <n> tokens of context` when capped). `--json`:
 {"envs": ["claude-default", "corp-proxy"], "account": "mine",
  "secret_helper": "my-keychain-helper", "secret_helper_from": "setting",
  "model_picker": {"options": [{"model": "fable", "label": "Fable (newest)", "description": null, "behaves_as": null}]},
- "failover": "on", "failover_accounts": ["claude-work", "claude-home"], "failover_max_context": null}
+ "failover": "on", "failover_accounts": ["claude-work", "claude-home"], "failover_max_context": null,
+ "label_vars": ["TERM_PROGRAM"]}
 ```
 
 (`account` is null when `DEFAULTS` names none; `secret_helper` and
@@ -2675,7 +2699,7 @@ what it means, is listed under *DESCRIBE* below.
 | `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play` is the last column) |
 | `ENVS` | env set | the `SHOW ENV` object |
 | `VARS` | variable, per layer, per playbook | one variable of one layer, with its `playbook`, `layer` and `effective` |
-| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty`, then `account`, `at_limit` and `account_at_limit`, are the last columns) |
+| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty`, then `account`, `at_limit`, `account_at_limit` and `labels`, are the last columns) |
 | `USAGE` | allowance (*SHOW USAGE*) | the `SHOW USAGE --json` object |
 | `DEFAULTS` | (one row) | the `SHOW DEFAULTS` object |
 
@@ -2754,6 +2778,7 @@ code to the same lines):
 | `accounts` | `Array(String)` | The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook. |
 | `account` | `Nullable(String)` | The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why). |
 | `failover` | `String` | The failover property: inherited (DEFAULTS' failover decides), on or off. |
+| `label_vars` | `Array(String)` | The label_vars property: environment variables whose values a launch copies into launch labels (env.<name>), after DEFAULTS'. |
 
 **`ENVS`**
 
@@ -2801,6 +2826,7 @@ code to the same lines):
 | `account` | `Nullable(String)` | The account cpb launched the session on, from its launch record; null for a session cpb did not launch. |
 | `at_limit` | `JSON` | The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped. |
 | `account_at_limit` | `JSON` | The usage limit the session's account is at, from the latest figure its sessions reported: window and resets_at; null when it is not. |
+| `labels` | `JSON` | The session's labels: launch (from --label at launch) and session (set from inside it with cpb session label); null when it has none. |
 
 **`USAGE`**
 
@@ -2831,6 +2857,7 @@ code to the same lines):
 | `failover` | `String` | Account failover for every playbook whose failover is inherited: off or on. |
 | `failover_accounts` | `Array(String)` | The accounts a session at a usage limit moves to, in order; an entry marked (any provider) may take a session from another kind of account. |
 | `failover_max_context` | `Nullable(Int64)` | The largest context, in tokens, a session may have to be moved; null for no cap. |
+| `label_vars` | `Array(String)` | Environment variables whose values every launch copies into launch labels (env.<name>), before a playbook's own. |
 
 ## SHOW SESSIONS
 
@@ -2880,9 +2907,11 @@ the usage step is given) and removes it when the launch returns.
   `env:<set>`, `block:<playbook>` or `flags:<host>`), `why` (the reason
   EXPLAIN gives), `key` (whose allowance it draws on: the account, or `machine`, or
   `playbook:<name>` for an isolated playbook's own login), `launch_id`,
-  `launched_at`, and after an account failover, `switches` (each `from`,
-  `to`, `at`, `window`, `resets_at`, `context_tokens`, `outcome`). No
-  credential, no reference, nothing from the environment.
+  `launched_at`, `labels` (the launch labels, since v4.9.0), and after an
+  account failover, `switches` (each `from`, `to`, `at`, `window`,
+  `resets_at`, `context_tokens`, `outcome`). No credential, no reference,
+  nothing from the environment. A record whose labels cpb would refuse is
+  not read.
 - **Matching.** A session gets the account of the record of its own pid,
   or else of its parent's pid (a secret helper that starts claude as its
   child), and only when that process started when the record says, so a
@@ -2916,10 +2945,12 @@ a lowercase name, or a time in milliseconds is no limit, never an error.
   its status stays Claude Code's own even when its screen shows the limit.
 
 **`SHOW SESSIONS`** prints the live sessions, newest first: one line each
-(`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
+(`PLAYBOOK ACCOUNT PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD LABELS`).
 `ACCOUNT` is `-` for none; `STATUS` reads `limit 5h`, `limit 7d` (or
 `limit <window>`) while the session is at a limit, and Claude Code's own
-status otherwise.
+status otherwise. `SESSION` is the session's id. `LABELS`, last, is its
+labels (*Session labels*): `launch k=v, …; session k=v, …`, each source left
+out when it has none, `-` for none.
 - `FOR PLAYBOOK` limits it to one playbook, and an unknown name is refused.
 - **`--json`** is an array of objects:
 
@@ -2941,6 +2972,7 @@ status otherwise.
 | `account` | string or null | the launch record (since v4.8.0); null for a session cpb did not launch |
 | `at_limit` | object or null | the transcript (since v4.8.0): `{"window": "seven_day", "resets_at": "<RFC 3339, UTC>"}` while the session is at a limit, else null |
 | `account_at_limit` | object or null | the latest figure of the session's allowance (since v4.8.0, *SHOW USAGE*): the same shape, while a window of it is at 100 or more and has not reset; set even when the session itself has not tried since. `STATUS` reads `account limit 7d` when only this is set |
+| `labels` | object or null | the launch record and the session's labels file (since v4.9.0, *Session labels*): `{"launch": {...}, "session": {...}}`, each left out when it has none; null when both are empty |
 
 A session's transcript is
 `<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`,
@@ -2950,7 +2982,7 @@ If that path is missing, cpb looks under every project directory.
 
 **`SELECT … FROM SESSIONS`** has the same rows. ClickHouse reads
 `started_at` and `last_active` as `DateTime64(3, 'UTC')`, and `at_limit`
-as `JSON`.
+and `labels` as `JSON`.
 
 **Resuming.** There is no resume statement. `<launcher> --resume <id>`,
 `--continue`, or `cpb run <name> --resume …` hand Claude Code's own flags to
@@ -3021,6 +3053,154 @@ Resume this playbook's session with: kd --resume bfb2d226-403f-46da-8216-e39b2a7
 No word is reserved: `SESSIONS` and `FOR` still name playbooks and env
 sets.
 
+## Session labels
+
+(Since v4.9.0.) A session carries short `key=value` labels, from two
+sources kept apart:
+
+- **Launch labels** are the user's own, fixed at launch: `--label KEY=VALUE`
+  on `cpb run`, a launcher or `cpb start` (repeatable; a later one for a key
+  wins). They go in the launch record, and every launch cpb rebuilds from
+  that launch carries them, like `--env`: the failover relaunch and the way
+  back, the by-hand line, a sandbox host. They are checked, each and
+  together, before anything starts, and before a launch is forwarded to a
+  sandbox host, so a refused one is neither printed nor handed to ssh. A
+  launch in a local sandbox takes them and records nothing, as it records
+  no account.
+- **Launch labels from the environment** (`label_vars`): the exact names of
+  environment variables whose values a launch copies into launch labels,
+  each as `env.<name in lower case>`:
+
+```
+cpb "ALTER DEFAULTS SET label_vars = ['TERM_PROGRAM']"          # every launch
+cpb "ALTER PLAYBOOK reviewer SET label_vars = ['HC_TERMINAL_ID']" # this playbook's, after DEFAULTS'
+```
+
+  - **Only names listed.** A name is a variable's exact name (letters,
+    digits and `_`, not starting with a digit, at most 28 characters): no
+    pattern, no prefix, no "all". At most 8 in each list, none twice in any
+    case. Each entry is taken as written: one with spaces around it, or an
+    empty one, is refused, never trimmed or dropped. Refused when the list
+    is set, whatever the value:
+    - cpb's own (`CPB_*`, `CLAUDE_CONFIG_DIR`) and an account's variables;
+    - a name that may hold a credential: one *Secrets* masks (`TOKEN`,
+      `SECRET`, `PASSWORD`, `AUTH`, a `*KEY` segment and the rest), any name
+      holding `KEY`, `COOKIE`, `WEBHOOK`, `DSN`, `SALT` or `SIGNING`, or
+      with a `SESSION` segment, and a name shaped like a credential (a key
+      id);
+    - a name whose value says who or where someone is, whatever the value:
+      `USER`, `LOGNAME`, `USERNAME`, `HOSTNAME`, `HOST`, `GIT_AUTHOR_NAME`,
+      `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`,
+      `GITHUB_ACTOR`.
+    An entry that is not a variable's name, or is shaped like a credential,
+    is named by its length only, in a refusal and wherever a stored list is
+    shown (a file edited by hand): `<an entry of 29 characters>`.
+  - **Read once per run,** where the launch runs, from the environment cpb
+    itself was started with, before any layer: DEFAULTS' names, then the
+    playbook's that DEFAULTS does not list. A `--label` of the same key
+    wins. A plain directory (`cpb start`) takes DEFAULTS' only. The failover
+    relaunch and the way back carry the launch's labels: they read neither
+    `label_vars` nor the environment again.
+  - **Each value is checked as any label is,** with its key `env.<name>`,
+    and more, since nobody typed it: a URL of any scheme, a path (starting
+    with `/` or `~`) and an IPv4 or IPv6 address are refused too. A label
+    typed with `--label` keeps the label rules alone. A variable that is
+    unset or empty is left out and says nothing. A refused value, a label
+    over the caps and a name no statement would set (a file edited by
+    hand) are left out, and the launch says so in one line on stderr, by
+    key and the kind of refusal, never a value:
+    `cpb: label_vars left out: env.hc_terminal_id (the value is a URL)`.
+  - **Install-local,** as `failover` is: `CREATE … FROM` ignores a source
+    manifest's `label_vars` with a note, `cpb update` keeps the installed
+    one, and a played recipe may not set it.
+  - `SHOW PLAYBOOK` and `SHOW DEFAULTS` show it (`label_vars` in `--json`),
+    `SHOW CREATE` writes it back, and `SELECT` has a `label_vars` column in
+    `PLAYBOOKS` and `DEFAULTS`. `EXPLAIN PLAYBOOK` says what a launch from
+    here would do with each name, read from this environment (`Labels from
+    the environment: TERM_PROGRAM as env.term_program, GIT_BRANCH as
+    env.git_branch (unset, left out)`; `--json` `label_vars`, one object
+    per name: `name`, `label`, `state` (`copied`, `unset`, `empty`,
+    `refused name`, `refused value`, `over the caps`) and, for a refused
+    value, `why`, its kind), never a value.
+- **Session labels** are claims made from inside a live session, by a hook
+  (a `SessionStart` hook setting `task=<name>`) or a tool:
+
+```
+cpb session label task=review-auth 'name=fixing ci'
+cpb session label --unset name
+cpb session label --list [--json]          # key=value lines; --json: {"session_id", "labels"}
+cpb session label --session <id> task=x    # outside any session: a live session by its id
+```
+
+  - **Which session.** The first ancestor of the calling process, at most 8
+    up, whose Claude Code session file, in a config directory cpb knows,
+    names it and records the start time that process has (*Live*). A claude
+    started without cpb in a playbook's directory (`CLAUDE_CONFIG_DIR` set
+    to it) counts too, as `SHOW SESSIONS` lists it. The ancestry is read
+    from one process table per call.
+    Inside a session cpb launched, `--session` may name only that session:
+    another is refused. Outside any session, `--session <id>` names a live
+    session, one confirmed live: not one recorded in another pid domain, nor
+    one whose file records no start time.
+  - **Exit codes.** 0 done; 1 refused, an unknown or unconfirmed
+    `--session` id included; 3 not in a session of a playbook (a registry
+    cpb cannot read included), so a hook can ignore exactly that.
+  - **Kept** in `<playbooks root>/.state/usage/labels/<session id>.json`
+    (mode `0600`), written whole under the session's lock, which a writer
+    waits at most 400 ms for before it is refused (another label write of
+    the session is in progress). The file goes when its last label does,
+    and is swept with the usage files nobody wrote for 30 days, unless its
+    session is still running.
+  - **Not a boundary.** Labels are not a boundary between processes of
+    one user: any of them can write a session's labels file, and outside a
+    session `cpb session label --session <id>` labels any live session.
+    They say what a session is for; they decide nothing.
+  - **The playbooks root.** A launch whose root came from `--playbooks-dir`
+    sets `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing one it
+    inherited (the flag outranks it), so a cpb inside it reads and writes
+    the same root. With the root from the environment or the default,
+    nothing is added.
+
+**What a label is.** A key is `a-z`, `0-9`, `.`, `_` and `-`, starting with
+a letter or a digit, at most 32 characters. A value is one line of plain
+visible text: valid UTF-8, not empty (`k=` is refused; `--unset k` removes
+a label), at most 200 bytes. At most 16 labels per source, 4 KiB together
+(launch labels over the caps refuse the launch before anything starts).
+Refused, with a message that names a valid key and never a value (an
+invalid key is not echoed either, only its length: a value may stand where
+the key goes):
+- a character that is not plain visible text: a control or format
+  character (Unicode Cc and Cf: zero-width spaces and joiners, the soft
+  hyphen, the byte-order mark, direction marks and isolates, the tag
+  characters U+E0000 to U+E007F), a line or paragraph separator (Zl, Zp),
+  a private-use character (Co), a variation selector (U+FE00 to U+FE0F,
+  U+E0100 to U+E01EF), the combining grapheme joiner (U+034F), the Hangul
+  fillers (U+115F, U+1160, U+3164, U+FFA0) and U+180B to U+180F. So an
+  emoji joined into a sequence, or one with a variation selector, is
+  refused; a single emoji is plain text;
+- a value shaped like an e-mail address;
+- a credential, judged on key and value together as `cpb ask` judges a
+  request: a key that names a secret with any value other than a number,
+  `true`, `false`, a reference (`keychain:x`) or a placeholder (`...`,
+  `<x>`) (`password=…`, `token=…`, `api_key=…`,
+  `secret=…`, `auth=Bearer …`; also `key=main`, since `key` names one), a
+  value shaped like a token, a URL with a password, or a long key-shaped
+  word. A long run after a key that names a hash is a hash, so
+  `commit=<40 hex>` is accepted.
+
+A label is printed on shared screens and written to the usage log, so
+nothing goes in one that does not belong there: no secret, no login
+identity, no home path, host name, address or repository URL with a
+credential, no prompt text. cpb refuses what it can recognise (above); the
+rest is for whoever sets the label. A label is taken from the environment
+only through `label_vars`, for the names listed there. A labels file or a launch record holding a label cpb would
+refuse, or of another shape, is not read.
+
+**Where they show.** The status line's `cpb` key (`labels`; *The usage
+step*), SHOW SESSIONS (`labels` in `--json`, the last `LABELS` column of
+the table, a `labels` column in `SELECT … FROM SESSIONS`), and the usage
+log (`launch_labels`, `session_labels`).
+
 ## SHOW USAGE
 
 (Since v4.8.0.) How much of each allowance is used, from what the usage step
@@ -3062,7 +3242,9 @@ SELECT … FROM USAGE
   `account`, `key`, `claude_version`, `session_name`, `model`,
   `effort`, `fast_mode`, `thinking`, `rate_limits` (whole), `cost` (whole),
   `context_window` (its sizes, totals and percentages), `prompt_cache` (its
-  counts), `project_dir`, `repo`, `git_worktree`, `agent`. Left out: paths
+  counts), `project_dir`, `repo`, `git_worktree`, `agent`, and
+  `launch_labels` and `session_labels` (since v4.9.0) when the session has
+  them. Left out: paths
   the others make redundant, the prompt id, UI state, cache diagnostics.
   A string is cut at 512 bytes; an object over 2 KiB is left out.
   No identity: SHOW USAGE reads it when it runs (*Rows*).
@@ -3075,13 +3257,16 @@ SELECT … FROM USAGE
   later, or, for a session's first figures (which may be ones Claude Code
   had from before the session's first answer), when both reset at the
   same time and the stored use is higher; a session's later figures stand
-  as they are. It is read only from the file its key's hash names, never
+  as they are. A session moved to another allowance (account failover
+  keeps its id) starts over there: its first line on the new allowance
+  holds first figures. It is read only from the file its key's hash names, never
   one seen later than now, with each name checked as a launch writes it,
   use bounded to 0-1000% and a reset to its seen time plus the window's
   length. A stored figure that claims a seen time more than a minute
   later than now is replaced by the next real one. `DROP
   ACCOUNT`, and a change of an account's provider, address or credential,
   remove the account's figure.
+- `labels/<session id>.json`: a session's labels (*Session labels*).
 - A launch removes files nobody wrote for 30 days. cpb neither writes nor
   sweeps through a symbolic link under `.state/usage/`.
 
@@ -3118,7 +3303,7 @@ CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
   SET launcher = 'w', login = 'isolated', global_instructions = 'excluded'
-  RESET sandbox, model, agent, statusline, model_picker.mode, model_picker_defaults, failover
+  RESET sandbox, model, agent, statusline, model_picker.mode, model_picker_defaults, failover, label_vars
   USE ENV tracing
   USE ACCOUNT router;
 
@@ -3599,6 +3784,7 @@ cpb run --env-file ./work.env sre -p "..."
 |------|-------|
 | `--account NAME` | not a layer: the account this launch runs on (see *Which account a launch runs on*); the last one wins |
 | `--failover`, `--no-failover` | not a layer: account failover on or off for this launch, whatever the playbook and DEFAULTS say (see *Account failover*); not both |
+| `--label KEY=VALUE` | not a layer: a launch label (see *Session labels*); a later one for a key wins |
 | `--env-set NAME` | an existing env set (`<playbooks root>/.env-sets/NAME.toml`); a missing or invalid one refuses the launch |
 | `--env KEY=VALUE` | set one variable |
 | `--block KEY` | remove one variable |
@@ -3639,7 +3825,7 @@ The flags belong to the same leading runs as the launch flags, in any order amon
 
 **Always sandboxed.** A manifest with `[sandbox] always = true` sandboxes every launch of the playbook without a flag: `run`, and launcher dispatch (`sre -p "..."`). `--no-sandbox` overrides it for one launch, loudly (above); there is no environment variable or setting that overrides it silently. `SET sandbox.always = true` needs `isolated_login = true` (`login = 'isolated'`), because the machine login cannot follow a playbook into its sandbox (below). The backend comes from `--sandbox=BACKEND`, else `[sandbox].backend`, else `sbx`; the launch logic talks to it through one seam (list, create, allow network, shell, attach, remove), so a further backend is an implementation, not a redesign. `[sandbox]` is install-local, like `[env]`: `CREATE PLAYBOOK … FROM` never adopts a source-shipped block (it would mount host paths or widen the network), dropping it with a note, and `update` preserves the live one.
 
-Procedure: resolve the environment exactly as an unsandboxed launch would (DEFAULTS, the env sets, the block, launch flags, the account and its refusals, with the sandbox's own rules for an account that uses no Claude login (*CREATE / ALTER / DROP ACCOUNT*, *Sandboxed launches*), the authentication decision including quarantine and identity purge of the playbook's own store, which the sandbox then reads through the mount; the config directory is made absolute first, so a relative `--playbooks-dir` cannot leak a relative `CLAUDE_CONFIG_DIR`), then reduce it to the variables the sandbox receives: the keys the effective block and launch flags **set**, plus `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER` and `CLAUDE_CONFIG_DIR` when the launch decided them. Nothing else of the host environment enters the sandbox. **A shared login does not enter it either:** when the store is still a symlink after preparation and the environment carries no `CLAUDE_CODE_OAUTH_TOKEN` (the shared-login path; a token launch authenticates with the token, and the link it may leave behind, one to a grantless store, holds nothing to adopt), its target `~/.claude` is not mounted and `sbx` mounts directories only, so the link would dangle inside and Claude Code would be logged out. A missing store on a non-isolated target (a fresh directory or playbook on a machine without a login) is the same shape with nothing to link to yet, and is treated the same way. The link is re-pointed (or created) instead, at a **sandbox-local** file: `<sandbox home>/.cpb-logins/<sandbox name>/.credentials.json` (`/home/agent/...` under `sbx`), whose directory the attach command creates inside before `claude` starts. `/login` inside writes through the link into the sandbox, where the grant persists with the sandbox (and goes with `--sandbox-fresh`) and never reaches the host. The account state the host sync copied in (`oauthAccount`, cached flags) is purged as for an isolated playbook, and `Shared login stays on the host: playbook "<name>" authenticates on its own inside the sandbox (run /login once there; the login lives in the sandbox)` is printed on stderr. When the session returns, or the launch is refused anywhere before the attach (a mount check, a failed create, a key the proxy could not register), the launch runs the credential sync again, which replaces any link that is not the shared one with the shared one and copies nothing, so the host sees the shared link as before; the next sandboxed launch re-points it again and the sandbox login is still there. While a sandboxed session is live (or after a launch that never returned) the host store link dangles, which every host command tolerates: `update` preserves it as it is, `DROP PLAYBOOK` removes it, `auth status` shows `shared-login` with the sandbox target and `no login`, and the next host launch repairs it. A sandboxed **token** launch that finds the store linked to a sandbox login detaches the link first (on the host the quarantine saw a dangling link and nothing to detach, but inside it would resolve to the earlier grant, which a Claude Code before 2.1.225 adopted over a token on a 401), exactly as the quarantine detaches a shared link with a grant. The machine's own config directory (`~/.claude`, by identity) is never sandboxed: it holds the machine login as a regular store, and mounting it would hand that login to the sandbox; `start --sandbox ~/.claude` is refused before any preparation. Nor may any mount contain it: the working directory, the root, and every extra mount (read-only or not) are refused when the machine config directory, the machine credentials store at its resolved location (the store may be a symlink into another directory), the long-lived token file, the registry's env sets directory (`<playbooks root>/.env-sets`, the secret store proxy injection keeps out of the sandbox), or its accounts directory (`<playbooks root>/.accounts`, whose credentials may be stored `AS PLAINTEXT` and which records each sandbox's account; never mounted) exists below them (the two registry directories count whether or not they exist yet: one made later would land inside the mount), decided by filesystem identity along the credential's ancestors (so `/`, a differently cased spelling, or any alias of the directory counts), so `--workdir ~`, `start --sandbox ~`, `--mount ~:ro` and `--mount /:ro` all refuse (`sandbox mount <path> contains the machine's Claude config directory <dir>: the machine login would enter the sandbox. Mount a narrower directory`). Every refusal happens before the backend is called. The login must never land as a regular file on the mount: the host sync promotes a newer regular grant-bearing store into the machine store, which is exactly what a sandbox login must not do. The machine login is never read, copied or moved. Every path that crosses into the sandbox is absolute and symlink-resolved (the target is what exists at that path inside): the working directory, the playbook root, the extra mounts (a missing one refuses the launch), and `CLAUDE_CONFIG_DIR` itself, which inside the sandbox names the resolved config directory, so a linked registry entry (`CREATE PLAYBOOK … LINK`) mounts and addresses its target. The root is not mounted again when it lies inside the working directory, and a config directory outside the mounted root is mounted on its own. `sbx ls -q` decides whether `cpb-<name>` exists; `--sandbox-fresh` removes it (`sbx rm -f`); a sandbox is bound to the account it was created for, recorded on the host outside any mount (a sandbox from before v4.2.0 counts as created for `machine`), and reusing it on another account refuses the launch, naming `--sandbox-fresh`, which recreates it for the new one; a sandbox that is reused is inspected first (`sbx ls --json`, its `workspaces`): mounts are creation-time, so the existing mounts must cover every path this launch needs, by containment (a working directory below an existing mount is covered; a different one would not exist inside) and pass the same guards as new mounts (the machine-login and env-sets guard, and in proxy mode the manifest-key guard over the existing, possibly wider, mounts), else the launch refuses and names `--sandbox-fresh` (`sandbox cpb-<name> was created with mounts ...; this launch also needs ..., which a reused sandbox cannot add. Recreate it with --sandbox-fresh` / `sandbox cpb-<name> mounts <path>, which contains <what>: the machine login would be inside. Recreate it with --sandbox-fresh`); a missing sandbox is created with `sbx create --name cpb-<name> [--clone] claude <workdir> <playbook root> <extra mounts...>`. A service on this machine is a special case: inside the sandbox `localhost` is the sandbox itself, so an `ANTHROPIC_BASE_URL` at `localhost`, `127.0.0.1` or `::1` is rewritten for the sandbox to the backend's host alias (`host.docker.internal` under `sbx`), scheme, port and path kept, with `ANTHROPIC_BASE_URL names this machine: inside the sandbox it is <url>` on stderr; and the backend's policy and secret store know that service as `localhost` whatever name the sandbox used (verified on `sbx` 0.38.0: an allow rule or a secret for `host.docker.internal` never matches, one for `localhost` does), so allow rules and secret registrations for the host alias, `localhost`, `127.0.0.1` or `::1` are spelled `localhost`, in `[sandbox].allow_net` too. After creation, and only then, every host in `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL` (when the effective environment sets one) is allowed for that sandbox (`sbx policy allow network --sandbox cpb-<name> <host>`; a failure is a warning, the launch continues), and a `[sandbox].claude_version` pin installs that Claude Code inside the sandbox through the official installer (a failure is a warning; the image's own version runs). **Remote sandbox host.** `sbx` drives only the machine it runs on, so "the host the sandbox runs on" is the host where `cpb` runs. With `--sandbox-host USER@HOST` (or the manifest's `[sandbox] host`, used whenever the launch is sandboxed) the whole launch is forwarded there over ssh, as the same subcommand rebuilt from what the launch parser consumed (never from the raw text, so `claude`'s own arguments travel verbatim and nothing in them is mistaken for a flag): `ssh [-t] -- USER@HOST 'env CPB_CMD=<base64> sh -c '"'"'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'"'"''`, where the decoded text is `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec cpb run [--playbooks-dir=D] --sandbox[=BACKEND] [--sandbox-fresh] [--clone] [--workdir=W] [--mount=M]... [--account=A | --env-set=P | --env=K=V | --block=K]... NAME [claude args...]` (`start` likewise, with `--delete` before the path). The transport exists because ssh hands the text to the remote user's login shell, whose family is unknown (tcsh breaks POSIX single quotes on a newline and expands `!`) and whose non-interactive PATH lacks `~/.local/bin`: the outer text is plain words every shell family passes through untouched, only POSIX `sh` parses the command, `sh`'s stdin is the ssh channel and its exit status is `cpb`'s (`exec`), and the PATH is widened inside with the installer's and the package managers' directories. `base64 --decode` is GNU and BSD alike, every value flag in its inline form so a value that looks like a flag stays a value there too (a value that is exactly `--` travels as two words, since a standalone `--` is where the registry scan stops on both sides; every `--workdir` occurrence is forwarded in order, the last winning there as here), every argument single-quoted into the one command string ssh hands the remote shell, the launch flags forwarded as typed and unevaluated (no env file is read for a remote launch, whether the host comes from the flag or from the manifest: the flags are evaluated only once the launch is known to be local), `-t` only when this process has a terminal on both ends, ssh's own options ended by `--` before the destination. The host is validated like the manifest key (no whitespace, no slash, no leading dash: `--sandbox-host "<value>" must be an ssh destination such as user@host`). `--sandbox` is always present, so the remote launch is sandboxed there whatever its manifest says; the remote host's own registry, env sets, manifest and secrets apply, and the sandbox, its login and its proxy mappings live there. Requirements on the remote: `cpb` in `~/.local/bin` (the installer's default), `/opt/homebrew/bin`, `/usr/local/bin`, or on the PATH an ssh session gets, a credential store `sbx` can read from a non-interactive ssh session (a Linux host with a headless keyring unlocked at boot; a macOS host keeps the Hub session in the login Keychain, which an ssh session cannot read until `security unlock-keychain` runs, so `sbx` fails there with `cannot prompt the user for password`), the playbook installed there (for `start`, the path is a path there; a directory manifest naming a host forwards a sandboxed `start` the same way, and `--delete` then acts there), `sbx` logged in. With the flag, the playbook need not be registered here at all. A `--playbooks-dir` travels as given, a path on that host. Refused: `--env-file` (a local file, refused by name; it is never opened), and `--sandbox-host` together with `--no-sandbox`; `--no-sandbox` on a playbook whose manifest names a host runs it here, on this host. Printed first: `Sandbox on USER@HOST: cpb run ...`. The exit status is the remote launch's.
+Procedure: resolve the environment exactly as an unsandboxed launch would (DEFAULTS, the env sets, the block, launch flags, the account and its refusals, with the sandbox's own rules for an account that uses no Claude login (*CREATE / ALTER / DROP ACCOUNT*, *Sandboxed launches*), the authentication decision including quarantine and identity purge of the playbook's own store, which the sandbox then reads through the mount; the config directory is made absolute first, so a relative `--playbooks-dir` cannot leak a relative `CLAUDE_CONFIG_DIR`), then reduce it to the variables the sandbox receives: the keys the effective block and launch flags **set**, plus `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER` and `CLAUDE_CONFIG_DIR` when the launch decided them. Nothing else of the host environment enters the sandbox. **A shared login does not enter it either:** when the store is still a symlink after preparation and the environment carries no `CLAUDE_CODE_OAUTH_TOKEN` (the shared-login path; a token launch authenticates with the token, and the link it may leave behind, one to a grantless store, holds nothing to adopt), its target `~/.claude` is not mounted and `sbx` mounts directories only, so the link would dangle inside and Claude Code would be logged out. A missing store on a non-isolated target (a fresh directory or playbook on a machine without a login) is the same shape with nothing to link to yet, and is treated the same way. The link is re-pointed (or created) instead, at a **sandbox-local** file: `<sandbox home>/.cpb-logins/<sandbox name>/.credentials.json` (`/home/agent/...` under `sbx`), whose directory the attach command creates inside before `claude` starts. `/login` inside writes through the link into the sandbox, where the grant persists with the sandbox (and goes with `--sandbox-fresh`) and never reaches the host. The account state the host sync copied in (`oauthAccount`, cached flags) is purged as for an isolated playbook, and `Shared login stays on the host: playbook "<name>" authenticates on its own inside the sandbox (run /login once there; the login lives in the sandbox)` is printed on stderr. When the session returns, or the launch is refused anywhere before the attach (a mount check, a failed create, a key the proxy could not register), the launch runs the credential sync again, which replaces any link that is not the shared one with the shared one and copies nothing, so the host sees the shared link as before; the next sandboxed launch re-points it again and the sandbox login is still there. While a sandboxed session is live (or after a launch that never returned) the host store link dangles, which every host command tolerates: `update` preserves it as it is, `DROP PLAYBOOK` removes it, `auth status` shows `shared-login` with the sandbox target and `no login`, and the next host launch repairs it. A sandboxed **token** launch that finds the store linked to a sandbox login detaches the link first (on the host the quarantine saw a dangling link and nothing to detach, but inside it would resolve to the earlier grant, which a Claude Code before 2.1.225 adopted over a token on a 401), exactly as the quarantine detaches a shared link with a grant. The machine's own config directory (`~/.claude`, by identity) is never sandboxed: it holds the machine login as a regular store, and mounting it would hand that login to the sandbox; `start --sandbox ~/.claude` is refused before any preparation. Nor may any mount contain it: the working directory, the root, and every extra mount (read-only or not) are refused when the machine config directory, the machine credentials store at its resolved location (the store may be a symlink into another directory), the long-lived token file, the registry's env sets directory (`<playbooks root>/.env-sets`, the secret store proxy injection keeps out of the sandbox), or its accounts directory (`<playbooks root>/.accounts`, whose credentials may be stored `AS PLAINTEXT` and which records each sandbox's account; never mounted) exists below them (the two registry directories count whether or not they exist yet: one made later would land inside the mount), decided by filesystem identity along the credential's ancestors (so `/`, a differently cased spelling, or any alias of the directory counts), so `--workdir ~`, `start --sandbox ~`, `--mount ~:ro` and `--mount /:ro` all refuse (`sandbox mount <path> contains the machine's Claude config directory <dir>: the machine login would enter the sandbox. Mount a narrower directory`). Every refusal happens before the backend is called. The login must never land as a regular file on the mount: the host sync promotes a newer regular grant-bearing store into the machine store, which is exactly what a sandbox login must not do. The machine login is never read, copied or moved. Every path that crosses into the sandbox is absolute and symlink-resolved (the target is what exists at that path inside): the working directory, the playbook root, the extra mounts (a missing one refuses the launch), and `CLAUDE_CONFIG_DIR` itself, which inside the sandbox names the resolved config directory, so a linked registry entry (`CREATE PLAYBOOK … LINK`) mounts and addresses its target. The root is not mounted again when it lies inside the working directory, and a config directory outside the mounted root is mounted on its own. `sbx ls -q` decides whether `cpb-<name>` exists; `--sandbox-fresh` removes it (`sbx rm -f`); a sandbox is bound to the account it was created for, recorded on the host outside any mount (a sandbox from before v4.2.0 counts as created for `machine`), and reusing it on another account refuses the launch, naming `--sandbox-fresh`, which recreates it for the new one; a sandbox that is reused is inspected first (`sbx ls --json`, its `workspaces`): mounts are creation-time, so the existing mounts must cover every path this launch needs, by containment (a working directory below an existing mount is covered; a different one would not exist inside) and pass the same guards as new mounts (the machine-login and env-sets guard, and in proxy mode the manifest-key guard over the existing, possibly wider, mounts), else the launch refuses and names `--sandbox-fresh` (`sandbox cpb-<name> was created with mounts ...; this launch also needs ..., which a reused sandbox cannot add. Recreate it with --sandbox-fresh` / `sandbox cpb-<name> mounts <path>, which contains <what>: the machine login would be inside. Recreate it with --sandbox-fresh`); a missing sandbox is created with `sbx create --name cpb-<name> [--clone] claude <workdir> <playbook root> <extra mounts...>`. A service on this machine is a special case: inside the sandbox `localhost` is the sandbox itself, so an `ANTHROPIC_BASE_URL` at `localhost`, `127.0.0.1` or `::1` is rewritten for the sandbox to the backend's host alias (`host.docker.internal` under `sbx`), scheme, port and path kept, with `ANTHROPIC_BASE_URL names this machine: inside the sandbox it is <url>` on stderr; and the backend's policy and secret store know that service as `localhost` whatever name the sandbox used (verified on `sbx` 0.38.0: an allow rule or a secret for `host.docker.internal` never matches, one for `localhost` does), so allow rules and secret registrations for the host alias, `localhost`, `127.0.0.1` or `::1` are spelled `localhost`, in `[sandbox].allow_net` too. After creation, and only then, every host in `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL` (when the effective environment sets one) is allowed for that sandbox (`sbx policy allow network --sandbox cpb-<name> <host>`; a failure is a warning, the launch continues), and a `[sandbox].claude_version` pin installs that Claude Code inside the sandbox through the official installer (a failure is a warning; the image's own version runs). **Remote sandbox host.** `sbx` drives only the machine it runs on, so "the host the sandbox runs on" is the host where `cpb` runs. With `--sandbox-host USER@HOST` (or the manifest's `[sandbox] host`, used whenever the launch is sandboxed) the whole launch is forwarded there over ssh, as the same subcommand rebuilt from what the launch parser consumed (never from the raw text, so `claude`'s own arguments travel verbatim and nothing in them is mistaken for a flag): `ssh [-t] -- USER@HOST 'env CPB_CMD=<base64> sh -c '"'"'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'"'"''`, where the decoded text is `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec cpb run [--playbooks-dir=D] --sandbox[=BACKEND] [--sandbox-fresh] [--clone] [--workdir=W] [--mount=M]... [--account=A | --env-set=P | --env=K=V | --block=K]... NAME [claude args...]` (`start` likewise, with `--delete` before the path). The transport exists because ssh hands the text to the remote user's login shell, whose family is unknown (tcsh breaks POSIX single quotes on a newline and expands `!`) and whose non-interactive PATH lacks `~/.local/bin`: the outer text is plain words every shell family passes through untouched, only POSIX `sh` parses the command, `sh`'s stdin is the ssh channel and its exit status is `cpb`'s (`exec`), and the PATH is widened inside with the installer's and the package managers' directories. `base64 --decode` is GNU and BSD alike, every value flag in its inline form so a value that looks like a flag stays a value there too (a value that is exactly `--` travels as two words, since a standalone `--` is where the registry scan stops on both sides; every `--workdir` occurrence is forwarded in order, the last winning there as here), every argument single-quoted into the one command string ssh hands the remote shell, the launch flags forwarded as typed and unevaluated (no env file is read for a remote launch, whether the host comes from the flag or from the manifest: the flags are evaluated only once the launch is known to be local), `-t` only when this process has a terminal on both ends, ssh's own options ended by `--` before the destination. The host is validated like the manifest key (no whitespace, no slash, no leading dash: `--sandbox-host "<value>" must be an ssh destination such as user@host`). `--sandbox` is always present, so the remote launch is sandboxed there whatever its manifest says; the remote host's own registry, env sets, manifest and secrets apply, and the sandbox, its login and its proxy mappings live there. Requirements on the remote: `cpb` in `~/.local/bin` (the installer's default), `/opt/homebrew/bin`, `/usr/local/bin`, or on the PATH an ssh session gets, a credential store `sbx` can read from a non-interactive ssh session (a Linux host with a headless keyring unlocked at boot; a macOS host keeps the Hub session in the login Keychain, which an ssh session cannot read until `security unlock-keychain` runs, so `sbx` fails there with `cannot prompt the user for password`), the playbook installed there (for `start`, the path is a path there; a directory manifest naming a host forwards a sandboxed `start` the same way, and `--delete` then acts there), `sbx` logged in. With the flag, the playbook need not be registered here at all. A `--playbooks-dir` travels as given, a path on that host. Refused: `--env-file` (a local file, refused by name; it is never opened), and `--sandbox-host` together with `--no-sandbox`; `--no-sandbox` on a playbook whose manifest names a host runs it here, on this host. Printed first: `Sandbox on USER@HOST: cpb run ...`, with each `--env` value left out and its name kept (`--env=K=<your value>`), as in the by-hand line; the command sent carries the values. The exit status is the remote launch's.
 
 **Secrets stay on the host.** Before attaching, every backend API key the environment carries (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`; since v4.2.0 only the launch's account sets one) is registered with the backend as a proxy-injected secret scoped to the sandbox, for the endpoint host (the host of `ANTHROPIC_BASE_URL`, else `api.anthropic.com`): `sbx secret set-custom --host <host> --env <KEY> --value <value> --placeholder <sandbox>-<KEY> --sandbox <sandbox>`. Inside, the variable holds the placeholder; every request from the sandbox passes through the host-side proxy, which swaps the real value into the request headers only on its way to that host (verified on sbx 0.38.0 for `Authorization: Bearer` and `x-api-key`; a request to any other host carries the placeholder). The key never enters the sandbox's filesystem or environment. That holds only for keys that live outside the mounts, which is where accounts live (`<playbooks root>/.accounts/`, never mounted); a key set in the target's own `[env.set]` sits in a `.playbook` on the mounted root (the config directory's, or one above a `start` directory that the working-directory mount carries; every manifest walking up from the config directory whose directory lies under one of this launch's mounts is checked, and one that cannot be read refuses too, `cannot check <path> for keys the sandbox would mount: <error> ...`, since it may hold a key), so a proxy-mode launch refuses it before any backend call (`<KEY> is set in <path>/.playbook, which the sandbox mounts: the key would be readable inside. Move it to an account, which lives outside the mount (cpb CREATE ACCOUNT <account> SET provider = '<provider>', <key> FROM '<ref>'; cpb ALTER PLAYBOOK <playbook> USE ACCOUNT <account> UNSET VAR <KEY>), or set [sandbox] secrets = "env" to accept the exposure`, `<key>` being `auth_token` or `api_key`). Since v4.2.0 a key in the governing manifest refuses the launch earlier (*Derived at launch*); this check still covers a manifest above it. Files the pilot places on a mount themselves (`--env-file` under the working directory, a `settings.json` `env`) are the pilot's own exposure. The placeholder is deterministic, so registering it again on the next launch updates the value in place (rotation follows the account). A mapping registered by an earlier launch for a key the environment no longer carries is **revoked** on the next launch (`sbx secret ls --sandbox` lists what is registered; the placeholder is re-registered as its own value for the current endpoint host, so the proxy substitutes it with itself, `Secret <KEY> revoked at the proxy: it is no longer in the environment`), since anyone inside could otherwise keep sending the predictable placeholder. One mapping exists per key per sandbox: two sessions of one sandbox launched with different one-off keys share it, and the later launch's key serves both (a known limitation; the placeholder must not change, or rotation would not work). `sbx` 0.38.0 cannot delete a custom secret; it persists in the backend's store after the sandbox or the playbook is gone, and the next launch of a sandbox of that name overwrites it. The value travels on `sbx`'s argument list for the moment of the call. A registration that fails **refuses the launch**: `<KEY> could not be registered at the sandbox proxy for <host> (<the backend's error, the value replaced by <redacted>>), so the launch stops: the key would otherwise enter the sandbox as a plain value. Retry, or set [sandbox] secrets = "env" to pass keys into the sandbox as plain variables`. Nothing is attached. `[sandbox] secrets = "env"` is the only way a key enters as a plain value. The scrub replaces the value exactly as it is; a backend error that echoed it transformed (encoded, truncated) would pass through, so a backend must never echo a secret. The subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) is not injected: Claude Code checks its shape locally, and a placeholder would not pass. Sandboxes are created with `--no-share-skills` unless `[sandbox] share_skills = true`: `sbx` otherwise mounts its shared skills store read-write into every sandbox, and a sandbox could plant a skill a later sandbox runs. Creation-time choices cannot be read back from `sbx`, so creation writes a marker inside (`~/.cpb-sandbox`, `skills=private` or `skills=shared`) and a reused sandbox must present the marker this launch expects. One without a marker is never attached to, since cpb cannot prove it made it (`a sandbox named <name> exists but has no cpb marker: remove it (sbx rm -f <name>) or launch with --sandbox-fresh`); one with another value was created under a different `share_skills` (`sandbox <name> was created with other creation-time settings (found "...", this launch needs "..."): share_skills changed. Recreate it with --sandbox-fresh`).
 

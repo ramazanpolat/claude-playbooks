@@ -49,7 +49,7 @@ var versionRe = regexp.MustCompile(versionPattern)
 
 // playbooksLateColumns are the PLAYBOOKS columns clickhouse-local's
 // SELECT * lists after the computed version_tuple, where they were appended.
-var playbooksLateColumns = []string{"play", "apply", "auth_mode", "token_source", "token_kind", "token_blocked", "accounts", "account", "failover"}
+var playbooksLateColumns = []string{"play", "apply", "auth_mode", "token_source", "token_kind", "token_blocked", "accounts", "account", "failover", "label_vars"}
 
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
@@ -59,12 +59,12 @@ var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
 		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "login", "global_instructions", "model_picker_defaults",
 			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "model", "model_picker", "play", "apply",
-			"auth_mode", "token_source", "token_kind", "token_blocked", "accounts", "account", "failover"},
+			"auth_mode", "token_source", "token_kind", "token_blocked", "accounts", "account", "failover", "label_vars"},
 		structure: "name String, version Nullable(String), description Nullable(String), homepage Nullable(String), author Nullable(String), " +
 			"path String, last_used Nullable(DateTime64(3, 'UTC')), source JSON, migrate Nullable(String), linked Nullable(String), " +
 			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, login String, global_instructions String, model_picker_defaults String, marketplaces Array(JSON), plugins Array(JSON), " +
 			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline JSON, model Nullable(String), model_picker JSON, play JSON, apply JSON, " +
-			"auth_mode String, token_source String, token_kind Nullable(String), token_blocked Bool, accounts Array(String), account Nullable(String), failover String",
+			"auth_mode String, token_source String, token_kind Nullable(String), token_blocked Bool, accounts Array(String), account Nullable(String), failover String, label_vars Array(String)",
 		comments: map[string]string{
 			"name":                  "The playbook's name.",
 			"version":               "The manifest's version; null when it has none.",
@@ -102,6 +102,7 @@ var selectTables = map[string]selectTable{
 			"accounts":              "The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook.",
 			"account":               "The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why).",
 			"failover":              "The failover property: inherited (DEFAULTS' failover decides), on or off.",
+			"label_vars":            "The label_vars property: environment variables whose values a launch copies into launch labels (env.<name>), after DEFAULTS'.",
 		},
 		rows: playbookRows,
 	},
@@ -135,10 +136,10 @@ var selectTables = map[string]selectTable{
 	},
 	"SESSIONS": {
 		columns: []string{"playbook", "pid", "session_id", "cwd", "kind", "status", "name", "claude_version",
-			"started_at", "last_active", "model", "launcher", "config_dir", "resume", "tty", "account", "at_limit", "account_at_limit"},
+			"started_at", "last_active", "model", "launcher", "config_dir", "resume", "tty", "account", "at_limit", "account_at_limit", "labels"},
 		structure: "playbook String, pid UInt32, session_id String, cwd String, kind String, status Nullable(String), name Nullable(String), " +
 			"claude_version Nullable(String), started_at DateTime64(3, 'UTC'), last_active Nullable(DateTime64(3, 'UTC')), model Nullable(String), " +
-			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String), account Nullable(String), at_limit JSON, account_at_limit JSON",
+			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String), account Nullable(String), at_limit JSON, account_at_limit JSON, labels JSON",
 		comments: map[string]string{
 			"playbook":         "The playbook's name; a plain directory's path.",
 			"pid":              "The Claude Code process's id.",
@@ -158,6 +159,7 @@ var selectTables = map[string]selectTable{
 			"account":          "The account cpb launched the session on, from its launch record; null for a session cpb did not launch.",
 			"at_limit":         "The usage limit the session is stopped at, from its transcript: window and resets_at; null when it is not stopped.",
 			"account_at_limit": "The usage limit the session's account is at, from the latest figure its sessions reported: window and resets_at; null when it is not.",
+			"labels":           "The session's labels: launch (from --label at launch) and session (set from inside it with cpb session label); null when it has none.",
 		},
 		rows: sessionRows,
 	},
@@ -182,8 +184,8 @@ var selectTables = map[string]selectTable{
 		rows: usageTableRows,
 	},
 	"DEFAULTS": {
-		columns:   []string{"envs", "account", "secret_helper", "secret_helper_from", "model_picker", "failover", "failover_accounts", "failover_max_context"},
-		structure: "envs Array(String), account Nullable(String), secret_helper Nullable(String), secret_helper_from Nullable(String), model_picker JSON, failover String, failover_accounts Array(String), failover_max_context Nullable(Int64)",
+		columns:   []string{"envs", "account", "secret_helper", "secret_helper_from", "model_picker", "failover", "failover_accounts", "failover_max_context", "label_vars"},
+		structure: "envs Array(String), account Nullable(String), secret_helper Nullable(String), secret_helper_from Nullable(String), model_picker JSON, failover String, failover_accounts Array(String), failover_max_context Nullable(Int64), label_vars Array(String)",
 		comments: map[string]string{
 			"envs":                 "The env sets every launch applies first, in order.",
 			"account":              "The DEFAULTS account (USE ACCOUNT), for playbooks that name none; null when none is set (they run on machine).",
@@ -193,6 +195,7 @@ var selectTables = map[string]selectTable{
 			"failover":             "Account failover for every playbook whose failover is inherited: off or on.",
 			"failover_accounts":    "The accounts a session at a usage limit moves to, in order; an entry marked (any provider) may take a session from another kind of account.",
 			"failover_max_context": "The largest context, in tokens, a session may have to be moved; null for no cap.",
+			"label_vars":           "Environment variables whose values every launch copies into launch labels (env.<name>), before a playbook's own.",
 		},
 		rows: defaultsRows,
 	},
@@ -321,6 +324,9 @@ func defaultsRows() ([]any, []playbook.Unreadable, error) {
 		return nil, nil, err
 	}
 	if err := withFailoverDefaults(&v, config.ResolvePlaybooksDir()); err != nil {
+		return nil, nil, err
+	}
+	if err := withLabelVarsDefaults(&v, config.ResolvePlaybooksDir()); err != nil {
 		return nil, nil, err
 	}
 	return []any{v}, nil, nil

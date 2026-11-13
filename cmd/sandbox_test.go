@@ -1127,3 +1127,40 @@ func TestRunSandboxRefusalRestoresSharedLogin(t *testing.T) {
 		}
 	}
 }
+
+// The line printed before a launch on a sandbox host leaves each --env
+// value out, its name kept, as the by-hand line does; the command ssh is
+// handed carries the value. run and start alike.
+func TestSandboxHostLineLeavesEnvValuesOut(t *testing.T) {
+	sandboxRoot(t, "pbs")
+	sshLog := stubSSH(t)
+	dir := t.TempDir()
+	for _, launch := range []func() error{
+		func() error {
+			return runRun(nil, []string{"--sandbox-host", "me@buildbox", "--env", "API_TOKEN=s3cret-value", "--env=MODE=fast", "ghost"})
+		},
+		func() error {
+			return runStart(nil, []string{"--sandbox-host", "me@buildbox", "--env", "API_TOKEN=s3cret-value", "--env=MODE=fast", dir})
+		},
+	} {
+		os.Remove(sshLog)
+		var err error
+		msg := captureStderr(t, func() { err = launch() })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(msg, "Sandbox on me@buildbox: cpb ") || !strings.Contains(msg, "'--env=API_TOKEN=<your value>' '--env=MODE=<your value>'") ||
+			strings.Contains(msg, "s3cret-value") || strings.Contains(msg, "fast") {
+			t.Fatalf("printed line: %q", msg)
+		}
+		sent, _ := os.ReadFile(sshLog)
+		m := regexp.MustCompile(`CPB_CMD=([A-Za-z0-9+/=]+)`).FindSubmatch(sent)
+		if m == nil {
+			t.Fatalf("ssh args: %q", sent)
+		}
+		inner, _ := base64.StdEncoding.DecodeString(string(m[1]))
+		if !strings.Contains(string(inner), "'--env=API_TOKEN=s3cret-value' '--env=MODE=fast'") {
+			t.Fatalf("the command sent: %q", inner)
+		}
+	}
+}

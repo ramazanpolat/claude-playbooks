@@ -1,0 +1,46 @@
+# LiteLLM as a local translator: Anthropic's Messages API in (what Claude
+# Code speaks), the provider's OpenAI-compatible chat completions out.
+# Venice.ai is the worked case. No secret in this file: both keys come from
+# the environment start.sh gives the process.
+#
+# Each model name is the provider's own id, so Claude Code sees an id it
+# knows (its context window, its price for the cost estimate).
+model_list:
+  - model_name: claude-haiku-5-5
+    litellm_params:
+      model: openai/claude-haiku-5-5
+      api_base: https://api.venice.ai/api/v1
+      api_key: os.environ/PROVIDER_API_KEY
+      extra_body:
+        venice_parameters:
+          include_venice_system_prompt: false
+  - model_name: claude-sonnet-5-5
+    litellm_params:
+      model: openai/claude-sonnet-5-5
+      api_base: https://api.venice.ai/api/v1
+      api_key: os.environ/PROVIDER_API_KEY
+      extra_body:
+        venice_parameters:
+          include_venice_system_prompt: false
+  - model_name: claude-opus-5-5
+    litellm_params:
+      model: openai/claude-opus-5-5
+      api_base: https://api.venice.ai/api/v1
+      api_key: os.environ/PROVIDER_API_KEY
+      extra_body:
+        venice_parameters:
+          include_venice_system_prompt: false
+
+litellm_settings:
+  # Anthropic /v1/messages becomes /chat/completions (LiteLLM's default for
+  # an openai/ model would be /responses).
+  use_chat_completions_url_for_anthropic_messages: true
+  # No prompt or response text in LiteLLM's own logs.
+  turn_off_message_logging: true
+  # Anthropic-only options the chat completions shape has no place for are
+  # dropped, not refused.
+  drop_params: true
+
+general_settings:
+  # A client must present the per-run token start.sh makes.
+  master_key: os.environ/TRANSLATOR_TOKEN

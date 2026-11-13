@@ -76,6 +76,10 @@ type usageSnapshot struct {
 	Repo          json.RawMessage `json:"repo"`
 	GitWorktree   *string         `json:"git_worktree"`
 	Agent         json.RawMessage `json:"agent"`
+	// LaunchLabels and SessionLabels are the session's labels as they
+	// were at this line (labels.go), apart from cpb's own fields.
+	LaunchLabels  map[string]string `json:"launch_labels,omitempty"`
+	SessionLabels map[string]string `json:"session_labels,omitempty"`
 }
 
 // capString keeps at most usageStringCap bytes of s, cut at a rune
@@ -187,7 +191,7 @@ func snapshotOf(in []byte) (usageSnapshot, bool) {
 // changeSignature is what makes a snapshot worth a line whenever it
 // changes: the usage figures and what the session runs.
 func (s usageSnapshot) changeSignature() string {
-	b, _ := json.Marshal([]any{s.RateLimits, s.Model, s.Effort, s.FastMode, s.SessionName, s.Account, s.Key})
+	b, _ := json.Marshal([]any{s.RateLimits, s.Model, s.Effort, s.FastMode, s.SessionName, s.Account, s.Key, s.LaunchLabels, s.SessionLabels})
 	return string(b)
 }
 
@@ -288,7 +292,9 @@ func appendSnapshot(root string, s usageSnapshot, now time.Time) (wrote bool, ne
 	}
 	if len(s.RateLimits) > 0 {
 		switch {
-		case last == nil || len(capRaw(last.RateLimits)) == 0:
+		case last == nil || len(capRaw(last.RateLimits)) == 0 || last.Key != s.Key:
+			// A session moved to another allowance (an account
+			// switch keeps its id) starts over there.
 			news = firstFigures
 		case string(last.RateLimits) != string(s.RateLimits):
 			news = changedFigures
@@ -606,6 +612,45 @@ func sweepUsage(root string, now time.Time) {
 		}
 		if (strings.HasPrefix(e.Name(), ".latest-") && old(fi, time.Minute)) || old(fi, usageSweepAge) {
 			_ = os.Remove(filepath.Join(accounts, e.Name()))
+		}
+	}
+	// Session labels, and their locks, nobody wrote for usageSweepAge (a
+	// write touches its lock), unless the session is still running, and a
+	// writer's temporary file left behind. The live sessions are read once,
+	// and only when an old labels file is found.
+	labels := labelsDir(root)
+	ents = nil
+	if realDirs(usageDir(root), labels) {
+		ents, _ = os.ReadDir(labels)
+	}
+	var running map[string]bool
+	isRunning := func(sessionID string) bool {
+		if running == nil {
+			running = map[string]bool{}
+			if dirs, err := knownSessionDirs(); err == nil {
+				for _, s := range readSessionFiles(dirs) {
+					running[s.f.SessionID] = true
+				}
+			}
+		}
+		return running[sessionID]
+	}
+	for _, e := range ents {
+		fi, err := e.Info()
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		name := e.Name()
+		switch {
+		case strings.HasPrefix(name, ".labels-"):
+			if old(fi, time.Minute) {
+				_ = os.Remove(filepath.Join(labels, name))
+			}
+		case old(fi, usageSweepAge):
+			sessionID := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(name, "."), ".lock"), ".json")
+			if !isRunning(sessionID) {
+				_ = os.Remove(filepath.Join(labels, name))
+			}
 		}
 	}
 }
