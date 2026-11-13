@@ -203,38 +203,19 @@ func resumeByHand(folder string, args []string) string {
 	return line
 }
 
-// shellWord is s as one word for a POSIX shell: as it is when it is plain;
-// in single quotes otherwise; with ANSI-C quoting ($'...') when it holds a
-// control character, so the line holds none.
+// shellWord is s as one word for any POSIX shell: as it is when it is
+// plain, else in single quotes, where a newline or a tab stands as itself.
+// A value with any other control character is not shown: no POSIX quoting
+// spells it without putting it raw on the terminal.
 func shellWord(s string) string {
 	plain := s != "" && s[0] != '=' && s[0] != '~' && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@%+,", r))
 	}) < 0
-	switch {
-	case plain:
+	if plain {
 		return s
-	case hasControl(s):
-		var b strings.Builder
-		b.WriteString("$'")
-		for _, r := range s {
-			switch {
-			case r == '\\' || r == '\'':
-				b.WriteByte('\\')
-				b.WriteRune(r)
-			case r == '\n':
-				b.WriteString(`\n`)
-			case r == '\t':
-				b.WriteString(`\t`)
-			case unicode.IsControl(r) && r < 0x100:
-				fmt.Fprintf(&b, `\x%02x`, r)
-			case unicode.IsControl(r):
-				fmt.Fprintf(&b, `\u%04x`, r)
-			default:
-				b.WriteRune(r)
-			}
-		}
-		b.WriteByte('\'')
-		return b.String()
+	}
+	if strings.IndexFunc(s, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\t' }) >= 0 {
+		return "'<a value with control characters, not shown>'"
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

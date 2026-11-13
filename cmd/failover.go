@@ -532,7 +532,9 @@ func readSessionFileOf(configDir string, pid int) (sessionFile, bool) {
 // itself when it has a session file, else the child's own child that does
 // (a secret helper that does not exec). 0 while there is none yet.
 func sessionPIDOf(configDir string, child int) int {
-	if _, ok := readSessionFileOf(configDir, child); ok {
+	// A session file counts only for the process it names, by its start
+	// time: a file a process before left on a reused pid is not this one.
+	if f, ok := readSessionFileOf(configDir, child); ok && sameStart(procStartOf(child), f.ProcStart) {
 		return child
 	}
 	ents, err := os.ReadDir(filepath.Join(configDir, "sessions"))
@@ -546,7 +548,10 @@ func sessionPIDOf(configDir string, child int) int {
 		}
 	}
 	for pid, info := range procStarts(pids) {
-		if info.ppid == child {
+		if info.ppid != child {
+			continue
+		}
+		if f, ok := readSessionFileOf(configDir, pid); ok && sameStart(info.start, f.ProcStart) {
 			return pid
 		}
 	}

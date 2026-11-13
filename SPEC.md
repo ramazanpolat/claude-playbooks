@@ -1403,8 +1403,9 @@ cpb run --failover reviewer                          -- one launch; --no-failove
     with no prompt, and says it did not move; that switch's `outcome` is
     `'failed'`. When that fails too, cpb says nothing runs the session and
     prints the command that resumes it by hand (with the playbooks root
-    when one was given; without `--env` values or an inline `--settings`
-    JSON; quoted for a POSIX shell). A way back whose claude ran and then
+    when one was given; without `--env` values, an inline `--settings`
+    JSON, or a value holding a control character other than a newline or a
+    tab; quoted for any POSIX shell). A way back whose claude ran and then
     ended with an error is reported as any launch: the session stayed on
     the old account. A launch on the new account that wrote to the
     transcript and then failed ran the session: that is a move, and its

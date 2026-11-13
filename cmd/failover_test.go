@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -60,7 +61,8 @@ if [ -n "$resumed" ]; then
   case " $FAKE_WRITE_FAIL_TOKENS " in *" $tok "*) printf '{"type":"user"}\n' >> "$t"; exit 1;; esac
   case " $FAKE_RUN_FAIL_TOKENS " in *" $tok "*)
     mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
-    printf '{"pid":%s,"sessionId":"%s","cwd":"%s","kind":"interactive","status":"busy"}' $$ "$FAKE_SID" "$dir" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
+    if [ -r "/proc/$$/stat" ]; then st=$(sed 's/.*) //' "/proc/$$/stat" | awk '{print $20}'); else st=$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ | awk '{$1=$1; print}'); fi
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s","procStart":"%s","kind":"interactive","status":"busy"}' $$ "$FAKE_SID" "$dir" "$st" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
     sleep 0.5; rm -f "$CLAUDE_CONFIG_DIR/sessions/$$.json"; exit 1;;
   esac
   case " $FAKE_OK_TOKENS " in *" $tok "*) ok=1;; esac
@@ -606,11 +608,88 @@ func TestResumeByHand(t *testing.T) {
 	resetCommandTestState(t)
 	config.PlaybooksDir = "/srv/pb"
 	got := resumeByHand("/w/my dir", []string{"--env=K=v", `--settings={"env":{"A":"b"}}`, "--settings", `{"x":1}`, "--account", "a", "alpha",
-		"--resume", sidLive, "--append-system-prompt", "one\ntwo", "=x", "~y"})
+		"--resume", sidLive, "--append-system-prompt", "one\ntwo", "--system-prompt", "bad\x1b[31m", "=x", "~y"})
 	want := `cd '/w/my dir' && cpb run --playbooks-dir /srv/pb '--env=K=<your value>' '--settings=<your settings JSON>' --settings '<your settings JSON>' --account a alpha --resume ` +
-		sidLive + ` --append-system-prompt $'one\ntwo' '=x' '~y'`
-	if got != want || hasControl(got) {
+		sidLive + " --append-system-prompt 'one\ntwo' --system-prompt '<a value with control characters, not shown>' '=x' '~y'"
+	if got != want || strings.IndexFunc(got, func(r rune) bool { return unicode.IsControl(r) && r != '\n' }) >= 0 {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+	// Every word reads back as itself in the system's POSIX shell.
+	for _, v := range []string{"plain", "my dir", "it's", "one\ntwo\n", "tab\there", "=x", "~y", "$(echo no)", "`no`", "a\\b"} {
+		out, err := exec.Command("/bin/sh", "-c", "printf %s "+shellWord(v)).Output()
+		if err != nil || string(out) != v {
+			t.Errorf("%q came back as %q (%v)", v, out, err)
+		}
+	}
+}
+
+// The same for the child of a secret helper: a stale file on its pid is
+// not the next claude.
+func TestFailoverHandoverIgnoresAStaleHelperChildFile(t *testing.T) {
+	sandboxDefaultRoot(t)
+	fastFailover(t, 0, time.Minute)
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	helper := exec.Command("/bin/sh", "-c", "sleep 30 & echo $! > "+pidFile+"; wait")
+	if err := helper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = helper.Process.Kill(); _ = helper.Wait() })
+	var child int
+	for i := 0; i < 100 && child == 0; i++ {
+		b, _ := os.ReadFile(pidFile)
+		child, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		time.Sleep(10 * time.Millisecond)
+	}
+	if child == 0 {
+		t.Fatal("the helper's child did not start")
+	}
+	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+	dir := t.TempDir()
+	writeSessionFile(t, dir, child, failSID, dir, "interactive", "Mon Jan 1 00:00:00 2001", time.Now())
+	w := newFailoverWatch(t, "acc-a", "acc-b")
+	w.configDir = dir
+	catchHandover()
+	t.Cleanup(releaseHandover)
+	handoverClaudeStarted.Store(false)
+	done := make(chan struct{})
+	ended := make(chan *failoverSwitch, 1)
+	go func() { ended <- w.watch(done, helper.Process) }()
+	time.Sleep(200 * time.Millisecond)
+	close(done)
+	<-ended
+	if handoverClaudeStarted.Load() {
+		t.Fatal("a stale session file of the helper's child counted as the next claude")
+	}
+}
+
+// A session file a process before left on the launch's pid (another start
+// time) is not the next claude: the catch stays.
+func TestFailoverHandoverIgnoresAStaleSessionFile(t *testing.T) {
+	sandboxDefaultRoot(t)
+	fastFailover(t, 0, time.Minute)
+	c := exec.Command("sleep", "30")
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Process.Kill(); _ = c.Wait() })
+	dir := t.TempDir()
+	writeSessionFile(t, dir, c.Process.Pid, failSID, dir, "interactive", "Mon Jan 1 00:00:00 2001", time.Now())
+	w := newFailoverWatch(t, "acc-a", "acc-b")
+	w.configDir = dir
+	catchHandover()
+	t.Cleanup(releaseHandover)
+	handoverClaudeStarted.Store(false)
+	done := make(chan struct{})
+	ended := make(chan *failoverSwitch, 1)
+	go func() { ended <- w.watch(done, c.Process) }()
+	time.Sleep(200 * time.Millisecond)
+	close(done)
+	<-ended
+	handoverMu.Lock()
+	caught := handoverSigs != nil
+	handoverMu.Unlock()
+	if !caught || handoverClaudeStarted.Load() {
+		t.Fatal("a stale session file counted as the next claude")
 	}
 }
 
