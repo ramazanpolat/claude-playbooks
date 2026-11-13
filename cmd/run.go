@@ -606,6 +606,9 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 			&failoverSwitch{From: sw.To, To: sw.From, sessionID: sw.sessionID, model: sw.model, folder: sw.folder, noPrompt: true})}
 	}
 	err = preserveExitCode(err)
+	if err != nil {
+		fmt.Fprint(os.Stderr, unresolvedAccountLine(acct, plan))
+	}
 	if h := failoverHandover; h != nil && h.notRun(err) && !(failoverBack && handoverClaudeStarted.Load()) {
 		// The launch never ran the session: runRun goes on (back to the
 		// account it came from, or says nothing runs it) and reports.

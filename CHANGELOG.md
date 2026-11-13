@@ -34,6 +34,14 @@
     `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
     one, so a cpb inside it uses the same root.
   - Guide: `docs/guides/labels.md`; example `29-labels`.
+- **An account reference that does not resolve at launch is named.** When a
+  launch through the secret helper ends with an error and a reference of the
+  account's own cannot be resolved, cpb adds a last line, after the
+  helper's own message: the account, the key (`auth_token`, `api_key`,
+  `claude_token`, a header) and the reference's scheme, never a value. On an
+  account whose address is on this machine it adds that the local server
+  behind it may not be running, and that `SHOW ACCOUNT <name>` shows what
+  the account points at. A launch that succeeds is not checked.
 
 ## [v4.8.0] -- 2026-11-13
 

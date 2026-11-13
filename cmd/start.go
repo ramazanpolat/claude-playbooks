@@ -300,6 +300,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	c.Stderr = os.Stderr
 
 	runErr := runRecorded(c, rec, nil)
+	if runErr != nil {
+		fmt.Fprint(os.Stderr, unresolvedAccountLine(acct, plan))
+	}
 
 	if deleteAfter {
 		if rmErr := os.RemoveAll(absPath); rmErr != nil {
