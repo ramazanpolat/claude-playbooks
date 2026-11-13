@@ -158,6 +158,10 @@ func (r *Result) clause(c grammar.Clause) {
 				r.refuse(line, "SET failover = '"+v.Value+"'", "moving sessions between your accounts is yours to turn on, not a recipe's")
 				return
 			}
+			if v.Key == "label_vars" {
+				r.refuse(line, "SET label_vars", "which of your environment variables reach your labels is yours to list, not a recipe's")
+				return
+			}
 			switch v.Value {
 			case "shared":
 				r.refuse(line, "SET "+v.Key+" = 'shared'", "sharing the "+v.Key+" is play's decision, not the recipe's")

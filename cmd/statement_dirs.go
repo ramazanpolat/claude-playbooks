@@ -62,7 +62,7 @@ func validateDirClauses(st *grammar.Stmt) error {
 			if v, ok := grammar.PropertyValue([]grammar.Clause{c}, "global_instructions"); ok && inMachineConfig(dir) {
 				return fmt.Errorf("global_instructions = '%s' cannot apply to %s: it is the machine's own Claude Code configuration, and its CLAUDE.md is its own instructions", v, dir)
 			}
-			for _, key := range []string{"login", "model_picker_defaults", "failover"} {
+			for _, key := range []string{"login", "model_picker_defaults", "failover", "label_vars"} {
 				if _, ok := grammar.PropertyValue([]grammar.Clause{c}, key); ok {
 					verb := "SET"
 					if c.Kind == grammar.ResetProperties {

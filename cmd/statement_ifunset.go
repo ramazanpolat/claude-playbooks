@@ -241,6 +241,11 @@ func (r *stmtRun) propertyReader(name string, pb *playbook.Playbook) (func(key s
 				return m.Failover, true
 			}
 			return failoverInherited, true
+		case "label_vars":
+			if m != nil && len(m.LabelVars) > 0 {
+				return strings.Join(m.LabelVars, ", "), true
+			}
+			return "", false
 		}
 		if k, ok := strings.CutPrefix(key, "sandbox."); ok {
 			sb := (*manifest.Sandbox)(nil)

@@ -30,3 +30,13 @@ grep -q '"launch_labels":{"name":"review-auth"}' "$log"
 grep -q '"session_labels":{"task":"triage"}' "$log"
 f="$HOME/.claude-playbooks/.state/usage/labels/$sid.json"
 test "$(ls -l "$f" | cut -c1-10)" = "-rw-------"
+
+# label_vars: a listed variable's value becomes a launch label, env.<name>.
+TERM_PROGRAM=demo-term PATH="$PWD/stand-in:$PATH" cpb run tagged
+grep -q '"labels":{"launch":{"env.term_program":"demo-term"}' "$HOME/tagged.in"
+# Unset, it is left out, and the launch says so by key, never by value.
+env -u TERM_PROGRAM PATH="$PWD/stand-in:$PATH" cpb run tagged 2> "$HOME/unset.err"
+grep -q "label_vars left out: env.term_program (unset)" "$HOME/unset.err"
+# A name that may hold a credential is refused when the list is set.
+if cpb "ALTER PLAYBOOK tagged SET label_vars = ['GITHUB_TOKEN']" 2> "$HOME/name.err"; then echo "took a credential name"; exit 1; fi
+grep -q "may hold a credential" "$HOME/name.err"

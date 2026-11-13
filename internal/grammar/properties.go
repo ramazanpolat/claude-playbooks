@@ -102,6 +102,10 @@ var playbookPropertyTable = []playbookProperty{
 	// failover; on and off decide for this playbook (the manifest's
 	// failover).
 	{key: "failover", values: []string{"inherited", "on", "off"}},
+	// label_vars: the exact names of environment variables whose values a
+	// launch copies into launch labels (env.<name in lower case>), after
+	// DEFAULTS' (the manifest's label_vars).
+	{key: "label_vars", kind: kindList},
 }
 
 // defaultsPropertyTable is DEFAULTS' properties: the secret helper, and
@@ -113,6 +117,7 @@ var defaultsPropertyTable = []playbookProperty{
 	{key: "failover", values: []string{"off", "on"}},
 	{key: "failover_accounts", kind: kindList},
 	{key: "failover_max_context", kind: kindString, check: checkTokenCount, placeholder: "<tokens>"},
+	{key: "label_vars", kind: kindList},
 }
 
 // checkTokenCount judges failover_max_context: a whole number of tokens.

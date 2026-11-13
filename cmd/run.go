@@ -569,7 +569,9 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 	}
 
 	rec := newLaunchRecord(pb.Name, configDir, acct.sel)
-	rec.Labels = launchLabelsOf(tokens)
+	if rec.Labels, err = launchLabels(config.ResolvePlaybooksDir(), pb.Manifest, tokens); err != nil {
+		return err
+	}
 	if !override {
 		acct.statusline = statuslineStepFor(config.ResolvePlaybooksDir(), configDir, wd, rec.LaunchID, claudeArgs).wrapped
 	}

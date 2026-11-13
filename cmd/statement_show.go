@@ -104,8 +104,10 @@ type playbookJSON struct {
 	Accounts []string `json:"accounts"`
 	RunsOn   *string  `json:"account"`
 	// Failover is the failover property: inherited, on or off (v4.8.0).
-	// Last.
 	Failover string `json:"failover"`
+	// LabelVars is the label_vars property: the names whose values a
+	// launch copies into launch labels, after DEFAULTS' (v4.9.0). Last.
+	LabelVars []string `json:"label_vars"`
 }
 
 // statuslineJSON is a playbook's status line (settings.json statusLine):
@@ -212,6 +214,8 @@ type defaultsJSON struct {
 	Failover           string   `json:"failover"`
 	FailoverAccounts   []string `json:"failover_accounts"`
 	FailoverMaxContext *int64   `json:"failover_max_context"`
+	// LabelVars is DEFAULTS' label_vars (v4.9.0). Last.
+	LabelVars []string `json:"label_vars"`
 }
 
 // defaultsModelsJSON is the DEFAULTS model rows: a picker's options, with
@@ -282,8 +286,11 @@ type explainJSON struct {
 	// (v4.8.0).
 	Failover failoverExplainJSON `json:"failover"`
 	// UsageAtLaunch is whether a launch from here records usage through
-	// cpb's status line step, and why not (v4.8.0). Last.
+	// cpb's status line step, and why not (v4.8.0).
 	UsageAtLaunch usageAtLaunchJSON `json:"usage_at_launch"`
+	// LabelVars is the names a launch copies into launch labels: DEFAULTS',
+	// then the playbook's (v4.9.0). Last.
+	LabelVars []string `json:"label_vars"`
 }
 
 // usageAtLaunchJSON is EXPLAIN's word on the status line step.
@@ -430,11 +437,14 @@ func readStatement(st *grammar.Stmt) error {
 		if err := withFailoverDefaults(&v, playbooksDir); err != nil {
 			return err
 		}
+		if err := withLabelVarsDefaults(&v, playbooksDir); err != nil {
+			return err
+		}
 		if st.JSON {
 			return printJSON(v)
 		}
 		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Account", deref(v.Account, account.Machine+" (none set)")}, {"Secret helper", humanHelper(helper)},
-			{"Model picker", defaultsModelsLine(v.ModelPicker)}, {"Failover", failoverDefaultsLine(v)}})
+			{"Model picker", defaultsModelsLine(v.ModelPicker)}, {"Failover", failoverDefaultsLine(v)}, {"Label vars", labelVarsShown(v.LabelVars)}})
 		return nil
 	}
 	return fmt.Errorf("cannot run %s", st.String())
@@ -486,6 +496,10 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v.Failover = failoverInherited
 	if pb.Manifest != nil && pb.Manifest.Failover != "" {
 		v.Failover = pb.Manifest.Failover
+	}
+	v.LabelVars = []string{}
+	if pb.Manifest != nil {
+		v.LabelVars = append(v.LabelVars, pb.Manifest.LabelVars...)
 	}
 	if pb.Manifest.ExcludesModelPickerDefaults() {
 		v.ModelPickerDefaults = manifest.ModelPickerDefaultsExcluded
@@ -695,6 +709,9 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	if v.Failover != failoverInherited {
 		rows = append(rows, [2]string{"Failover", v.Failover + failoverMeaning(v.Failover)})
 	}
+	if len(v.LabelVars) > 0 {
+		rows = append(rows, [2]string{"Label vars", labelVarsShown(v.LabelVars)})
+	}
 	if len(v.Skills) > 0 {
 		names := make([]string, len(v.Skills))
 		for i, s := range v.Skills {
@@ -875,7 +892,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
 			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions,
 			ModelPickerAtLaunch: launchPickerJSONOf(explainPicker(pb)), Account: pv.Account, Failover: explainFailover(pb),
-			UsageAtLaunch: usageAtLaunchOf(explainUsage(pb))})
+			UsageAtLaunch: usageAtLaunchOf(explainUsage(pb)), LabelVars: explainLabelVars(pb)})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -947,6 +964,7 @@ func printLaunchPicker(pb *playbook.Playbook) {
 	}
 	fmt.Println(explainFailoverLine(explainFailover(pb)))
 	fmt.Println(explainUsage(pb).explainLine())
+	fmt.Println("Labels from the environment: " + labelVarsShown(explainLabelVars(pb)))
 }
 
 // printLaunchSandbox says where a launch runs and what its login is, when

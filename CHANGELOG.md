@@ -22,12 +22,24 @@
     (`launch_labels`, `session_labels`).
   - A value that looks like an e-mail address or a credential, or holds a
     control, direction or invisible character, is refused, with a message
-    naming the key and never the value. Labels are never taken from the
-    environment.
+    naming the key and never the value. A label is taken from the
+    environment only through `label_vars` (below), for the names listed.
   - A launch whose playbooks root came from `--playbooks-dir` sets
     `CPB_PLAYBOOKS_DIR` (absolute) in the session, so a cpb inside it uses
     the same root.
   - Guide: `docs/guides/labels.md`; example `29-labels`.
+- **`label_vars`**, a PLAYBOOK and a DEFAULTS property: the exact names of
+  environment variables whose values a launch copies into launch labels,
+  as `env.<name in lower case>` (DEFAULTS' names first, then the
+  playbook's). At most 8 names in each list, no patterns. A name that is
+  cpb's own or an account's, or that may hold a credential (`TOKEN`,
+  `KEY`, `SECRET`, `PASSWORD` and the rest), is refused when the list is
+  set. Each value is checked as any label is. An unset variable or a
+  refused value is left out, and the launch says so in one line on
+  stderr, by key, never by value. Install-local: an install ignores a
+  source's, `cpb update` keeps the installed one, and a played recipe may
+  not set it. `SHOW PLAYBOOK`, `SHOW DEFAULTS`, `EXPLAIN`, `SHOW CREATE`
+  and `SELECT` (`PLAYBOOKS`, `DEFAULTS`) show it.
 
 ## [v4.8.0] -- 2026-11-13
 

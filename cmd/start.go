@@ -292,7 +292,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	rec := newLaunchRecord(absPath, absPath, acct.sel)
-	rec.Labels = launchLabelsOf(tokens)
+	// A plain directory takes DEFAULTS' label_vars only: label_vars is a
+	// playbook's property.
+	if rec.Labels, err = launchLabels(config.ResolvePlaybooksDir(), nil, tokens); err != nil {
+		return err
+	}
 	acct.statusline = statuslineStepFor(config.ResolvePlaybooksDir(), absPath, wd, rec.LaunchID, claudeArgs).wrapped
 	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), withPlaybooksRoot(launchEnv))
 	c.Stdin = os.Stdin

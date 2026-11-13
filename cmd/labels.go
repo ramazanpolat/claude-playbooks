@@ -7,14 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
 	"unicode/utf8"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // Session labels (SPEC.md, "Session labels"): short key=value pairs a
@@ -111,6 +114,112 @@ func validLabels(m map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// label_vars (SPEC.md, "Session labels"): the exact names of environment
+// variables whose values a launch copies into launch labels, as
+// env.<name in lower case>. Only names the person listed, read once at
+// launch, each value checked as any label is.
+const labelVarsMax = 8
+
+var labelVarNameShape = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,27}$`)
+
+// labelVarNameProblem is why n cannot be a name of label_vars, "" when it
+// can: not a variable's exact name, cpb's own or an account's variable,
+// or a name that may hold a credential, whatever its value.
+func labelVarNameProblem(n string) string {
+	if !labelVarNameShape.MatchString(n) {
+		return fmt.Sprintf("%q is not an environment variable's exact name (letters, digits and '_', not starting with a digit, at most 28 characters; no pattern)", n)
+	}
+	up := strings.ToUpper(n)
+	if strings.HasPrefix(up, "CPB_") || up == "CLAUDE_CONFIG_DIR" || account.IsReserved(up) {
+		return n + " is cpb's own or an account's variable"
+	}
+	if manifest.LooksLikeSecretKey(n) || strings.Contains(up, "KEY") || strings.Contains(up, "COOKIE") || slices.Contains(strings.Split(up, "_"), "SESSION") {
+		return n + " names a variable that may hold a credential"
+	}
+	return ""
+}
+
+// checkLabelVars refuses a label_vars list: at most labelVarsMax names,
+// each one label_vars takes, none twice (in any case: two names would be
+// one label).
+func checkLabelVars(names []string) error {
+	if len(names) > labelVarsMax {
+		return fmt.Errorf("label_vars lists %d names; at most %d", len(names), labelVarsMax)
+	}
+	seen := map[string]bool{}
+	for _, n := range names {
+		if p := labelVarNameProblem(n); p != "" {
+			return fmt.Errorf("label_vars: %s", p)
+		}
+		if seen[labelVarKey(n)] {
+			return fmt.Errorf("label_vars names %s twice", n)
+		}
+		seen[labelVarKey(n)] = true
+	}
+	return nil
+}
+
+// labelVarKey is the launch label a name of label_vars gives.
+func labelVarKey(n string) string { return "env." + strings.ToLower(n) }
+
+// splitLabelVars reads a list property's value ('A, B') into its names.
+func splitLabelVars(v string) []string {
+	var out []string
+	for _, n := range strings.Split(v, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// withLabelVars adds to typed (the --label labels) one label per name of
+// label_vars: DEFAULTS' first, then the playbook's, each name once. A
+// typed label of the same key wins. A name it does not take (a file
+// edited by hand), an unset variable, a value a label refuses, and a label
+// over the caps are left out, each named in the notes by its key, never
+// its value.
+func withLabelVars(typed map[string]string, names []string, lookup func(string) (string, bool)) (map[string]string, []string) {
+	out := map[string]string{}
+	for k, v := range typed {
+		out[k] = v
+	}
+	var notes []string
+	done := map[string]bool{}
+	for _, n := range names {
+		if p := labelVarNameProblem(n); p != "" {
+			notes = append(notes, fmt.Sprintf("%s (not a name label_vars takes)", strings.ToLower(n)))
+			continue
+		}
+		k := labelVarKey(n)
+		if done[k] {
+			continue
+		}
+		done[k] = true
+		if _, ok := typed[k]; ok {
+			continue
+		}
+		v, ok := lookup(n)
+		if !ok {
+			notes = append(notes, k+" (unset)")
+			continue
+		}
+		if p := labelValueProblem(v); p != "" {
+			notes = append(notes, k+" (the value "+p+")")
+			continue
+		}
+		out[k] = v
+		if checkLabelSet(out) != nil {
+			delete(out, k)
+			notes = append(notes, k+" (over the label caps)")
+		}
+	}
+	if len(out) == 0 {
+		out = nil
+	}
+	return out, notes
 }
 
 // launchLabelsOf is the launch labels the tokens give: each --label, a

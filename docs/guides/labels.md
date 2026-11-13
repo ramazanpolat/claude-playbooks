@@ -38,6 +38,32 @@ cpb session label --list --json       # {"session_id": "...", "labels": {...}}
 The two never mix: a session label does not change a launch label of the
 same key, and every place that shows labels shows both, apart.
 
+## From the environment
+
+`label_vars` copies the values of environment variables you name into
+launch labels, each as `env.<name in lower case>`:
+
+```
+cpb "ALTER DEFAULTS SET label_vars = ['TERM_PROGRAM']"            # every launch
+cpb "ALTER PLAYBOOK reviewer SET label_vars = ['HC_TERMINAL_ID']"  # this playbook's, after DEFAULTS'
+cpb "ALTER PLAYBOOK reviewer RESET label_vars"
+```
+
+- **Only the names you list.** Exact names, no patterns, at most 8 in each
+  list. cpb refuses, when you set the list, its own variables and an
+  account's, and any name that may hold a credential (`GITHUB_TOKEN`,
+  `API_KEY`, `DB_PASSWORD`, a name with `KEY`, `COOKIE` or a `SESSION`
+  part), whatever the value.
+- **Read once, at launch,** from the environment you launched cpb in. A
+  `--label` of the same key wins.
+- **Checked like any label.** A value that looks like an e-mail address or
+  a credential, an unset variable, and a label over the caps are left out,
+  and the launch says so in one line, by key:
+  `cpb: label_vars left out: env.hc_terminal_id (unset)`.
+- **Yours, on this machine.** An installed or played playbook never brings
+  its own `label_vars`, and `cpb update` keeps yours.
+- `EXPLAIN PLAYBOOK <name>` shows which names a launch copies.
+
 ## From a hook
 
 A `SessionStart` hook can label every session, here with its folder's name.
@@ -85,8 +111,9 @@ A label is printed on shared screens and written to the log, so cpb refuses
 a value that looks like an e-mail address or a credential, and any control,
 direction or invisible character. The refusal names the key, never the
 value. What cpb cannot recognise is yours to keep out: no secrets, no login
-identity, no home paths, host names or addresses, no prompt text. cpb never
-takes a label from the environment.
+identity, no home paths, host names or addresses, no prompt text. cpb takes
+a label from the environment only through `label_vars`, for the names you
+list.
 
 ## Another playbooks root
 
