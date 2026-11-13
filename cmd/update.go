@@ -460,9 +460,10 @@ func overlayView(work string) (string, func(), error) {
 // would write it (overlayView), with the install root. What the update
 // puts back after the overlay is left out on both sides, as the update
 // itself finds it:
-//   - the preserved paths, by spelling and, in the install, by file
-//     identity (touchedEntry's rule: on a case-insensitive filesystem a
-//     shipped Settings.json is the preserved settings.json);
+//   - the preserved paths, by spelling and, in the install, under another
+//     spelling the filesystem takes for the same entry (as touchedEntry
+//     finds it: on a case-insensitive filesystem a shipped Settings.json
+//     is the preserved settings.json; leftOut);
 //   - the folders a preserved path's restore creates when the source does
 //     not ship them, with nothing in them but what is put back;
 //   - skills/<name> for each [skills] record, which restoreSkills puts
@@ -506,8 +507,13 @@ func newUpdateCompare(root string, preserve, skills []string, gitURL bool) *upda
 }
 
 // leftOut reports whether rel is put back by the update: a skipped path,
-// or an install entry that is one of the preserved ones under another
-// spelling.
+// or a preserved one under another spelling that the install's filesystem
+// takes for the same entry, as touchedEntry finds it after the overlay: a
+// case variant where case is ignored (Settings.json for settings.json), or
+// another Unicode form of the name where that is ignored too. Such a name
+// leads to the preserved file and is not listed in its folder as written.
+// A hard link under any name is listed, and is a file of its own, which
+// the update replaces.
 func (c *updateCompare) leftOut(rel string) bool {
 	if c.skip[rel] {
 		return true
@@ -515,12 +521,30 @@ func (c *updateCompare) leftOut(rel string) bool {
 	if len(c.preserved) == 0 {
 		return false
 	}
-	fi, err := os.Lstat(filepath.Join(c.root, filepath.FromSlash(rel)))
+	path := filepath.Join(c.root, filepath.FromSlash(rel))
+	fi, err := os.Lstat(path)
 	if err != nil {
 		return false
 	}
 	for _, p := range c.preserved {
 		if os.SameFile(fi, p) {
+			return !listedAs(path)
+		}
+	}
+	return false
+}
+
+// listedAs reports whether path's folder lists an entry spelled exactly as
+// path's last element; true when the folder cannot be read, so the entry
+// is compared rather than left out.
+func listedAs(path string) bool {
+	ents, err := readDirNoFollow(filepath.Dir(path))
+	if err != nil {
+		return true
+	}
+	name := filepath.Base(path)
+	for _, e := range ents {
+		if e.Name() == name {
 			return true
 		}
 	}
