@@ -693,18 +693,30 @@ func (p *parser) show(s *Stmt) *Error {
 	// not an object is still an error, never a silent fallback, and
 	// completion still offers every object here.
 	if p.atEnd() || p.at("--json") {
-		p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "ASK")
+		p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "USAGE", "ASK")
 		s.Object = Playbooks
 		p.jsonFlag(s)
 		return nil
 	}
-	switch w := p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "ASK"); w {
+	switch w := p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "USAGE", "ASK"); w {
 	case "":
 		return p.fail("SHOW needs an object")
 	case "SESSIONS":
 		s.Object = Sessions
 		if err := p.forPlaybook(s); err != nil {
 			return err
+		}
+	case "USAGE":
+		s.Object = Usage
+		if p.kw("FOR") != "" {
+			if p.kw("ACCOUNT") == "" {
+				return p.fail("FOR takes ACCOUNT: FOR ACCOUNT <name>")
+			}
+			name, err := p.name(Account, false)
+			if err != nil {
+				return err
+			}
+			s.Name = name
 		}
 	case "ASK":
 		if err := p.askStore(s); err != nil {

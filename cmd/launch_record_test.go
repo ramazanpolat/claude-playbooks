@@ -24,7 +24,8 @@ func TestRunRecordsTheLaunch(t *testing.T) {
 	fakeProcs(t, nil)
 	dir := t.TempDir()
 	out := filepath.Join(dir, "seen")
-	script := "#!/bin/sh\nf=\"$FAKE_ROOT/.state/launches/$$.json\"\ni=0\nwhile [ ! -f \"$f\" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done\n" +
+	// The record is named for the launch's id; it names this process.
+	script := "#!/bin/sh\nd=\"$FAKE_ROOT/.state/launches\"\ni=0\nf=\nwhile [ -z \"$f\" ] && [ $i -lt 100 ]; do f=$(grep -l \"\\\"pid\\\":$$,\" \"$d\"/*.json 2>/dev/null | head -1); [ -n \"$f\" ] || sleep 0.05; i=$((i+1)); done\n" +
 		"cp \"$f\" \"$FAKE_OUT\" && ls -ln \"$f\" | cut -c1-10 > \"$FAKE_OUT.mode\" && echo $$ > \"$FAKE_OUT.pid\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -58,8 +59,11 @@ func TestRunRecordsTheLaunch(t *testing.T) {
 		if mode, _ := os.ReadFile(out + ".mode"); strings.TrimSpace(string(mode)) != "-rw-------" {
 			t.Fatalf("record mode %q, want -rw-------", mode)
 		}
-		if _, err := os.Stat(filepath.Join(launchRecordsDir(root), strconv.Itoa(r.PID)+".json")); !os.IsNotExist(err) {
-			t.Fatalf("the record outlives its launch: %v", err)
+		if left, _ := filepath.Glob(filepath.Join(launchRecordsDir(root), "*.json")); len(left) != 0 {
+			t.Fatalf("the record outlives its launch: %v", left)
+		}
+		if !launchIDShape.MatchString(r.LaunchID) || r.Key == "" {
+			t.Fatalf("record id or key: %+v", r)
 		}
 		if r.V != 1 || r.ProcStart == "" || r.ConfigDir != filepath.Join(root, "alpha") || r.Playbook != "alpha" || r.LaunchedAt == "" {
 			t.Fatalf("record: %+v", r)
@@ -67,15 +71,20 @@ func TestRunRecordsTheLaunch(t *testing.T) {
 		return r
 	}
 
-	// The implicit account: machine, inherited, no identity.
-	if r := launch("alpha"); r.Account != "machine" || r.Why != account.WhyInherited || r.Identity != nil {
+	// The implicit account: machine, inherited.
+	if r := launch("alpha"); r.Account != "machine" || r.Why != account.WhyInherited || r.Key != account.Machine {
 		t.Fatalf("machine launch: %+v", r)
 	}
-	// A named account carries its identity label.
+	// A named account with an identity label: the record names the
+	// account, never the identity (it is read when a statement needs it).
 	putAccount(t, account.Account{Name: "acc", Provider: account.Anthropic, Identity: "someone@example.com",
 		Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
-	if r := launch("--account", "acc", "alpha"); r.Account != "acc" || r.Why != "--account" || r.Identity == nil || *r.Identity != "someone@example.com" {
+	if r := launch("--account", "acc", "alpha"); r.Account != "acc" || r.Why != "--account" || r.Key != "acc" {
 		t.Fatalf("--account launch: %+v", r)
+	}
+	b, _ := json.Marshal(newLaunchRecord("alpha", filepath.Join(root, "alpha"), account.Selection{Name: "acc", Account: &account.Account{Name: "acc", Identity: "someone@example.com"}}))
+	if strings.Contains(string(b), "someone@example.com") || strings.Contains(string(b), "identity") {
+		t.Fatalf("the record holds an identity: %s", b)
 	}
 	if fi, err := os.Stat(launchRecordsDir(root)); err != nil || fi.Mode().Perm() != 0o700 {
 		t.Fatalf("records directory: %v %v", fi.Mode(), err)
@@ -104,11 +113,17 @@ func writeRecord(t *testing.T, root string, r launchRecord) {
 	if r.V == 0 {
 		r.V = launchRecordVersion
 	}
+	if r.LaunchID == "" {
+		r.LaunchID = testLaunchID(r.PID)
+	}
 	dir := launchRecordsDir(root)
-	if err := writeLaunchRecord(dir, filepath.Join(dir, strconv.Itoa(r.PID)+".json"), &r); err != nil {
+	if err := writeLaunchRecord(dir, filepath.Join(dir, r.LaunchID+".json"), &r); err != nil {
 		t.Fatal(err)
 	}
 }
+
+// testLaunchID is a launch id for a test record of pid.
+func testLaunchID(pid int) string { return fmt.Sprintf("%016x", pid) }
 
 // SHOW SESSIONS shows the account of a session's launch record: its own
 // pid's, or its parent's (a secret helper that started claude), and only
@@ -197,22 +212,25 @@ func TestReadLaunchRecordsDefensive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ok := `{"v":1,"pid":10,"proc_start":"x","account":"acc"}`
-	put("10.json", ok)
-	put("11.json", `{"v":2,"pid":11,"proc_start":"x","account":"acc"}`)
-	put("12.json", `{"v":1,"pid":13,"proc_start":"x","account":"acc"}`)
-	put("14.json", `{"v":1,"pid":14,"proc_start":"x","account":"a\tb"}`)
-	put("15.json", `{"v":1,"pid":15,"proc_start":"","account":"acc"}`)
-	put("16.json", `not json`)
-	put("17.json", `{"v":1,"pid":17,"proc_start":"x","account":"acc","pad":"`+strings.Repeat("x", maxLaunchRecordBytes)+`"}`)
-	put("018.json", `{"v":1,"pid":18,"proc_start":"x","account":"acc"}`)
-	put("19.json", `{"v":1,"pid":19,"proc_start":"x","account":"acc\u001b[31m"}`)
+	rec := func(pid int, rest string) string {
+		return fmt.Sprintf(`{"v":1,"launch_id":%q,"pid":%d,%s}`, testLaunchID(pid), pid, rest)
+	}
+	id := func(pid int) string { return testLaunchID(pid) + ".json" }
+	put(id(10), rec(10, `"proc_start":"x","account":"acc"`))
+	put(id(11), strings.Replace(rec(11, `"proc_start":"x","account":"acc"`), `"v":1`, `"v":2`, 1))
+	put(id(12), rec(13, `"proc_start":"x","account":"acc"`)) // named for another launch
+	put(id(14), rec(14, `"proc_start":"x","account":"a\tb"`))
+	put(id(15), rec(15, `"proc_start":"","account":"acc"`))
+	put(id(16), `not json`)
+	put(id(17), rec(17, `"proc_start":"x","account":"acc","pad":"`+strings.Repeat("x", maxLaunchRecordBytes)+`"`))
+	put("18.json", `{"v":1,"pid":18,"proc_start":"x","account":"acc"}`) // not a launch id's name
+	put(id(19), rec(19, `"proc_start":"x","account":"acc\u001b[31m"`))
 	// Every form a launch writes reads back: a route's IPv6 host, a block
 	// named for a directory with a space in it.
-	put("20.json", `{"v":1,"pid":20,"proc_start":"x","account":"flags:[::1]:8080"}`)
-	put("21.json", `{"v":1,"pid":21,"proc_start":"x","account":"block:my dir"}`)
+	put(id(20), rec(20, `"proc_start":"x","account":"flags:[::1]:8080"`))
+	put(id(21), rec(21, `"proc_start":"x","account":"block:my dir"`))
 	got := readLaunchRecords(root)
-	if len(got) != 3 || got[10].Account != "acc" || got[20].Account != "flags:[::1]:8080" || got[21].Account != "block:my dir" {
+	if len(got) != 3 || got[10][0].Account != "acc" || got[20][0].Account != "flags:[::1]:8080" || got[21][0].Account != "block:my dir" {
 		t.Fatalf("records: %+v", got)
 	}
 }
@@ -238,7 +256,7 @@ func TestSweepLaunchRecords(t *testing.T) {
 	}
 	sweepLaunchRecords(dir)
 	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
-	if !exists(filepath.Join(dir, fmt.Sprintf("%d.json", os.Getpid()))) || exists(filepath.Join(dir, fmt.Sprintf("%d.json", dead))) || exists(old) || !exists(fresh) {
+	if !exists(filepath.Join(dir, testLaunchID(os.Getpid())+".json")) || exists(filepath.Join(dir, testLaunchID(dead)+".json")) || exists(old) || !exists(fresh) {
 		t.Fatal("sweep kept or removed the wrong files")
 	}
 }

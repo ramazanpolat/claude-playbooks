@@ -91,6 +91,13 @@ type sessionJSON struct {
 	// so every earlier field keeps its place.
 	Account *string       `json:"account"`
 	AtLimit *sessionLimit `json:"at_limit"`
+	// AccountAtLimit is the limit the session's account is at, from the
+	// latest figure any of its sessions reported (SHOW USAGE), kept apart
+	// from AtLimit: the session itself may not have tried since. Last.
+	AccountAtLimit *sessionLimit `json:"account_at_limit"`
+	// key is whose allowance the session draws on (its launch record's
+	// usage key), for SHOW USAGE; not printed.
+	key string
 }
 
 // sessionLimit is the usage limit a session is stopped at: the window
@@ -297,8 +304,9 @@ type liveSession struct {
 	f     sessionFile
 	state liveState
 	tty   string // the process's controlling terminal, "" for none
-	// account is the account of its launch record, "" for none.
-	account string
+	// account is the account of its launch record, "" for none; key its
+	// usage key.
+	account, key string
 }
 
 // readSessionFiles reads the session files of dirs. It only reads.
@@ -389,8 +397,8 @@ func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 		if !ok {
 			continue
 		}
-		if r, ok := recs[s.f.PID]; ok && sameStart(r.ProcStart, info.start) {
-			s.account = r.Account
+		if r, ok := recordStarted(recs[s.f.PID], info.start); ok {
+			s.account, s.key = r.Account, r.Key
 			continue
 		}
 		if _, ok := recs[info.ppid]; ok && info.ppid > 1 {
@@ -410,10 +418,12 @@ func matchLaunchRecords(sessions []liveSession, starts map[int]procInfo) {
 		if !ok || info.ppid <= 1 {
 			continue
 		}
-		r, ok := recs[info.ppid]
 		p, alive := pstarts[info.ppid]
-		if ok && alive && sameStart(r.ProcStart, p.start) {
-			s.account = r.Account
+		if !alive {
+			continue
+		}
+		if r, ok := recordStarted(recs[info.ppid], p.start); ok {
+			s.account, s.key = r.Account, r.Key
 		}
 	}
 }
@@ -637,7 +647,7 @@ func (s liveSession) json() sessionJSON {
 		Cwd: s.f.Cwd, Kind: s.f.Kind, Status: optStr(s.f.Status), Name: optStr(s.f.Name),
 		ClaudeVersion: optStr(s.f.Version), StartedAt: rfc3339(time.UnixMilli(s.f.StartedAt)),
 		Launcher: optStr(s.dir.launcher), Resume: s.dir.resumeIn(s.f.SessionID, s.f.Cwd),
-		TTY: optStr(s.tty), Account: optStr(s.account),
+		TTY: optStr(s.tty), Account: optStr(s.account), key: s.key,
 	}
 	if p := transcriptPath(s.dir.path, s.f.Cwd, s.f.SessionID); p != "" {
 		if fi, err := os.Stat(p); err == nil {
@@ -678,8 +688,14 @@ func liveSessions(forName string) ([]sessionJSON, []playbook.Unreadable, error) 
 		return nil, nil, err
 	}
 	rows := []sessionJSON{}
+	latest := readLatestFigures(launchRecordsRoot())
+	now := sessionsNow()
 	for _, s := range readSessionFiles(dirs) {
-		rows = append(rows, s.json())
+		v := s.json()
+		if l, ok := latest[s.key]; ok && s.key != "" {
+			v.AccountAtLimit = accountLimitOf(l, now)
+		}
+		rows = append(rows, v)
 	}
 	return rows, bad, nil
 }
@@ -739,8 +755,11 @@ func showSessions(st *grammar.Stmt) error {
 	t := newTable("PLAYBOOK", "ACCOUNT", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(10)
 	for _, r := range rows {
 		status := deref(r.Status, "-")
-		if r.AtLimit != nil {
+		switch {
+		case r.AtLimit != nil:
 			status = limitLabel(r.AtLimit)
+		case r.AccountAtLimit != nil:
+			status = "account " + limitLabel(r.AccountAtLimit)
 		}
 		t.add(r.Playbook, deref(r.Account, "-"), strconv.Itoa(r.PID), deref(r.TTY, "-"), r.Kind, status, ageOf(&r.StartedAt),
 			ageOf(r.LastActive), deref(r.Model, "-"), r.SessionID, r.Cwd)

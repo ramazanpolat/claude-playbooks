@@ -1,9 +1,9 @@
- cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
+ cpb [1 Playbooks] 2 Sessions  3 Env sets  4 Defaults  5 Log  6 Usage    ? help
 ────────────────────────────────────────────────────────────────────────────────
 
   cpb tui: a view of what the cpb grammar reads. It changes nothing (v1).
 
-  1-5          Playbooks, Sessions, Env sets, Defaults, Log
+  1-6          Playbooks, Sessions, Env sets, Defaults, Log, Usage
   ↑↓ j k       move          enter     open
   / filter     r refresh     q quit    esc back
   c            SHOW CREATE of the selection (--skip-secrets)

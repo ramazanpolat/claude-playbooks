@@ -38,6 +38,7 @@ const (
 	Accounts  Object = "ACCOUNTS" // SHOW ACCOUNTS
 	All       Object = "ALL"      // SHOW CREATE ALL
 	Sessions  Object = "SESSIONS" // SHOW SESSIONS: the live Claude Code sessions of cpb's config dirs
+	Usage     Object = "USAGE"    // SHOW USAGE: how much of each allowance is used, from cpb's usage log
 	// The cpb ask store: SHOW ASK HISTORY lists the records of answered
 	// asks, newest first; SHOW ASK RECORD <id> shows one in full.
 	AskHistory Object = "ASK HISTORY"

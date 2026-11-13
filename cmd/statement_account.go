@@ -68,6 +68,21 @@ func accountStatement(r *stmtRun, st *grammar.Stmt) error {
 		c.Headers = maps.Clone(a.Headers) // the copy may not share what the statement changes
 		old = &c
 	}
+	// A label is checked when the statement sets it, never for one already
+	// stored that the statement leaves as it is.
+	for _, c := range st.Clauses {
+		for _, v := range c.Settings {
+			if v.Key != "identity" || v.Value == "" {
+				continue
+			}
+			if len(v.Value) > 512 {
+				return fmt.Errorf("account %q: identity is %d bytes; at most 512", st.Name, len(v.Value))
+			}
+			if !validRecordedAccount(v.Value) {
+				return fmt.Errorf("account %q: identity %q holds a control or invisible character", st.Name, v.Value)
+			}
+		}
+	}
 	lines := applyAccountClauses(a, st.Clauses)
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("account %s: %w", st.Name, err)
@@ -96,6 +111,10 @@ func accountStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	if err := account.Write(dir, a); err != nil {
 		return fmt.Errorf("cannot write account: %w", err)
+	}
+	if old != nil && (old.Provider != a.Provider || old.BaseURL != a.BaseURL || !reflect.DeepEqual(old.Auth, a.Auth)) {
+		// Another credential is another allowance: its old figure goes.
+		forgetUsage(config.ResolvePlaybooksDir(), st.Name)
 	}
 	head := "Altered ACCOUNT " + st.Name
 	switch {
@@ -272,6 +291,7 @@ func (r *stmtRun) dropAccount(playbooksDir, dir string, st *grammar.Stmt, a *acc
 	if err := account.Delete(dir, st.Name); err != nil {
 		return err
 	}
+	forgetUsage(config.ResolvePlaybooksDir(), st.Name)
 	fmt.Printf("Dropped ACCOUNT %s\n", st.Name)
 	return nil
 }
@@ -441,10 +461,19 @@ type accountJSON struct {
 	Default bool     `json:"default"`
 }
 
+// shownLabel is a label as SHOW prints it: as written, or none when it
+// holds a character a terminal would not show as written.
+func shownLabel(s string) string {
+	if s == "" || validRecordedAccount(s) {
+		return s
+	}
+	return ""
+}
+
 func describeAccount(a *account.Account, users []string, def bool) accountJSON {
 	v := accountJSON{
 		Name: a.Name, Description: optStr(a.Description), Provider: a.Provider,
-		BaseURL: optStr(a.BaseURL), Identity: optStr(a.Identity),
+		BaseURL: optStr(a.BaseURL), Identity: optStr(shownLabel(a.Identity)),
 		Auth: a.Auth.Kind, AuthRef: optStr(a.Auth.Ref), AuthPlaintext: a.Auth.Value != "",
 		Helper: optStr(a.Auth.Helper), Access: account.AccessAny,
 		ClaudeLoginTrusted: a.ClaudeLoginTrusted, Models: map[string]string{},

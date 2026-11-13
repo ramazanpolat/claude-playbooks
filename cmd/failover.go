@@ -561,7 +561,7 @@ func sessionPIDOf(configDir string, child int) (int, bool) {
 	}
 	var pids []int
 	for _, e := range ents {
-		if p, ok := launchRecordPID(e.Name()); ok {
+		if p, ok := pidFileName(e.Name()); ok {
 			pids = append(pids, p)
 		}
 	}
@@ -812,7 +812,26 @@ func failoverWatchFor(in failoverWatchInput) (*failoverWatch, error) {
 		return auth.OwnLoginRefusal(in.configDir, eff, in.pb.Name)
 	}
 	w.fullAccounts = func() map[string]bool {
+		// At a limit by the latest usage figure of the allowance it draws
+		// on from this playbook (SHOW USAGE: a Claude login's figure is the
+		// login's, machine or playbook:<name>, not the account name's), or
+		// by a live session stopped there.
 		out := map[string]bool{}
+		root := config.ResolvePlaybooksDir()
+		full := fullKeys(readLatestFigures(root), time.Now())
+		for _, t := range cfg.accounts {
+			sel := account.Selection{Name: t.name}
+			if t.name != account.Machine {
+				a, err := account.Read(account.Dir(root), t.name)
+				if err != nil || a == nil {
+					continue
+				}
+				sel.Account = a
+			}
+			if full[usageKey(sel, in.configDir, in.pb.Name)] {
+				out[t.name] = true
+			}
+		}
 		rows, _, err := liveSessions("")
 		if err != nil {
 			return out

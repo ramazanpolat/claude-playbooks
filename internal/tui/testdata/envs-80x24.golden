@@ -1,4 +1,4 @@
- cpb   1 Playbooks   2 Sessions  [3 Env sets]  4 Defaults   5 Log        ? help
+ cpb  1 Playbooks  2 Sessions [3 Env sets] 4 Defaults  5 Log  6 Usage    ? help
 ────────────────────────────────────────────────────────────────────────────────
   NAME   VARS       USED BY  DEFAULT  DESCRIPTION
 ▸ proxy  2 (1 ref)  router   -        LLM proxy

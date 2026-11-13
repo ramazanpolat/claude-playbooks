@@ -568,6 +568,10 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
+	rec := newLaunchRecord(pb.Name, configDir, acct.sel)
+	if !override {
+		acct.statusline = statuslineStepFor(config.ResolvePlaybooksDir(), configDir, wd, rec.LaunchID, claudeArgs).wrapped
+	}
 	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), launchEnv)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
@@ -581,7 +585,6 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 	if exitLine {
 		before = transcriptStamps(sd.path)
 	}
-	rec := newLaunchRecord(pb.Name, configDir, acct.sel)
 	if watch != nil {
 		rec.Switches = activeEpisode.switchesCopy()
 	}

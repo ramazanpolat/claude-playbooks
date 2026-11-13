@@ -51,6 +51,12 @@ const fixturePlaybooks = `[
  {"name":"router","version":null,"path":"/home/me/.claude-playbooks/router","source":null,"linked":null,"launcher":"rt","envs":["proxy"],"vars":[{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true},{"key":"MY_FLAG","value":"1"}],"sandbox":{"always":false},"login":"isolated","global_instructions":"excluded","marketplaces":[{"name":"team","source":{"source":"github","repo":"x/y"}}],"plugins":[{"id":"reviewer@team","enabled":true}],"agent":"reviewer:reviewer","mcp_servers":[{"name":"sentry","transport":"http","url":"https://mcp.sentry.dev/mcp","env":[],"headers":[{"key":"Authorization","ref":"keychain:sentry"}]}],"tools":{"allow":[],"deny":[]},"skills":[{"name":"notes","source":"/home/me/notes","branch":null,"subdir":null,"mode":"link"}],"statusline":{"command":null,"refresh":null},"model":"glm-5.3","model_picker":{"mode":"append","options":[{"model":"glm-5.3","label":"GLM","description":null,"behaves_as":null}]}}
 ]`
 
+const fixtureUsage = `[
+ {"account":"claude-home","accounts":["claude-home"],"identity":null,"playbooks":[],"live_sessions":0,"sessions_at_limit":0,"state":"not_seen","five_hour":null,"seven_day":null,"spend_limit":null,"seen_at":null,"seen_by":null},
+ {"account":"claude-work","accounts":["claude-work"],"identity":null,"playbooks":["alpha"],"live_sessions":1,"sessions_at_limit":1,"state":"reported","five_hour":{"used_percentage":26,"left_percentage":74,"resets_at":"2026-09-28T13:20:00.000Z","reset":false},"seven_day":{"used_percentage":100,"left_percentage":0,"resets_at":"2026-10-01T12:00:00.000Z","reset":false},"spend_limit":null,"seen_at":"2026-09-28T11:58:00.000Z","seen_by":{"session_id":"bfb2d226-403f-46da-8216-e39b2a71dae9","playbook":"alpha"}},
+ {"account":"router","accounts":["router"],"identity":null,"playbooks":["router"],"live_sessions":1,"sessions_at_limit":0,"state":"not_reported","five_hour":null,"seven_day":null,"spend_limit":null,"seen_at":null,"seen_by":null}
+]`
+
 const fixtureSessions = `[
  {"playbook":"alpha","config_dir":"/home/me/.claude-playbooks/alpha","pid":59735,"session_id":"bfb2d226-403f-46da-8216-e39b2a71dae9","cwd":"/home/me/DEV/app","kind":"interactive","status":"busy","name":"release","claude_version":"2.1.283","started_at":"2026-09-28T03:00:00.000Z","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","launcher":"al","resume":"cd '/home/me/DEV/app' && al --resume bfb2d226-403f-46da-8216-e39b2a71dae9","tty":"ttys039","account":"claude-work","at_limit":{"window":"seven_day","resets_at":"2026-10-01T12:00:00.000Z"}},
  {"playbook":"router","config_dir":"/home/me/.claude-playbooks/router","pid":21452,"session_id":"01e9cca2-4fe7-4330-ad02-4c417cf4a13e","cwd":"/home/me/DEV/app","kind":"bg","status":"idle","name":null,"claude_version":"2.1.283","started_at":"2026-09-26T12:00:00.000Z","last_active":"2026-09-28T11:32:00.000Z","model":"glm-5.3","launcher":"rt","resume":"cd '/home/me/DEV/app' && rt --resume 01e9cca2-4fe7-4330-ad02-4c417cf4a13e","tty":null,"account":"router","at_limit":null}
@@ -71,6 +77,7 @@ func fixture() *fakeRunner {
 	f := &fakeRunner{out: map[string]string{
 		"SHOW PLAYBOOKS --json":                      fixturePlaybooks,
 		"SHOW SESSIONS --json":                       fixtureSessions,
+		"SHOW USAGE --json":                          fixtureUsage,
 		"SHOW ENVS --json":                           fixtureEnvs,
 		"SHOW DEFAULTS --json":                       fixtureDefaults,
 		"EXPLAIN PLAYBOOK router --json":             fixtureExplain,
@@ -209,6 +216,7 @@ func TestGoldenScreens(t *testing.T) {
 		}{
 			{"playbooks", nil},
 			{"sessions", []string{"2"}},
+			{"usage", []string{"6"}},
 			{"envs", []string{"3"}},
 			{"defaults", []string{"4"}},
 			{"detail-overview", []string{"down", "enter"}},

@@ -50,9 +50,10 @@ const (
 	vEnvs
 	vDefaults
 	vLog
+	vUsage
 )
 
-var viewNames = []string{"Playbooks", "Sessions", "Env sets", "Defaults", "Log"}
+var viewNames = []string{"Playbooks", "Sessions", "Env sets", "Defaults", "Log", "Usage"}
 
 var detailTabs = []string{"Overview", "Env", "Vars", "Plugins", "MCP", "Skills", "Status line", "Model", "Sessions"}
 
@@ -105,6 +106,10 @@ type (
 	}
 	sessionsMsg struct {
 		s   []Session
+		err error
+	}
+	usageMsg struct {
+		u   []Usage
 		err error
 	}
 	playbookMsg struct {
@@ -170,6 +175,14 @@ func (m Model) loadSessions() Cmd {
 	}
 }
 
+func (m Model) loadUsage() Cmd {
+	r := m.o.Runner
+	return func() Msg {
+		u, err := loadUsage(r)
+		return usageMsg{u, err}
+	}
+}
+
 // polling: sessions are re-read only while a screen that shows them is up.
 func (m Model) polling() bool {
 	if m.text != nil || m.confirm != nil || m.help {
@@ -178,7 +191,7 @@ func (m Model) polling() bool {
 	if m.detail != nil {
 		return m.detail.tab == len(detailTabs)-1 || m.detail.tab == 0
 	}
-	return m.view == vPlaybooks || m.view == vSessions
+	return m.view == vPlaybooks || m.view == vSessions || m.view == vUsage
 }
 
 // Update is tea.Model's; update is the same with the concrete model, which
@@ -209,6 +222,15 @@ func (m Model) update(msg Msg) (Model, Cmd) {
 		m.st, m.loaded, m.err, m.partial, m.lastRead = msg.st, true, "", false, m.o.Now()
 		if partial != nil {
 			m.err, m.partial = partial.Error(), true
+		}
+		m.clampCursors()
+		return m, nil
+	case usageMsg:
+		var partial *PartialRead
+		if msg.err == nil || errors.As(msg.err, &partial) {
+			m.st.Usage, m.lastRead = msg.u, m.o.Now()
+		} else {
+			m.err = msg.err.Error()
 		}
 		m.clampCursors()
 		return m, nil
@@ -262,6 +284,9 @@ func (m Model) update(msg Msg) (Model, Cmd) {
 		return m.export(msg)
 	case tickMsg:
 		if m.polling() && m.loaded {
+			if m.view == vUsage && m.detail == nil {
+				return m, batch(m.tick(), m.loadUsage())
+			}
 			return m, batch(m.tick(), m.loadSessions())
 		}
 		return m, m.tick()
@@ -348,7 +373,7 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 	case "?":
 		m.help = true
 		return m, nil
-	case "1", "2", "3", "4", "5":
+	case "1", "2", "3", "4", "5", "6":
 		m.view = view(s[0] - '1')
 		m.filter = ""
 		return m, nil
@@ -591,6 +616,8 @@ func (m Model) rowCount() int {
 		return len(m.envRows())
 	case vLog:
 		return len(m.log)
+	case vUsage:
+		return len(m.usageRows())
 	}
 	return 0
 }
@@ -624,6 +651,16 @@ func (m Model) sessionRows() []Session {
 	for _, s := range m.st.Sessions {
 		if matches(m.filter, s.Playbook, s.Cwd, s.SessionID, deref(s.Model)) {
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (m Model) usageRows() []Usage {
+	var out []Usage
+	for _, u := range m.st.Usage {
+		if matches(m.filter, append([]string{u.Account}, u.Accounts...)...) {
+			out = append(out, u)
 		}
 	}
 	return out

@@ -185,6 +185,27 @@ type Session struct {
 	// Account and AtLimit (v4.8.0): nil from an older cpb.
 	Account *string       `json:"account"`
 	AtLimit *SessionLimit `json:"at_limit"`
+	// AccountAtLimit (v4.8.0): the limit the session's account is at.
+	AccountAtLimit *SessionLimit `json:"account_at_limit"`
+}
+
+// Usage is one row of SHOW USAGE --json (v4.8.0).
+type Usage struct {
+	Account         string       `json:"account"`
+	Accounts        []string     `json:"accounts"`
+	LiveSessions    int          `json:"live_sessions"`
+	SessionsAtLimit int          `json:"sessions_at_limit"`
+	State           string       `json:"state"`
+	FiveHour        *UsageWindow `json:"five_hour"`
+	SevenDay        *UsageWindow `json:"seven_day"`
+	SeenAt          *string      `json:"seen_at"`
+}
+
+// UsageWindow is one window of a usage row.
+type UsageWindow struct {
+	UsedPercentage float64 `json:"used_percentage"`
+	ResetsAt       string  `json:"resets_at"`
+	Reset          bool    `json:"reset"`
 }
 
 // SessionLimit is the usage limit a session is stopped at.
@@ -193,9 +214,25 @@ type SessionLimit struct {
 	ResetsAt string `json:"resets_at"`
 }
 
+// limitWord is a limit's short form: limit 5h, limit 7d, or limit <window>.
+func (s Session) limitWord(l *SessionLimit) *string {
+	w := "limit " + l.Window
+	switch l.Window {
+	case "five_hour":
+		w = "limit 5h"
+	case "seven_day":
+		w = "limit 7d"
+	}
+	return &w
+}
+
 // StatusLine is a session's status as the tables show it: the limit it is
-// stopped at, else Claude Code's own status.
+// stopped at, else its account's, else Claude Code's own status.
 func (s Session) StatusLine() *string {
+	if s.AtLimit == nil && s.AccountAtLimit != nil {
+		l := "account " + *s.limitWord(s.AccountAtLimit)
+		return &l
+	}
 	if s.AtLimit == nil {
 		return s.Status
 	}
@@ -233,6 +270,7 @@ type Explain struct {
 type State struct {
 	Playbooks []Playbook
 	Sessions  []Session
+	Usage     []Usage
 	Envs      []EnvSet
 	Defaults  Defaults
 }
@@ -264,6 +302,7 @@ var (
 	readSessions  = []string{"SHOW", "SESSIONS", "--json"}
 	readEnvs      = []string{"SHOW", "ENVS", "--json"}
 	readDefaults  = []string{"SHOW", "DEFAULTS", "--json"}
+	readUsage     = []string{"SHOW", "USAGE", "--json"}
 )
 
 // loadState reads everything the screens show. A read that left playbooks
@@ -288,6 +327,9 @@ func loadState(r Runner) (State, error) {
 	if err := read(&s.Sessions, readSessions...); err != nil {
 		return s, err
 	}
+	if err := read(&s.Usage, readUsage...); err != nil {
+		return s, err
+	}
 	if err := read(&s.Envs, readEnvs...); err != nil {
 		return s, err
 	}
@@ -298,6 +340,11 @@ func loadState(r Runner) (State, error) {
 		return s, partial
 	}
 	return s, nil
+}
+
+func loadUsage(r Runner) ([]Usage, error) {
+	var u []Usage
+	return u, readJSON(r, &u, readUsage...)
 }
 
 func loadSessions(r Runner) ([]Session, error) {

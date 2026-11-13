@@ -279,8 +279,32 @@ type explainJSON struct {
 	// Account is SHOW's, flattened (v4.2.0).
 	auth.Account
 	// Failover is what a launch with no flags does at a usage limit
-	// (v4.8.0). Last.
+	// (v4.8.0).
 	Failover failoverExplainJSON `json:"failover"`
+	// UsageAtLaunch is whether a launch from here records usage through
+	// cpb's status line step, and why not (v4.8.0). Last.
+	UsageAtLaunch usageAtLaunchJSON `json:"usage_at_launch"`
+}
+
+// usageAtLaunchJSON is EXPLAIN's word on the status line step.
+type usageAtLaunchJSON struct {
+	Recorded bool    `json:"recorded"`
+	Reason   *string `json:"reason"`
+}
+
+// explainUsage is what a launch of pb from the current folder does with
+// its status line.
+func explainUsage(pb *playbook.Playbook) statuslineStep {
+	wd, _ := os.Getwd()
+	return statuslineStepFor(config.ResolvePlaybooksDir(), pb.Path, wd, "0000000000000000", nil)
+}
+
+func usageAtLaunchOf(s statuslineStep) usageAtLaunchJSON {
+	if s.wrapped != nil {
+		return usageAtLaunchJSON{Recorded: true}
+	}
+	r := s.reason
+	return usageAtLaunchJSON{Reason: &r}
 }
 
 // agentJSON is the agent a launch starts as, when the playbook names one.
@@ -377,6 +401,8 @@ func readStatement(st *grammar.Stmt) error {
 		return leftOut(bad)
 	case st.Object == grammar.Sessions:
 		return showSessions(st)
+	case st.Object == grammar.Usage:
+		return showUsage(st)
 	case st.Object == grammar.AskHistory, st.Object == grammar.AskRecord:
 		return showAskStore(playbooksDir, st)
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
@@ -848,7 +874,8 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		pv := describePlaybook(pb)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
 			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions,
-			ModelPickerAtLaunch: launchPickerJSONOf(explainPicker(pb)), Account: pv.Account, Failover: explainFailover(pb)})
+			ModelPickerAtLaunch: launchPickerJSONOf(explainPicker(pb)), Account: pv.Account, Failover: explainFailover(pb),
+			UsageAtLaunch: usageAtLaunchOf(explainUsage(pb))})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -919,6 +946,7 @@ func printLaunchPicker(pb *playbook.Playbook) {
 		fmt.Println(line)
 	}
 	fmt.Println(explainFailoverLine(explainFailover(pb)))
+	fmt.Println(explainUsage(pb).explainLine())
 }
 
 // printLaunchSandbox says where a launch runs and what its login is, when

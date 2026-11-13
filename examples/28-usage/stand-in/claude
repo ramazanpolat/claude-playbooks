@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+# A stand-in for claude that does what Claude Code does with a status line:
+# it takes statusLine.command from the launch's --settings and runs it with
+# /bin/sh -c, a status line input on its standard input, shaped like Claude
+# Code 2.1.322's, with the account's 5-hour and weekly figures. What the
+# command prints goes to $HOME/statusline.out. No network, no model.
+import json, os, subprocess, sys, time
+
+args = sys.argv[1:]
+settings = {}
+if "--settings" in args:
+    settings = json.loads(args[args.index("--settings") + 1])
+command = (settings.get("statusLine") or {}).get("command")
+if not command:
+    sys.exit(0)
+time.sleep(0.3)  # Claude Code renders after it starts
+now = int(time.time())
+status_input = {
+    "session_id": "0e5c1a2b-0000-4000-8000-0000000000a1",
+    "version": "2.1.322",
+    "model": {"id": "claude-opus-5-5", "display_name": "Opus"},
+    "workspace": {"current_dir": os.getcwd(), "project_dir": os.getcwd()},
+    "cost": {"total_cost_usd": 0.42},
+    "rate_limits": {
+        "five_hour": {"used_percentage": 26, "resets_at": now + 3600},
+        "seven_day": {"used_percentage": 5, "resets_at": now + 3 * 86400},
+    },
+}
+out = subprocess.run(["/bin/sh", "-c", command], input=json.dumps(status_input).encode(), capture_output=True)
+with open(os.path.join(os.environ["HOME"], "statusline.out"), "wb") as f:
+    f.write(out.stdout)
