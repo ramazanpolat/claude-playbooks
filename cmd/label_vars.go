@@ -121,19 +121,42 @@ func containsFold(list []string, s string) bool {
 	return false
 }
 
+// runLabels holds a run's launch labels once its first launch has read
+// them: the failover relaunch and the way back carry them, and read
+// neither label_vars nor the environment again. runRun resets it.
+var runLabels struct {
+	set    bool
+	labels map[string]string
+}
+
 // launchLabels is a launch's labels: the --label ones, then label_vars'
-// values from the environment cpb was started with. What it leaves out is
-// said on stderr in one line, by key, never by value.
+// values from the environment cpb was started with, read once per run.
+// What it leaves out for a reason is said on stderr in one line, by key,
+// never by value; an unset or empty variable says nothing.
 func launchLabels(root string, m *manifest.Manifest, tokens []launchToken) (map[string]string, error) {
+	if runLabels.set {
+		return runLabels.labels, nil
+	}
 	names, err := launchLabelVars(root, m)
 	if err != nil {
 		return nil, err
 	}
-	labels, notes := withLabelVars(launchLabelsOf(tokens), names, os.LookupEnv)
-	if len(notes) > 0 {
-		fmt.Fprintf(os.Stderr, "cpb: label_vars left out: %s\n", strings.Join(notes, ", "))
+	labels, states := labelVarsAt(launchLabelsOf(tokens), names, os.LookupEnv)
+	if line := labelVarsLeftOut(states); line != "" {
+		fmt.Fprintln(os.Stderr, line)
 	}
+	runLabels.set, runLabels.labels = true, labels
 	return labels, nil
+}
+
+// labelVarsShownList is a stored list as SHOW and SELECT show it: an entry
+// that is not a variable's name named by its length only.
+func labelVarsShownList(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = labelVarShown(n)
+	}
+	return out
 }
 
 // withLabelVarsDefaults fills DEFAULTS' label_vars of v.
@@ -142,29 +165,64 @@ func withLabelVarsDefaults(v *defaultsJSON, root string) error {
 	if err != nil {
 		return fmt.Errorf("DEFAULTS' label_vars cannot be read: %w", err)
 	}
-	v.LabelVars = append([]string{}, names...)
+	v.LabelVars = labelVarsShownList(names)
 	return nil
 }
 
-// explainLabelVars is the names a launch of pb copies into launch labels;
-// none when DEFAULTS' cannot be read (EXPLAIN reads, it does not refuse).
-func explainLabelVars(pb *playbook.Playbook) []string {
+// explainLabelVars is what a launch of pb from here would do with each
+// name of label_vars, read from this environment: copied, unset, empty,
+// a refused name or a refused value (by kind), never a value. None when
+// DEFAULTS' cannot be read (EXPLAIN reads, it does not refuse).
+func explainLabelVars(pb *playbook.Playbook) []labelVarState {
 	names, err := launchLabelVars(config.ResolvePlaybooksDir(), pb.Manifest)
-	if err != nil || names == nil {
-		return []string{}
+	if err != nil {
+		return []labelVarState{}
 	}
-	return names
+	_, states := labelVarsAt(nil, names, os.LookupEnv)
+	if states == nil {
+		return []labelVarState{}
+	}
+	return states
 }
 
-// labelVarsShown is a label_vars list for a person: each name with the
-// launch label it gives.
+// labelVarsShown is a stored label_vars list for a person: each name with
+// the launch label it gives.
 func labelVarsShown(names []string) string {
 	if len(names) == 0 {
 		return "none (label_vars)"
 	}
 	parts := make([]string, len(names))
 	for i, n := range names {
-		parts[i] = n + " as " + labelVarKey(n)
+		switch {
+		case strings.HasPrefix(n, "<an entry of "):
+			parts[i] = n // shown already (labelVarsShownList)
+		case !labelVarShowable(n):
+			parts[i] = labelVarShown(n)
+		default:
+			parts[i] = n + " as " + labelVarKey(n)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// labelVarStatesShown is EXPLAIN's line on label_vars: each name, the
+// label it gives, and what a launch from here would do with it.
+func labelVarStatesShown(states []labelVarState) string {
+	if len(states) == 0 {
+		return "none (label_vars)"
+	}
+	parts := make([]string, len(states))
+	for i, s := range states {
+		switch s.State {
+		case "copied":
+			parts[i] = s.Name + " as " + s.Label
+		case "refused name":
+			parts[i] = s.Name + " (refused name, left out)"
+		case "refused value":
+			parts[i] = s.Name + " as " + s.Label + " (refused value: " + s.Why + ", left out)"
+		default:
+			parts[i] = s.Name + " as " + s.Label + " (" + s.State + ", left out)"
+		}
 	}
 	return strings.Join(parts, ", ")
 }

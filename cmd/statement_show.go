@@ -288,9 +288,11 @@ type explainJSON struct {
 	// UsageAtLaunch is whether a launch from here records usage through
 	// cpb's status line step, and why not (v4.8.0).
 	UsageAtLaunch usageAtLaunchJSON `json:"usage_at_launch"`
-	// LabelVars is the names a launch copies into launch labels: DEFAULTS',
-	// then the playbook's (v4.9.0). Last.
-	LabelVars []string `json:"label_vars"`
+	// LabelVars is what a launch from here would do with each name of
+	// label_vars, DEFAULTS' then the playbook's (v4.9.0): its name (by
+	// length when it is not a variable's name), its label, its state and,
+	// for a refused value, the kind. Last.
+	LabelVars []labelVarState `json:"label_vars"`
 }
 
 // usageAtLaunchJSON is EXPLAIN's word on the status line step.
@@ -499,7 +501,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	v.LabelVars = []string{}
 	if pb.Manifest != nil {
-		v.LabelVars = append(v.LabelVars, pb.Manifest.LabelVars...)
+		v.LabelVars = append(v.LabelVars, labelVarsShownList(pb.Manifest.LabelVars)...)
 	}
 	if pb.Manifest.ExcludesModelPickerDefaults() {
 		v.ModelPickerDefaults = manifest.ModelPickerDefaultsExcluded
@@ -964,7 +966,7 @@ func printLaunchPicker(pb *playbook.Playbook) {
 	}
 	fmt.Println(explainFailoverLine(explainFailover(pb)))
 	fmt.Println(explainUsage(pb).explainLine())
-	fmt.Println("Labels from the environment: " + labelVarsShown(explainLabelVars(pb)))
+	fmt.Println("Labels from the environment: " + labelVarStatesShown(explainLabelVars(pb)))
 }
 
 // printLaunchSandbox says where a launch runs and what its login is, when

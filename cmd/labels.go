@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -181,27 +182,103 @@ func validLabels(m map[string]string) bool {
 // label_vars (SPEC.md, "Session labels"): the exact names of environment
 // variables whose values a launch copies into launch labels, as
 // env.<name in lower case>. Only names the person listed, read once at
-// launch, each value checked as any label is.
+// launch, each value checked as any label is and more: a value from the
+// environment is not typed by the person who sees it, so a URL, a path and
+// an address are refused too.
 const labelVarsMax = 8
 
-var labelVarNameShape = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,27}$`)
+var (
+	labelVarNameShape = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,27}$`)
+	// labelVarWords refuse a name holding them: it may hold a credential.
+	labelVarWords = []string{"KEY", "COOKIE", "WEBHOOK", "DSN", "SALT", "SIGNING"}
+	// labelVarIdentities are names whose values say who or where someone
+	// is, whatever check a value passes.
+	labelVarIdentities = []string{"USER", "LOGNAME", "USERNAME", "HOSTNAME", "HOST", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GITHUB_ACTOR"}
+	urlShape  = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://`)
+	ipv4Shape = regexp.MustCompile(`(^|[^0-9.])[0-9]{1,3}(\.[0-9]{1,3}){3}($|[^0-9.])`)
+)
+
+// labelVarShowable reports whether a list entry may be shown as written: a
+// variable's name, not shaped like a credential. Any other entry is named
+// by its length only: what stands where a name goes may be a value.
+func labelVarShowable(n string) bool {
+	return labelVarNameShape.MatchString(n) && askRequestCredential(n) == ""
+}
+
+// labelVarShown is a list entry as SHOW, EXPLAIN and SELECT show it.
+func labelVarShown(n string) string {
+	if labelVarShowable(n) {
+		return n
+	}
+	return fmt.Sprintf("<an entry of %d characters>", utf8.RuneCountInString(n))
+}
 
 // labelVarNameProblem is why n cannot be a name of label_vars, "" when it
-// can: not a variable's exact name, cpb's own or an account's variable,
-// or a name that may hold a credential, whatever its value.
+// can: not a variable's exact name, shaped like a credential, cpb's own or
+// an account's variable, one that says who or where someone is, or a name
+// that may hold a credential, whatever its value.
 func labelVarNameProblem(n string) string {
 	if !labelVarNameShape.MatchString(n) {
-		// Not echoed: what stands where a name goes may be a value.
 		return fmt.Sprintf("an entry of %d characters is not an environment variable's exact name (letters, digits and '_', not starting with a digit, at most 28 characters; no pattern)", utf8.RuneCountInString(n))
+	}
+	if askRequestCredential(n) != "" {
+		return fmt.Sprintf("an entry of %d characters is shaped like a credential, not a variable's name", utf8.RuneCountInString(n))
 	}
 	up := strings.ToUpper(n)
 	if strings.HasPrefix(up, "CPB_") || up == "CLAUDE_CONFIG_DIR" || account.IsReserved(up) {
 		return n + " is cpb's own or an account's variable"
 	}
-	if manifest.LooksLikeSecretKey(n) || strings.Contains(up, "KEY") || strings.Contains(up, "COOKIE") || slices.Contains(strings.Split(up, "_"), "SESSION") {
+	if slices.Contains(labelVarIdentities, up) {
+		return n + " says who or where someone is"
+	}
+	if manifest.LooksLikeSecretKey(n) || slices.Contains(strings.Split(up, "_"), "SESSION") || slices.ContainsFunc(labelVarWords, func(w string) bool { return strings.Contains(up, w) }) {
 		return n + " names a variable that may hold a credential"
 	}
 	return ""
+}
+
+// labelVarValueProblem is why v, the value of the variable that gives the
+// label k, cannot be a label, "" when it can: a label's own rules, and a
+// URL, a path or an address, which a value typed with --label may hold. It
+// names a kind, never the value.
+func labelVarValueProblem(k, v string) string {
+	switch {
+	case urlShape.MatchString(v):
+		return "a URL"
+	case strings.HasPrefix(v, "/") || strings.HasPrefix(v, "~"):
+		return "a path"
+	case ipv4Shape.MatchString(v) || hasIPv6(v):
+		return "an address"
+	}
+	if p := labelProblem(k, v); p != "" {
+		switch {
+		case strings.Contains(p, "e-mail"):
+			return "an e-mail address"
+		case strings.Contains(p, "credential"):
+			return "a credential"
+		case strings.Contains(p, "plain visible text"):
+			return "not plain visible text"
+		}
+		return "not a label value (" + strings.SplitN(p, ";", 2)[0] + ")"
+	}
+	return ""
+}
+
+// hasIPv6 reports a word of v that is an IPv6 address, with or without a
+// zone, brackets or a port.
+func hasIPv6(v string) bool {
+	for _, w := range strings.FieldsFunc(v, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune("[],;=@/\"'", r) }) {
+		if i := strings.IndexByte(w, '%'); i > 0 {
+			w = w[:i]
+		}
+		if strings.Count(w, ":") >= 2 {
+			if ip := net.ParseIP(w); ip != nil && ip.To4() == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // checkLabelVars refuses a label_vars list: at most labelVarsMax names,
@@ -238,26 +315,31 @@ func splitLabelVars(v string) []string {
 	return out
 }
 
-// withLabelVars adds to typed (the --label labels) one label per name of
-// label_vars: DEFAULTS' first, then the playbook's, each name once. A
-// typed label of the same key wins. A name it does not take (a file
-// edited by hand), an unset variable, a value a label refuses, and a label
-// over the caps are left out, each named in the notes by its key, never
-// its value.
-func withLabelVars(typed map[string]string, names []string, lookup func(string) (string, bool)) (map[string]string, []string) {
+// labelVarState is what a launch does with one name of label_vars: Name
+// as it may be shown, Label the key it gives (none for a refused name),
+// State one of copied, unset, empty, typed (a --label of the key wins),
+// refused name, refused value and over the caps, and Why the kind of a
+// refused value. Never a value.
+type labelVarState struct {
+	Name  string `json:"name"`
+	Label string `json:"label,omitempty"`
+	State string `json:"state"`
+	Why   string `json:"why,omitempty"`
+}
+
+// labelVarsAt is the labels a launch takes: typed (the --label labels) and
+// one label per name of label_vars, DEFAULTS' first, then the playbook's,
+// each name once, with what it did with each name.
+func labelVarsAt(typed map[string]string, names []string, lookup func(string) (string, bool)) (map[string]string, []labelVarState) {
 	out := map[string]string{}
 	for k, v := range typed {
 		out[k] = v
 	}
-	var notes []string
+	var states []labelVarState
 	done := map[string]bool{}
 	for _, n := range names {
 		if labelVarNameProblem(n) != "" {
-			if labelVarNameShape.MatchString(n) {
-				notes = append(notes, strings.ToLower(n)+" (not a name label_vars takes)")
-			} else {
-				notes = append(notes, fmt.Sprintf("an entry of %d characters (not a name label_vars takes)", utf8.RuneCountInString(n)))
-			}
+			states = append(states, labelVarState{Name: labelVarShown(n), State: "refused name"})
 			continue
 		}
 		k := labelVarKey(n)
@@ -265,32 +347,55 @@ func withLabelVars(typed map[string]string, names []string, lookup func(string) 
 			continue
 		}
 		done[k] = true
-		if _, ok := typed[k]; ok {
-			continue
-		}
+		st := labelVarState{Name: n, Label: k}
 		v, ok := lookup(n)
-		if !ok {
-			notes = append(notes, k+" (unset)")
-			continue
+		switch _, isTyped := typed[k]; {
+		case isTyped:
+			st.State = "typed"
+		case !ok:
+			st.State = "unset"
+		case v == "":
+			st.State = "empty"
+		default:
+			if p := labelVarValueProblem(k, v); p != "" {
+				st.State, st.Why = "refused value", p
+				break
+			}
+			out[k] = v
+			st.State = "copied"
+			if checkLabelSet(out) != nil {
+				delete(out, k)
+				st.State = "over the caps"
+			}
 		}
-		if v == "" {
-			notes = append(notes, k+" (empty)")
-			continue
-		}
-		if p := labelProblem(k, v); p != "" {
-			notes = append(notes, k+" (the value "+p+")")
-			continue
-		}
-		out[k] = v
-		if checkLabelSet(out) != nil {
-			delete(out, k)
-			notes = append(notes, k+" (over the label caps)")
-		}
+		states = append(states, st)
 	}
 	if len(out) == 0 {
 		out = nil
 	}
-	return out, notes
+	return out, states
+}
+
+// labelVarsLeftOut is the launch's one line on what it left out: a refused
+// name, a refused value (by kind) or a label over the caps, by key, never
+// by value; "" when nothing was. An unset or empty variable is normal and
+// says nothing.
+func labelVarsLeftOut(states []labelVarState) string {
+	var parts []string
+	for _, s := range states {
+		switch s.State {
+		case "refused name":
+			parts = append(parts, s.Name+" (not a name label_vars takes)")
+		case "refused value":
+			parts = append(parts, s.Label+" (the value is "+s.Why+")")
+		case "over the caps":
+			parts = append(parts, s.Label+" (over the label caps)")
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "cpb: label_vars left out: " + strings.Join(parts, ", ")
 }
 
 // launchLabelsOf is the launch labels the tokens give: each --label, a

@@ -35,8 +35,9 @@ same hook works under plain `claude`.
 whose values a launch copies into launch labels, as `env.<name>`: here
 `tagged` gets `env.term_program`. Only names you list are read, set on a
 playbook or on DEFAULTS. A name that may hold a credential (`GITHUB_TOKEN`)
-is refused when the list is set, and a variable that is unset at launch is
-left out, the launch saying so by key.
+or says who you are (`USER`) is refused when the list is set. A variable
+that is unset at launch is left out quietly; a value that is a URL, a path
+or an address is refused, the launch saying so by key and kind.
 
 A label is printed on shared screens, so a value that looks like an e-mail
 address or a credential is refused, as is a control or invisible character.

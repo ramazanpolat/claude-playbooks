@@ -47,6 +47,9 @@ func noteStartIgnoresOverride(dirShown string) {
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
+	// Labels are read once per launch (label_vars.go).
+	runLabels.set, runLabels.labels = false, nil
+	defer func() { runLabels.set, runLabels.labels = false, nil }()
 	// start addresses a path, not a registry name, but the playbooks-dir
 	// value still names the root whose .env-sets/ the path's manifest
 	// may reference, so it is applied to this process exactly as run does

@@ -121,6 +121,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// failover.go); cpb run stops catching it when it returns, whatever
 	// happened.
 	defer releaseHandover()
+	// The run's labels are read by its first launch and carried by every
+	// relaunch (label_vars.go).
+	runLabels.set, runLabels.labels = false, nil
+	defer func() { runLabels.set, runLabels.labels = false, nil }()
 	err := runRunOnce(cmd, args)
 	for {
 		var rl *failoverRelaunch

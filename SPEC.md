@@ -3067,31 +3067,47 @@ cpb "ALTER PLAYBOOK reviewer SET label_vars = ['HC_TERMINAL_ID']" # this playboo
   - **Only names listed.** A name is a variable's exact name (letters,
     digits and `_`, not starting with a digit, at most 28 characters): no
     pattern, no prefix, no "all". At most 8 in each list, none twice in any
-    case. Refused when the list is set, whatever the value: cpb's own
-    (`CPB_*`, `CLAUDE_CONFIG_DIR`) and an account's variables, and a name
-    that may hold a credential (one *Secrets* masks: `TOKEN`, `SECRET`,
-    `PASSWORD`, `AUTH`, a `*KEY` segment and the rest; also any name holding
-    `KEY` or `COOKIE`, or with a `SESSION` segment).
-  - **Read once at launch,** where the launch runs, from the environment
-    cpb itself was started with, before any layer: DEFAULTS' names, then
-    the playbook's that DEFAULTS does not list. A `--label` of the same key
-    wins. A plain directory (`cpb start`) takes DEFAULTS' only.
-  - **Each value is checked as any label is,** with its key `env.<name>`
-    and the same refusals. A variable that is unset or empty, a value a
-    label refuses, a label over the caps, and a name a statement would
-    refuse (a file edited by hand) are left out, and the launch says so in
-    one line on stderr, naming each key and never a value (an entry that is
-    not a variable's name is named by its length):
-    `cpb: label_vars left out: env.term_program (unset)`. A refused name in
-    a statement is likewise named by its length when it is not a
-    variable's name.
+    case. Refused when the list is set, whatever the value:
+    - cpb's own (`CPB_*`, `CLAUDE_CONFIG_DIR`) and an account's variables;
+    - a name that may hold a credential: one *Secrets* masks (`TOKEN`,
+      `SECRET`, `PASSWORD`, `AUTH`, a `*KEY` segment and the rest), any name
+      holding `KEY`, `COOKIE`, `WEBHOOK`, `DSN`, `SALT` or `SIGNING`, or
+      with a `SESSION` segment, and a name shaped like a credential (a key
+      id);
+    - a name whose value says who or where someone is, whatever the value:
+      `USER`, `LOGNAME`, `USERNAME`, `HOSTNAME`, `HOST`, `GIT_AUTHOR_NAME`,
+      `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`,
+      `GITHUB_ACTOR`.
+    An entry that is not a variable's name, or is shaped like a credential,
+    is named by its length only, in a refusal and wherever a stored list is
+    shown (a file edited by hand): `<an entry of 29 characters>`.
+  - **Read once per run,** where the launch runs, from the environment cpb
+    itself was started with, before any layer: DEFAULTS' names, then the
+    playbook's that DEFAULTS does not list. A `--label` of the same key
+    wins. A plain directory (`cpb start`) takes DEFAULTS' only. The failover
+    relaunch and the way back carry the launch's labels: they read neither
+    `label_vars` nor the environment again.
+  - **Each value is checked as any label is,** with its key `env.<name>`,
+    and more, since nobody typed it: a URL of any scheme, a path (starting
+    with `/` or `~`) and an IPv4 or IPv6 address are refused too. A label
+    typed with `--label` keeps the label rules alone. A variable that is
+    unset or empty is left out and says nothing. A refused value, a label
+    over the caps and a name no statement would set (a file edited by
+    hand) are left out, and the launch says so in one line on stderr, by
+    key and the kind of refusal, never a value:
+    `cpb: label_vars left out: env.hc_terminal_id (the value is a URL)`.
   - **Install-local,** as `failover` is: `CREATE … FROM` ignores a source
     manifest's `label_vars` with a note, `cpb update` keeps the installed
     one, and a played recipe may not set it.
   - `SHOW PLAYBOOK` and `SHOW DEFAULTS` show it (`label_vars` in `--json`),
-    `EXPLAIN PLAYBOOK` says which names a launch copies (`Labels from the
-    environment:`; `--json` `label_vars`), `SHOW CREATE` writes it back,
-    and `SELECT` has a `label_vars` column in `PLAYBOOKS` and `DEFAULTS`.
+    `SHOW CREATE` writes it back, and `SELECT` has a `label_vars` column in
+    `PLAYBOOKS` and `DEFAULTS`. `EXPLAIN PLAYBOOK` says what a launch from
+    here would do with each name, read from this environment (`Labels from
+    the environment: TERM_PROGRAM as env.term_program, GIT_BRANCH as
+    env.git_branch (unset, left out)`; `--json` `label_vars`, one object
+    per name: `name`, `label`, `state` (`copied`, `unset`, `empty`,
+    `refused name`, `refused value`, `over the caps`) and, for a refused
+    value, `why`, its kind), never a value.
 - **Session labels** are claims made from inside a live session, by a hook
   (a `SessionStart` hook setting `task=<name>`) or a tool:
 

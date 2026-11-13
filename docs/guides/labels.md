@@ -53,19 +53,28 @@ cpb "ALTER PLAYBOOK reviewer RESET label_vars"
 ```
 
 - **Only the names you list.** Exact names, no patterns, at most 8 in each
-  list. cpb refuses, when you set the list, its own variables and an
-  account's, and any name that may hold a credential (`GITHUB_TOKEN`,
-  `API_KEY`, `DB_PASSWORD`, a name with `KEY`, `COOKIE` or a `SESSION`
-  part), whatever the value.
-- **Read once, at launch,** from the environment you launched cpb in. A
-  `--label` of the same key wins.
-- **Checked like any label.** A value that looks like an e-mail address or
-  a credential, an unset variable, and a label over the caps are left out,
-  and the launch says so in one line, by key:
-  `cpb: label_vars left out: env.hc_terminal_id (unset)`.
+  list. When you set the list, cpb refuses, whatever the value:
+  - its own variables and an account's;
+  - any name that may hold a credential (`GITHUB_TOKEN`, `API_KEY`,
+    `DB_PASSWORD`, `SLACK_WEBHOOK`, `DATABASE_DSN`, a name with `KEY`,
+    `COOKIE`, `SALT`, `SIGNING` or a `SESSION` part, or shaped like a key);
+  - a name that says who or where you are: `USER`, `LOGNAME`, `USERNAME`,
+    `HOSTNAME`, `HOST`, the `GIT_AUTHOR_*` and `GIT_COMMITTER_*` names, and
+    `GITHUB_ACTOR`.
+- **Read once per run,** from the environment you launched cpb in. A
+  `--label` of the same key wins. When failover moves the session to
+  another account, the relaunch keeps the labels the launch read.
+- **Checked more than a typed label.** Nobody typed these values, so
+  besides what any label refuses (an e-mail address, a credential,
+  invisible characters), a URL, a path and an address are refused too.
+  The launch says so in one line, by key and kind, never by value:
+  `cpb: label_vars left out: env.hc_terminal_id (the value is a URL)`. An
+  unset or empty variable is left out quietly.
 - **Yours, on this machine.** An installed or played playbook never brings
   its own `label_vars`, and `cpb update` keeps yours.
-- `EXPLAIN PLAYBOOK <name>` shows which names a launch copies.
+- `EXPLAIN PLAYBOOK <name>` shows, for each name, the label it gives and
+  what a launch from here would do with it: copy it, or leave it out
+  (unset, a refused name, a refused value and its kind).
 
 ## From a hook
 
