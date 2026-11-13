@@ -267,7 +267,8 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	// lock, and a source-shipped [env] block that was live even briefly --
 	// or permanently, had a later rewrite failed -- could redirect the
 	// install's endpoint or strip its authentication. Install-local fields
-	// (alias, isolation, the model_picker_defaults opt-out, failover, source, [env],
+	// (alias, isolation, the model_picker_defaults opt-out, failover,
+	// label_vars, source, [env],
 	// and the [mcp] and [skills] records
 	// statements keep) come from the live manifest; the
 	// install's name is its directory name (this also heals installs whose
@@ -283,6 +284,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		updated.IsolatedLogin = liveManifest.IsolatedLogin
 		updated.ModelPickerDefaults = liveManifest.ModelPickerDefaults
 		updated.Failover = liveManifest.Failover
+		updated.LabelVars = liveManifest.LabelVars
 		updated.Source = liveManifest.Source
 		updated.Env = liveManifest.Env
 		updated.Sandbox = liveManifest.Sandbox

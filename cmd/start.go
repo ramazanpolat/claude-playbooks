@@ -47,6 +47,9 @@ func noteStartIgnoresOverride(dirShown string) {
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
+	// Labels are read once per launch (label_vars.go).
+	runLabels.set, runLabels.labels = false, nil
+	defer func() { runLabels.set, runLabels.labels = false, nil }()
 	// start addresses a path, not a registry name, but the playbooks-dir
 	// value still names the root whose .env-sets/ the path's manifest
 	// may reference, so it is applied to this process exactly as run does
@@ -292,7 +295,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	rec := newLaunchRecord(absPath, absPath, acct.sel)
-	rec.Labels = launchLabelsOf(tokens)
+	// A plain directory takes DEFAULTS' label_vars only: label_vars is a
+	// playbook's property.
+	if rec.Labels, err = launchLabels(config.ResolvePlaybooksDir(), nil, tokens); err != nil {
+		return err
+	}
 	acct.statusline = statuslineStepFor(config.ResolvePlaybooksDir(), absPath, wd, rec.LaunchID, claudeArgs).wrapped
 	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), withPlaybooksRoot(launchEnv))
 	c.Stdin = os.Stdin

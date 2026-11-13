@@ -270,6 +270,12 @@ tr -d ' \n' < "$HOME/lb-sessions.json" | grep -qF "$want" || { echo sessions-wro
 cpb --playbooks-dir "$HOME/lbroot" CREATE PLAYBOOK lbo SET launcher = '' >/dev/null || exit 1
 cd "$HOME" && cpb --playbooks-dir lbroot run lbo >/dev/null 2>&1 || { echo root-run-failed; exit 1; }
 grep -qx "CPB_PLAYBOOKS_DIR=$HOME/lbroot" "$HOME/claude-env" || { echo root-not-handed; exit 1; }
+cpb "ALTER PLAYBOOK lbp SET label_vars = ['LB_TAG']" >/dev/null || { echo label-vars-set-failed; exit 1; }
+cpb "ALTER PLAYBOOK lbp SET label_vars = ['GITHUB_TOKEN']" 2>/dev/null && { echo credential-name-taken; exit 1; }
+cd "$HOME/lbwork" && LB_TAG=nightly PATH="$H:$PATH" cpb run lbp >/dev/null 2>&1 || { echo vars-run-failed; exit 1; }
+grep -qF '"launch":{"env.lb_tag":"nightly"}' "$HOME/lb.in" || { echo label-vars-wrong; cat "$HOME/lb.in"; exit 1; }
+env -u LB_TAG PATH="$H:$PATH" cpb run lbp 2> "$HOME/lbv.err" >/dev/null; ! grep -q label_vars "$HOME/lbv.err" || { echo unset-said-something; exit 1; }
+LB_TAG=https://example.com/hook PATH="$H:$PATH" cpb run lbp 2> "$HOME/lbv.err" >/dev/null; grep -qF "label_vars left out: env.lb_tag (the value is a URL)" "$HOME/lbv.err" && ! grep -q example.com "$HOME/lbv.err" || { echo url-note-wrong; exit 1; }
 echo labels-ok'''
 contains = "labels-ok"
 

@@ -121,6 +121,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// failover.go); cpb run stops catching it when it returns, whatever
 	// happened.
 	defer releaseHandover()
+	// The run's labels are read by its first launch and carried by every
+	// relaunch (label_vars.go).
+	runLabels.set, runLabels.labels = false, nil
+	defer func() { runLabels.set, runLabels.labels = false, nil }()
 	err := runRunOnce(cmd, args)
 	for {
 		var rl *failoverRelaunch
@@ -569,7 +573,9 @@ func runRunOnce(cmd *cobra.Command, args []string) error {
 	}
 
 	rec := newLaunchRecord(pb.Name, configDir, acct.sel)
-	rec.Labels = launchLabelsOf(tokens)
+	if rec.Labels, err = launchLabels(config.ResolvePlaybooksDir(), pb.Manifest, tokens); err != nil {
+		return err
+	}
 	if !override {
 		acct.statusline = statuslineStepFor(config.ResolvePlaybooksDir(), configDir, wd, rec.LaunchID, claudeArgs).wrapped
 	}

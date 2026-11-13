@@ -6,6 +6,7 @@ cpb run --label name=review-auth agent       # a launch label, fixed at launch
 cpb session label task=triage                # from inside the session: a hook or a tool
 cpb session label --list
 cpb SHOW SESSIONS                            # the last column, LABELS, shows them
+cpb "ALTER PLAYBOOK tagged SET label_vars = ['TERM_PROGRAM']"   # a variable's value as env.term_program
 ```
 
 A session carries short `key=value` labels, from two sources kept apart:
@@ -29,6 +30,14 @@ A hook that labels each session with its folder's name, in a playbook's
 
 `|| [ $? -eq 3 ]` ignores exactly "not in a session cpb launched", so the
 same hook works under plain `claude`.
+
+**From the environment.** `label_vars` lists the exact names of variables
+whose values a launch copies into launch labels, as `env.<name>`: here
+`tagged` gets `env.term_program`. Only names you list are read, set on a
+playbook or on DEFAULTS. A name that may hold a credential (`GITHUB_TOKEN`)
+or says who you are (`USER`) is refused when the list is set. A variable
+that is unset at launch is left out quietly; a value that is a URL, a path
+or an address is refused, the launch saying so by key and kind.
 
 A label is printed on shared screens, so a value that looks like an e-mail
 address or a credential is refused, as is a control or invisible character.

@@ -147,7 +147,7 @@ origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a sourc
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, global_instructions, model, agent, sandbox.<key>,
                                            statusline.command, statusline.refresh, model_picker.mode,
-                                           model_picker_defaults
+                                           model_picker_defaults, failover, label_vars
                                            see "Playbook properties"
 value      := '<string>' | <word> | <integer> | true | false | [ '<string>', ... ] | '<item>,<item>'
                                            a one-word value bare or quoted; a list also comma-joined
@@ -174,6 +174,9 @@ defaults-clause := set-clause
             | SET failover = 'off' | 'on', failover_accounts = ['<account>', ...],
                   failover_max_context = <tokens>   account failover (see Account failover)
             | RESET failover, failover_accounts, failover_max_context
+            | SET label_vars = ['<NAME>', ...]   launch labels from the environment
+                                           (see Session labels)
+            | RESET label_vars
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
                                            a row every launch offers; see "Model picker"
             | DROP MODEL '<id>'
@@ -314,6 +317,8 @@ stores commands; files store the result.
 | `ALTER DEFAULTS SET / RESET secret_helper` | `<root>/.env-sets/.secret-helper`, one line: the command |
 | `ALTER DEFAULTS SET / RESET failover, failover_accounts, failover_max_context` | `<root>/.env-sets/.failover`, TOML (`failover`, `accounts`, `max_context`), mode `0600`; removed when nothing is set |
 | `ALTER PLAYBOOK … SET failover` | the playbook's `.playbook`, `failover = "on"` or `"off"` (none for `'inherited'`) |
+| `ALTER DEFAULTS SET / RESET label_vars` | `<root>/.env-sets/.label_vars`, TOML (`names`), mode `0600`; removed when empty |
+| `ALTER PLAYBOOK … SET label_vars` | the playbook's `.playbook`, `label_vars = [...]` (none when empty) |
 | `CREATE / ALTER / DROP ACCOUNT` | `<root>/.accounts/<name>.toml` |
 | `ALTER PLAYBOOK … USE ACCOUNT` | the playbook's `.playbook`, `[env] accounts = [...]` |
 | `ALTER DEFAULTS USE ACCOUNT` | `<root>/.accounts/.default`, one name |
@@ -1485,13 +1490,15 @@ ALTER PLAYBOOK <name> RESET login, global_instructions       -- back to the defa
 | `statusline.refresh` | whole seconds, at least 1 | none | `statusLine.refreshInterval` |
 | `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `RESET model_picker` is the mode too: the rows are a collection, which `DROP MODEL` empties |
 | `failover` | `'inherited'`, `'on'`, `'off'` | `'inherited'` | Whether a launch moves its session to another account at a usage limit (see *Account failover*); `'inherited'` follows DEFAULTS' `failover`. The manifest's `failover`, written only when `'on'` or `'off'`. `CREATE … FROM` ignores a source manifest's, as it ignores `[env]`; `cpb update` keeps the installed one. A plain directory refuses it |
+| `label_vars` | a list of environment variable names, `['TERM_PROGRAM', 'HC_TERMINAL_ID']` | none | The variables whose values a launch copies into launch labels, after DEFAULTS' (see *Session labels*). The manifest's `label_vars`. Install-local, as `failover` is: `CREATE … FROM` ignores a source manifest's, `cpb update` keeps the installed one, a played recipe may not set it. A plain directory refuses it |
 | `model_picker_defaults` | `'inherited'`, `'excluded'` | `'inherited'` | Whether the playbook's launches offer the DEFAULTS model rows (see *Model picker*); the manifest's `model_picker_defaults`, written only when `'excluded'`. A key of its own: `RESET model_picker` stays the mode. A plain directory has no manifest and refuses it, as it refuses `login` |
 
 `DEFAULTS` has the property `secret_helper` (`ALTER DEFAULTS SET
 secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*), and
 `failover` (`'off'` or `'on'`), `failover_accounts` (a list, `['a', 'b
 (any provider)']`) and `failover_max_context` (a whole number of tokens),
-each removed by `RESET` (see *Account failover*).
+each removed by `RESET` (see *Account failover*), and `label_vars` (a list
+of environment variable names; see *Session labels*).
 
 - **The form.** A pair is one word (`global_instructions='inherited'`) or three
   (`global_instructions = 'inherited'`); pairs are separated by commas, which may be left
@@ -2409,7 +2416,8 @@ a, b`, with `at most <n> tokens of context` when capped). `--json`:
 {"envs": ["claude-default", "corp-proxy"], "account": "mine",
  "secret_helper": "my-keychain-helper", "secret_helper_from": "setting",
  "model_picker": {"options": [{"model": "fable", "label": "Fable (newest)", "description": null, "behaves_as": null}]},
- "failover": "on", "failover_accounts": ["claude-work", "claude-home"], "failover_max_context": null}
+ "failover": "on", "failover_accounts": ["claude-work", "claude-home"], "failover_max_context": null,
+ "label_vars": ["TERM_PROGRAM"]}
 ```
 
 (`account` is null when `DEFAULTS` names none; `secret_helper` and
@@ -2758,6 +2766,7 @@ code to the same lines):
 | `accounts` | `Array(String)` | The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook. |
 | `account` | `Nullable(String)` | The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why). |
 | `failover` | `String` | The failover property: inherited (DEFAULTS' failover decides), on or off. |
+| `label_vars` | `Array(String)` | The label_vars property: environment variables whose values a launch copies into launch labels (env.<name>), after DEFAULTS'. |
 
 **`ENVS`**
 
@@ -2836,6 +2845,7 @@ code to the same lines):
 | `failover` | `String` | Account failover for every playbook whose failover is inherited: off or on. |
 | `failover_accounts` | `Array(String)` | The accounts a session at a usage limit moves to, in order; an entry marked (any provider) may take a session from another kind of account. |
 | `failover_max_context` | `Nullable(Int64)` | The largest context, in tokens, a session may have to be moved; null for no cap. |
+| `label_vars` | `Array(String)` | Environment variables whose values every launch copies into launch labels (env.<name>), before a playbook's own. |
 
 ## SHOW SESSIONS
 
@@ -3045,6 +3055,61 @@ sources kept apart:
   sandbox host, so a refused one is neither printed nor handed to ssh. A
   launch in a local sandbox takes them and records nothing, as it records
   no account.
+- **Launch labels from the environment** (`label_vars`): the exact names of
+  environment variables whose values a launch copies into launch labels,
+  each as `env.<name in lower case>`:
+
+```
+cpb "ALTER DEFAULTS SET label_vars = ['TERM_PROGRAM']"          # every launch
+cpb "ALTER PLAYBOOK reviewer SET label_vars = ['HC_TERMINAL_ID']" # this playbook's, after DEFAULTS'
+```
+
+  - **Only names listed.** A name is a variable's exact name (letters,
+    digits and `_`, not starting with a digit, at most 28 characters): no
+    pattern, no prefix, no "all". At most 8 in each list, none twice in any
+    case. Each entry is taken as written: one with spaces around it, or an
+    empty one, is refused, never trimmed or dropped. Refused when the list
+    is set, whatever the value:
+    - cpb's own (`CPB_*`, `CLAUDE_CONFIG_DIR`) and an account's variables;
+    - a name that may hold a credential: one *Secrets* masks (`TOKEN`,
+      `SECRET`, `PASSWORD`, `AUTH`, a `*KEY` segment and the rest), any name
+      holding `KEY`, `COOKIE`, `WEBHOOK`, `DSN`, `SALT` or `SIGNING`, or
+      with a `SESSION` segment, and a name shaped like a credential (a key
+      id);
+    - a name whose value says who or where someone is, whatever the value:
+      `USER`, `LOGNAME`, `USERNAME`, `HOSTNAME`, `HOST`, `GIT_AUTHOR_NAME`,
+      `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`,
+      `GITHUB_ACTOR`.
+    An entry that is not a variable's name, or is shaped like a credential,
+    is named by its length only, in a refusal and wherever a stored list is
+    shown (a file edited by hand): `<an entry of 29 characters>`.
+  - **Read once per run,** where the launch runs, from the environment cpb
+    itself was started with, before any layer: DEFAULTS' names, then the
+    playbook's that DEFAULTS does not list. A `--label` of the same key
+    wins. A plain directory (`cpb start`) takes DEFAULTS' only. The failover
+    relaunch and the way back carry the launch's labels: they read neither
+    `label_vars` nor the environment again.
+  - **Each value is checked as any label is,** with its key `env.<name>`,
+    and more, since nobody typed it: a URL of any scheme, a path (starting
+    with `/` or `~`) and an IPv4 or IPv6 address are refused too. A label
+    typed with `--label` keeps the label rules alone. A variable that is
+    unset or empty is left out and says nothing. A refused value, a label
+    over the caps and a name no statement would set (a file edited by
+    hand) are left out, and the launch says so in one line on stderr, by
+    key and the kind of refusal, never a value:
+    `cpb: label_vars left out: env.hc_terminal_id (the value is a URL)`.
+  - **Install-local,** as `failover` is: `CREATE … FROM` ignores a source
+    manifest's `label_vars` with a note, `cpb update` keeps the installed
+    one, and a played recipe may not set it.
+  - `SHOW PLAYBOOK` and `SHOW DEFAULTS` show it (`label_vars` in `--json`),
+    `SHOW CREATE` writes it back, and `SELECT` has a `label_vars` column in
+    `PLAYBOOKS` and `DEFAULTS`. `EXPLAIN PLAYBOOK` says what a launch from
+    here would do with each name, read from this environment (`Labels from
+    the environment: TERM_PROGRAM as env.term_program, GIT_BRANCH as
+    env.git_branch (unset, left out)`; `--json` `label_vars`, one object
+    per name: `name`, `label`, `state` (`copied`, `unset`, `empty`,
+    `refused name`, `refused value`, `over the caps`) and, for a refused
+    value, `why`, its kind), never a value.
 - **Session labels** are claims made from inside a live session, by a hook
   (a `SessionStart` hook setting `task=<name>`) or a tool:
 
@@ -3107,8 +3172,8 @@ A label is printed on shared screens and written to the usage log, so
 nothing goes in one that does not belong there: no secret, no login
 identity, no home path, host name, address or repository URL with a
 credential, no prompt text. cpb refuses what it can recognise (above); the
-rest is for whoever sets the label. A label is never taken from the
-environment. A labels file or a launch record holding a label cpb would
+rest is for whoever sets the label. A label is taken from the environment
+only through `label_vars`, for the names listed there. A labels file or a launch record holding a label cpb would
 refuse, or of another shape, is not read.
 
 **Where they show.** The status line's `cpb` key (`labels`; *The usage
@@ -3216,7 +3281,7 @@ CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
   SET launcher = 'w', login = 'isolated', global_instructions = 'excluded'
-  RESET sandbox, model, agent, statusline, model_picker.mode, model_picker_defaults, failover
+  RESET sandbox, model, agent, statusline, model_picker.mode, model_picker_defaults, failover, label_vars
   USE ENV tracing
   USE ACCOUNT router;
 

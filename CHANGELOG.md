@@ -29,11 +29,30 @@
     an e-mail address, and a credential, judged on key and value together
     as `cpb ask` judges a request (`password=…`, `key=main`; a hash after
     `commit=` is fine), are refused, with a message naming a valid key and
-    never a value. Labels are never taken from the environment.
+    never a value. A label is taken from the environment only through
+    `label_vars` (below), for the names listed.
   - A launch whose playbooks root came from `--playbooks-dir` sets
     `CPB_PLAYBOOKS_DIR` (absolute) in the session, replacing an inherited
     one, so a cpb inside it uses the same root.
   - Guide: `docs/guides/labels.md`; example `29-labels`.
+- **`label_vars`**, a PLAYBOOK and a DEFAULTS property: the exact names of
+  environment variables whose values a launch copies into launch labels,
+  as `env.<name in lower case>` (DEFAULTS' names first, then the
+  playbook's), read once per run: the failover relaunch keeps the
+  launch's labels. At most 8 names in each list, no patterns. Refused when
+  the list is set: a name that is cpb's own or an account's, one that may
+  hold a credential (`TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `WEBHOOK`,
+  `DSN`, `SALT`, `SIGNING` and the rest, or shaped like a key), and one
+  that says who or where someone is (`USER`, `HOSTNAME`, the git author
+  and committer names, `GITHUB_ACTOR` and the like). Each value is checked
+  as any label is, and a URL, a path or an address is refused too. A
+  refused value is left out and the launch says so in one line on stderr,
+  by key and kind, never by value; an unset variable is left out quietly.
+  An entry that is not a variable's name is shown by its length only.
+  Install-local: an install ignores a source's, `cpb update` keeps the
+  installed one, and a played recipe may not set it. `SHOW PLAYBOOK`,
+  `SHOW DEFAULTS`, `SHOW CREATE` and `SELECT` (`PLAYBOOKS`, `DEFAULTS`)
+  show it, and `EXPLAIN` says for each name what a launch would do.
 - **A provider that speaks only the OpenAI API** (docs only, no change to
   cpb): a guide and an example for running Claude Code on such a provider
   through a translator on your machine, with Venice.ai through LiteLLM as
