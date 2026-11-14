@@ -1,6 +1,6 @@
 # Changelog
 
-## [v4.9.0] -- 2026-11-14
+## [v4.9.0] -- 2026-11-15
 
 v4.9.0 lets each session say what it is. A session carries short
 `key=value` labels: given at launch with `--label`, copied from the
