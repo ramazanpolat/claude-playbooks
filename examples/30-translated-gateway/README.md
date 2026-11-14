@@ -31,9 +31,14 @@ claude ── Messages ──▶ translator, 127.0.0.1:4100 ── chat completi
 - **The provider's own model names**: each tier (`opus_model`,
   `sonnet_model`, `haiku_model`) is an id the translator serves. Claude Code's
   background requests use the haiku tier.
+- **One command.** `translator/session.sh` starts the translator when none
+  runs, runs `venice-agent` with every argument passed on, and stops the
+  translator it started when the session ends; one started by hand is left
+  running.
 
-In this check no translator runs: `.setup` writes a placeholder token, and
-the stand-in claude records what a launch would send.
+In this check no translator runs: `.setup` writes a placeholder token, the
+stand-in claude records what a launch would send, and `translator/session.sh`
+runs against a stand-in translator (a local port and the token).
 
 Reference: [CREATE / ALTER / DROP ACCOUNT](../../SPEC.md#create--alter--drop-account);
 guide: [A provider that speaks only the OpenAI API](../../docs/guides/openai-compatible-provider.md).
