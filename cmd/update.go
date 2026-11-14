@@ -475,7 +475,7 @@ func overlayView(work string) (string, func(), error) {
 type updateCompare struct {
 	root      string
 	skip      map[string]bool
-	preserved []os.FileInfo
+	preserved []preservedEntry
 	ancestors map[string]bool
 	// gitURL: the staged tree is cpb's own fresh clone, whose .git is
 	// compared by the commit its HEAD names (gitHead). A local source's
@@ -492,7 +492,7 @@ func newUpdateCompare(root string, preserve, skills []string, gitURL bool) *upda
 		p = filepath.ToSlash(p)
 		c.skip[p] = true
 		if fi, err := os.Lstat(filepath.Join(root, filepath.FromSlash(p))); err == nil {
-			c.preserved = append(c.preserved, fi)
+			c.preserved = append(c.preserved, preservedEntry{rel: p, info: fi})
 		}
 		for i := 0; i < len(p); i++ {
 			if p[i] == '/' {
@@ -506,14 +506,21 @@ func newUpdateCompare(root string, preserve, skills []string, gitURL bool) *upda
 	return c
 }
 
+// preservedEntry is a preserved path, as the preserve list spells it, and
+// the install's entry at it.
+type preservedEntry struct {
+	rel  string
+	info os.FileInfo
+}
+
 // leftOut reports whether rel is put back by the update: a skipped path,
-// or a preserved one under another spelling that the install's filesystem
-// takes for the same entry, as touchedEntry finds it after the overlay: a
-// case variant where case is ignored (Settings.json for settings.json), or
-// another Unicode form of the name where that is ignored too. Such a name
-// leads to the preserved file and is not listed in its folder as written.
-// A hard link under any name is listed, and is a file of its own, which
-// the update replaces.
+// or the entry of a preserved path under another spelling, as touchedEntry
+// finds it after the overlay. That is rel leading to the preserved file
+// while its folders do not list both names as written: on a filesystem
+// that ignores case, one entry answers to Settings.json and settings.json
+// and its folder lists one of them, whichever spelling it holds. A hard
+// link is listed under both names, on any filesystem, and is a file of its
+// own, which the update replaces.
 func (c *updateCompare) leftOut(rel string) bool {
 	if c.skip[rel] {
 		return true
@@ -527,9 +534,13 @@ func (c *updateCompare) leftOut(rel string) bool {
 		return false
 	}
 	for _, p := range c.preserved {
-		if os.SameFile(fi, p) {
-			return !listedAs(path)
+		if !os.SameFile(fi, p.info) {
+			continue
 		}
+		if listedAs(path) && listedAs(filepath.Join(c.root, filepath.FromSlash(p.rel))) {
+			continue // a file of its own
+		}
+		return true
 	}
 	return false
 }

@@ -271,3 +271,27 @@ func TestGitHeadRefusals(t *testing.T) {
 		t.Errorf("a loose ref that is a FIFO: %q", got)
 	}
 }
+
+// On a filesystem that ignores case, an install whose preserved
+// settings.json is spelled Settings.json, as the source ships it (an
+// install made from such a source, before its first update), keeps its
+// own: the dry run does not list it, and the update keeps its bytes.
+func TestUpdateDryRunPreservedFileSpelledAsTheSourceShipsIt(t *testing.T) {
+	installed, _ := migrateFixture(t, false)
+	if !caseInsensitive(t, installed) {
+		t.Skip("a filesystem that heeds case: Settings.json is another file")
+	}
+	source := filepath.Join(filepath.Dir(config.PlaybooksDir), "source")
+	writeRel(t, source, "Settings.json", `{"from":"source"}`)
+	writeRel(t, installed, "Settings.json", `{"mine":true}`)
+	if out := dryRunUpdate(t); strings.Contains(out, "Settings.json") {
+		t.Fatalf("the install's own Settings.json listed:\n%s", out)
+	}
+	updateNow(t)
+	if b, _ := os.ReadFile(filepath.Join(installed, "settings.json")); string(b) != `{"mine":true}` {
+		t.Fatalf("the update did not keep the install's own: %s", b)
+	}
+	if out := dryRunUpdate(t); !strings.Contains(out, "replaces:  nothing") {
+		t.Fatalf("after the update:\n%s", out)
+	}
+}
