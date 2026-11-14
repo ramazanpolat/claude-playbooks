@@ -34,3 +34,49 @@ if grep -rq --exclude-dir=.fake-claude 'placeholder-' "$p"; then echo "a token r
 sh -n translator/start.sh
 grep -E '^ *(api_key|master_key):' translator/litellm.yaml > "$HOME/keys.out"
 if grep -v 'os.environ/' "$HOME/keys.out"; then echo "a key is written in the configuration"; exit 1; fi
+# An instruction file left out with claudeMdExcludes: cpb keeps an entry it
+# did not write, beside its own, when the file is applied again.
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["claudeMdExcludes"].append("**/CLAUDE.local.md"); json.dump(d, open(p, "w"))' "$p/venice-agent/settings.json"
+cpb APPLY playbook.cpb --yes > "$HOME/reapply.out"
+python3 -c 'import json,sys; v=json.load(open(sys.argv[1]))["claudeMdExcludes"]; assert "**/CLAUDE.local.md" in v and len(v) == 2, v' "$p/venice-agent/settings.json"
+cpb SHOW PLAYBOOK venice-agent --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["global_instructions"] == "excluded", v'
+# translator/session.sh, against a stand-in translator that leaves what
+# start.sh leaves (the lock, the per-run token, a local port that answers):
+# it starts one when none runs, passes every argument on, and stops only the
+# one it started.
+sh -n translator/session.sh
+rm "$HOME/.config/cpb-secrets/translator-token"
+port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+cat > "$HOME/stand-in.sh" <<EOF
+#!/bin/sh
+dir="\$HOME/.local/share/translator"; token="\$HOME/.config/cpb-secrets/translator-token"
+mkdir -p "\$dir" && mkdir "\$dir/run.lock" && echo \$\$ > "\$dir/run.lock/pid" || exit 1
+trap 'rm -f "\$token"; rm -rf "\$dir/run.lock"' EXIT
+(umask 077 && printf '%s' stand-in-token > "\$token")
+python3 -m http.server --bind 127.0.0.1 --directory "\$dir" $port > /dev/null 2>&1 &
+child=\$!
+trap 'kill -TERM "\$child" 2>/dev/null' INT TERM
+wait "\$child"
+while kill -0 "\$child" 2>/dev/null; do wait "\$child"; done
+EOF
+chmod 755 "$HOME/stand-in.sh"
+export TRANSLATOR_START="$HOME/stand-in.sh" TRANSLATOR_HEALTH="http://127.0.0.1:$port/"
+translator/session.sh --model claude-haiku-5-5 2> "$HOME/session.err"
+grep -q 'starting the translator' "$HOME/session.err"
+grep -qx 'ANTHROPIC_AUTH_TOKEN=stand-in-token' "$env"
+grep -qx -- '--model' "$p/venice-agent/.fake-claude/launch-args"
+grep -qx 'claude-haiku-5-5' "$p/venice-agent/.fake-claude/launch-args"
+if curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH"; then echo "the translator it started still runs"; exit 1; fi
+test ! -e "$HOME/.config/cpb-secrets/translator-token"
+test ! -e "$HOME/.local/share/translator/run.lock"
+# A translator started by hand is used and left running.
+"$HOME/stand-in.sh" & hand=$!
+i=0; until curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH"; do i=$((i + 1)); [ "$i" -le 30 ]; sleep 1; done
+rm "$env"
+translator/session.sh 2> "$HOME/session.err"
+if grep -q 'starting the translator' "$HOME/session.err"; then echo "a second translator was started"; exit 1; fi
+grep -qx 'ANTHROPIC_AUTH_TOKEN=stand-in-token' "$env"
+curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH"
+test -s "$HOME/.config/cpb-secrets/translator-token"
+kill -TERM "$hand"; wait "$hand" || true
+test ! -e "$HOME/.config/cpb-secrets/translator-token"

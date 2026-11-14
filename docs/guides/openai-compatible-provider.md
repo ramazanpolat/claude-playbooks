@@ -28,10 +28,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://api.venice.ai/api/v1/me
 ## Before you start
 
 - **Everything goes to the provider**: the whole context, what the
-  playbook's `CLAUDE.md` holds, the files a session reads, tool output. Give
-  the provider a playbook of its own: the `CLAUDE.md` cpb writes imports
-  nothing, `login = 'isolated'` keeps your Claude login out, and a new
-  playbook keeps `~/.claude`'s instructions out
+  playbook's `CLAUDE.md` holds, the instruction files of the folder you
+  launch from ([below](#instruction-files-go-along)), the files a session
+  reads, tool output. Give the provider a playbook of its own: the
+  `CLAUDE.md` cpb writes imports nothing, `login = 'isolated'` keeps your
+  Claude login out, and a new playbook keeps `~/.claude`'s instructions out
   ([example 15](../../examples/15-third-party-route/)).
 - **It is pay per token.** Claude Code's background requests use the haiku
   tier: map it to a cheap model.
@@ -124,6 +125,65 @@ claude starts: the helper cannot resolve `file:translator-token`. cpb's last
 line names the account and says the local server behind it may not be
 running; whatever the helper itself suggests, the token is the script's to
 write.
+
+## 6. One command
+
+[`session.sh`](../../examples/30-translated-gateway/translator/session.sh),
+copied next to `start.sh` in step 1, does both in one terminal:
+
+```bash
+~/.local/share/translator/session.sh                          # cpb run venice-agent
+~/.local/share/translator/session.sh --model claude-haiku-5-5  # arguments pass on
+```
+
+- It starts the translator when none runs, with its output in
+  `translator.log` in the translator's folder, and waits until it answers.
+  Then it runs the playbook with every argument passed on.
+- When the session ends it stops the translator it started, and the
+  per-run token goes with it. A translator already running, started by hand
+  in another terminal, is used and left running.
+- Set `PLAYBOOK` in it (and `TOKENS` as in `start.sh`). For a translator
+  other than LiteLLM, set `HEALTH` to an address that answers once it is
+  ready. To type a short name instead, put it on your `PATH` under a name no
+  launcher uses.
+
+## Instruction files go along
+
+Claude Code puts instruction files into the context of every session, so
+they reach the provider with your prompts:
+
+- the playbook's own `CLAUDE.md`;
+- `CLAUDE.md` and `CLAUDE.local.md` in the folder you launch from and in
+  every folder above it, with whatever they import;
+- the same files in a folder below, once the session reads or edits a file
+  there;
+- `AGENTS.md` in the folder you launch from, when no `CLAUDE.md` or
+  `CLAUDE.local.md` loads from that folder or above it.
+
+`CLAUDE.local.md` is where people keep notes they do not share. Launch from
+a folder whose files may go to the provider, or leave files out with
+`claudeMdExcludes` in the playbook's `settings.json`: glob patterns,
+matched against each file's absolute path. cpb keeps the entries it did not
+write, beside its own `~/.claude` one (`global_instructions = 'excluded'`):
+
+```json
+{
+  "claudeMdExcludes": [
+    "/home/user/.claude/**",
+    "**/CLAUDE.local.md"
+  ]
+}
+```
+
+- An excluded `CLAUDE.local.md` counts as absent: launched from a folder
+  with an `AGENTS.md` and no `CLAUDE.md` there or above, the `AGENTS.md`
+  loads in its place. Add `"**/AGENTS.md"` to keep it out too.
+- Excluding stops only the automatic loading: the session can still read the
+  file like any other.
+
+Seen with Claude Code 2.1.325, against a local stand-in for the translator
+that recorded which files reached it ([Claude Code's memory
+documentation](https://code.claude.com/docs/en/memory) has the full rules).
 
 ## What to expect
 
