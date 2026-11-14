@@ -1,6 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [v4.9.0] -- 2026-11-14
+
+v4.9.0 lets each session say what it is. A session carries short
+`key=value` labels: given at launch with `--label`, copied from the
+environment variables `label_vars` lists (the terminal it runs in, a
+branch), or set from inside the session by a hook with `cpb session
+label`. The status line's `cpb` key, `SHOW SESSIONS` and the usage log show
+them. Each value is checked: a credential or an e-mail address never becomes
+a label, and a value copied from the environment is never a URL, a path or
+an address either. `cpb update --dry-run` now lists what an update would
+replace, entry by entry, and says `up to date` only when nothing would
+change. A guide shows how to run Claude Code on a provider that speaks only
+the OpenAI API, and fixes cover edges of v4.8.0's failover and usage step
+and a settings file that is a FIFO.
 
 ### Added
 
