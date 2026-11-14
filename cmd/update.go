@@ -460,9 +460,10 @@ func overlayView(work string) (string, func(), error) {
 // would write it (overlayView), with the install root. What the update
 // puts back after the overlay is left out on both sides, as the update
 // itself finds it:
-//   - the preserved paths, by spelling and, in the install, by file
-//     identity (touchedEntry's rule: on a case-insensitive filesystem a
-//     shipped Settings.json is the preserved settings.json);
+//   - the preserved paths, by spelling and, in the install, under another
+//     spelling the filesystem takes for the same entry (as touchedEntry
+//     finds it: on a case-insensitive filesystem a shipped Settings.json
+//     is the preserved settings.json; leftOut);
 //   - the folders a preserved path's restore creates when the source does
 //     not ship them, with nothing in them but what is put back;
 //   - skills/<name> for each [skills] record, which restoreSkills puts
@@ -474,7 +475,7 @@ func overlayView(work string) (string, func(), error) {
 type updateCompare struct {
 	root      string
 	skip      map[string]bool
-	preserved []os.FileInfo
+	preserved []preservedEntry
 	ancestors map[string]bool
 	// gitURL: the staged tree is cpb's own fresh clone, whose .git is
 	// compared by the commit its HEAD names (gitHead). A local source's
@@ -491,7 +492,7 @@ func newUpdateCompare(root string, preserve, skills []string, gitURL bool) *upda
 		p = filepath.ToSlash(p)
 		c.skip[p] = true
 		if fi, err := os.Lstat(filepath.Join(root, filepath.FromSlash(p))); err == nil {
-			c.preserved = append(c.preserved, fi)
+			c.preserved = append(c.preserved, preservedEntry{rel: p, info: fi})
 		}
 		for i := 0; i < len(p); i++ {
 			if p[i] == '/' {
@@ -505,9 +506,21 @@ func newUpdateCompare(root string, preserve, skills []string, gitURL bool) *upda
 	return c
 }
 
+// preservedEntry is a preserved path, as the preserve list spells it, and
+// the install's entry at it.
+type preservedEntry struct {
+	rel  string
+	info os.FileInfo
+}
+
 // leftOut reports whether rel is put back by the update: a skipped path,
-// or an install entry that is one of the preserved ones under another
-// spelling.
+// or the entry of a preserved path under another spelling, as touchedEntry
+// finds it after the overlay. That is rel leading to the preserved file
+// while its folders do not list both names as written: on a filesystem
+// that ignores case, one entry answers to Settings.json and settings.json
+// and its folder lists one of them, whichever spelling it holds. A hard
+// link is listed under both names, on any filesystem, and is a file of its
+// own, which the update replaces.
 func (c *updateCompare) leftOut(rel string) bool {
 	if c.skip[rel] {
 		return true
@@ -515,12 +528,34 @@ func (c *updateCompare) leftOut(rel string) bool {
 	if len(c.preserved) == 0 {
 		return false
 	}
-	fi, err := os.Lstat(filepath.Join(c.root, filepath.FromSlash(rel)))
+	path := filepath.Join(c.root, filepath.FromSlash(rel))
+	fi, err := os.Lstat(path)
 	if err != nil {
 		return false
 	}
 	for _, p := range c.preserved {
-		if os.SameFile(fi, p) {
+		if !os.SameFile(fi, p.info) {
+			continue
+		}
+		if listedAs(path) && listedAs(filepath.Join(c.root, filepath.FromSlash(p.rel))) {
+			continue // a file of its own
+		}
+		return true
+	}
+	return false
+}
+
+// listedAs reports whether path's folder lists an entry spelled exactly as
+// path's last element; true when the folder cannot be read, so the entry
+// is compared rather than left out.
+func listedAs(path string) bool {
+	ents, err := readDirNoFollow(filepath.Dir(path))
+	if err != nil {
+		return true
+	}
+	name := filepath.Base(path)
+	for _, e := range ents {
+		if e.Name() == name {
 			return true
 		}
 	}
