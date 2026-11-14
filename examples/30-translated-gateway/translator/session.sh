@@ -43,10 +43,10 @@ if ! up; then
     echo "a translator is starting (pid $pid); waiting for it" >&2
   else
     [ -x "$START" ] || { echo "no translator start script at $START" >&2; exit 1; }
-    umask 077
-    mkdir -p "$DIR"
     echo "starting the translator (log: $DIR/translator.log)" >&2
-    "$START" >>"$DIR/translator.log" 2>&1 &
+    # Owner-only files for the translator and its log; the session keeps the
+    # caller's umask.
+    (umask 077 && mkdir -p "$DIR" && exec "$START" >>"$DIR/translator.log" 2>&1) &
     started=$!
   fi
   i=0

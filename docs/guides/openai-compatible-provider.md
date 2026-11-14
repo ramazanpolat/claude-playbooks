@@ -155,10 +155,13 @@ they reach the provider with your prompts:
 - the playbook's own `CLAUDE.md`;
 - `CLAUDE.md` and `CLAUDE.local.md` in the folder you launch from and in
   every folder above it, with whatever they import;
-- the same files in a folder below, once the session reads or edits a file
-  there;
-- `AGENTS.md` in the folder you launch from, when no `CLAUDE.md` or
-  `CLAUDE.local.md` loads from that folder or above it.
+- `.claude/CLAUDE.md` and the `.claude/rules/` files without a `paths`
+  field, in the same folders;
+- every `AGENTS.md` and `.claude/AGENTS.md` in the folder you launch from
+  and in every folder above it, when no `CLAUDE.md`, `.claude/CLAUDE.md` or
+  `CLAUDE.local.md` loads from those folders;
+- the same kinds of files in a folder below, once the session works with a
+  file there.
 
 `CLAUDE.local.md` is where people keep notes they do not share. Launch from
 a folder whose files may go to the provider, or leave files out with
@@ -175,9 +178,9 @@ write, beside its own `~/.claude` one (`global_instructions = 'excluded'`):
 }
 ```
 
-- An excluded `CLAUDE.local.md` counts as absent: launched from a folder
-  with an `AGENTS.md` and no `CLAUDE.md` there or above, the `AGENTS.md`
-  loads in its place. Add `"**/AGENTS.md"` to keep it out too.
+- An excluded `CLAUDE.local.md` counts as absent: launched where no other
+  `CLAUDE.md` loads, the `AGENTS.md` files load in its place. Add
+  `"**/AGENTS.md"` to keep them out too.
 - Excluding stops only the automatic loading: the session can still read the
   file like any other.
 

@@ -61,11 +61,14 @@ while kill -0 "\$child" 2>/dev/null; do wait "\$child"; done
 EOF
 chmod 755 "$HOME/stand-in.sh"
 export TRANSLATOR_START="$HOME/stand-in.sh" TRANSLATOR_HEALTH="http://127.0.0.1:$port/"
-translator/session.sh --model claude-haiku-5-5 2> "$HOME/session.err"
+(umask 022 && translator/session.sh --model claude-haiku-5-5 2> "$HOME/session.err")
 grep -q 'starting the translator' "$HOME/session.err"
 grep -qx 'ANTHROPIC_AUTH_TOKEN=stand-in-token' "$env"
 grep -qx -- '--model' "$p/venice-agent/.fake-claude/launch-args"
 grep -qx 'claude-haiku-5-5' "$p/venice-agent/.fake-claude/launch-args"
+# The translator's owner-only umask stays with the translator: the session
+# keeps the caller's.
+grep -qx '0*22' "$p/venice-agent/.fake-claude/launch-umask"
 if curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH"; then echo "the translator it started still runs"; exit 1; fi
 test ! -e "$HOME/.config/cpb-secrets/translator-token"
 test ! -e "$HOME/.local/share/translator/run.lock"
