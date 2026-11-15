@@ -139,9 +139,10 @@ copied next to `start.sh` in step 1, does both in one terminal:
 - It starts the translator when none runs, with its output in
   `translator.log` in the translator's folder, and waits until it answers.
   Then it runs the playbook with every argument passed on.
-- When the session ends it stops the translator it started, and the
-  per-run token goes with it. A translator already running, started by hand
-  in another terminal, is used and left running.
+- Sessions share the translator: one started while another runs uses the
+  same translator, and when the last of them ends it stops the translator,
+  and the per-run token goes with it. A translator already running, started
+  by hand in another terminal, is used and left running.
 - Set `PLAYBOOK` in it (and `TOKENS` as in `start.sh`). For a translator
   other than LiteLLM, set `HEALTH` to an address that answers once it is
   ready. To type a short name instead, put it on your `PATH` under a name no

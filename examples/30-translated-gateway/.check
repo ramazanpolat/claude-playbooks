@@ -99,3 +99,7 @@ if grep -q 'starting the translator' "$HOME/b.err"; then echo "the second sessio
 if curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH"; then echo "the translator still runs after the last session"; exit 1; fi
 test ! -e "$HOME/.config/cpb-secrets/translator-token"
 test ! -e "$HOME/.local/share/translator/run.lock"
+# Nothing of the sessions is left: no session files, no marker, no lock.
+test -z "$(ls -A "$HOME/.local/share/translator/sessions")"
+test ! -e "$HOME/.local/share/translator/started-by-session"
+test ! -e "$HOME/.local/share/translator/session.lock"
