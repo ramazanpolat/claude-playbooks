@@ -33,9 +33,11 @@ up() { [ -s "$TOKENS/translator-token" ] && curl -fsS -m 2 -o /dev/null "$HEALTH
 alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ! ps -o stat= -p "$1" 2>/dev/null | grep -q Z; }
 
 # Joining and leaving take turns, so a session that leaves and one that
-# arrives never both decide alone. A lock whose holder died is taken over.
+# arrives never both decide alone. A lock whose holder died is taken over;
+# a session that already holds it (it ends while joining) keeps it.
 locked=""
 lock() {
+  [ -z "$locked" ] || return 0
   n=0
   while ! mkdir "$MUTEX" 2>/dev/null; do
     holder=$(cat "$MUTEX/pid" 2>/dev/null || true)
@@ -50,6 +52,7 @@ lock() {
 unlock() { [ -z "$locked" ] || rm -rf "$MUTEX"; locked=""; }
 
 joined=""
+started=""   # the pid of a translator this session started
 leave() {
   [ -n "$joined" ] || { unlock; return 0; }
   lock
@@ -64,9 +67,12 @@ leave() {
   done
   if [ -z "$others" ]; then
     # The last session out stops the translator if a session started it: its
-    # pid is the one holding start.sh's lock. One started by hand stays.
+    # pid is the one holding start.sh's lock, or this session's own start
+    # (stopped before it took that lock). One started by hand stays.
     pid=$(cat "$OURS" 2>/dev/null || true)
-    if [ -n "$pid" ] && [ "$pid" = "$(cat "$DIR/run.lock/pid" 2>/dev/null)" ] && alive "$pid"; then
+    [ -n "$pid" ] || pid=$started
+    if [ -n "$pid" ] && alive "$pid" &&
+       { [ "$pid" = "$started" ] || [ "$pid" = "$(cat "$DIR/run.lock/pid" 2>/dev/null)" ]; }; then
       kill -TERM "$pid" 2>/dev/null
       i=0
       while alive "$pid" && [ "$i" -lt 100 ]; do sleep 0.2; i=$((i + 1)); done
@@ -86,7 +92,6 @@ lock || exit 1
 joined=1
 if ! up; then
   pid=$(cat "$DIR/run.lock/pid" 2>/dev/null || true)
-  started=""
   if alive "$pid"; then
     echo "a translator is starting (pid $pid); waiting for it" >&2
   else
