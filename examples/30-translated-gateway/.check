@@ -83,3 +83,19 @@ curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH"
 test -s "$HOME/.config/cpb-secrets/translator-token"
 kill -TERM "$hand"; wait "$hand" || true
 test ! -e "$HOME/.config/cpb-secrets/translator-token"
+# Two sessions at once share one translator: the first to end leaves it
+# running for the second, and the last one out stops it.
+FAKE_CLAUDE_HOLD="$HOME/end-a" translator/session.sh 2> "$HOME/a.err" & a=$!
+i=0; until test -e "$HOME/end-a.held"; do i=$((i + 1)); [ "$i" -le 300 ]; sleep 0.1; done
+FAKE_CLAUDE_HOLD="$HOME/end-b" translator/session.sh 2> "$HOME/b.err" & b=$!
+i=0; until test -e "$HOME/end-b.held"; do i=$((i + 1)); [ "$i" -le 300 ]; sleep 0.1; done
+touch "$HOME/end-a"; wait "$a"
+kept=yes
+curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH" && test -s "$HOME/.config/cpb-secrets/translator-token" || kept=no
+touch "$HOME/end-b"; wait "$b"
+if [ "$kept" = no ]; then echo "the first session to end stopped the translator the second still used"; exit 1; fi
+grep -q 'starting the translator' "$HOME/a.err"
+if grep -q 'starting the translator' "$HOME/b.err"; then echo "the second session started a translator of its own"; exit 1; fi
+if curl -fs -m 2 -o /dev/null "$TRANSLATOR_HEALTH"; then echo "the translator still runs after the last session"; exit 1; fi
+test ! -e "$HOME/.config/cpb-secrets/translator-token"
+test ! -e "$HOME/.local/share/translator/run.lock"
