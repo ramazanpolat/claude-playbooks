@@ -117,6 +117,7 @@ status line, model and `/model` picker, skills) and applies to any playbook or t
 ```bash
 cpb SHOW SESSIONS                                  # live sessions in every playbook: account, who is at a usage limit
 cpb SHOW USAGE                                     # each account: how much of its 5-hour and weekly allowance is used
+cpb run --label task=review work                   # a label for this session: SHOW SESSIONS and the status line show it
 cpb "ALTER DEFAULTS SET failover = 'on', failover_accounts = ['claude-work', 'claude-home']"   # at a usage limit, a session moves on by itself
 cpb run work --continue                            # this folder's latest, in its playbook; never one live elsewhere
 cpb tui                                            # browse playbooks, sessions and env sets; never shows a secret
@@ -125,10 +126,9 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 
 ## Built to be relied on
 
-- **Tested on every change:** CI applies all 29 examples and, on Linux and
-  macOS, upgrades from the previous release and checks the state reads the
-  same. A full arena regression runs on the exact commit each release is
-  tagged from.
+- **Tested on every change:** CI applies all 30 examples and, on Linux and macOS,
+  upgrades from the previous release and checks the state reads the same. A
+  full arena regression runs on the exact commit each release is tagged from.
 - **Another Claude login never replaces yours:** cpb sets it aside rather
   than copying it over `~/.claude`'s.
 - **Your Claude login never goes to another provider:** an account with
@@ -140,7 +140,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | base -> an agent -> a team layer, as recipes |
-| [Examples 01-25](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI, `cpb play` and accounts, all applied in CI |
+| [Examples 01-30](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI, `cpb play`, accounts and labels, all applied in CI |
 | [Ask in plain words](docs/guides/assistant.md) | `cpb ask "<request>"` shows the cpb command that does it |
 | [Guides](docs/README.md) · [SPEC.md](SPEC.md) | how-tos for every area · every statement, command, file and output format: the contract |
 | [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) | what changed in each release · development |
