@@ -7,15 +7,25 @@
 - **One command for a translated provider, and the instruction files that go
   along** (docs and an example script, no change to cpb). Example
   `30-translated-gateway` gains `translator/session.sh`: it starts the
-  translator when none runs, waits until it answers, runs the playbook with
-  every argument passed on, and when the session ends stops the translator
-  only if it started it. The guide `docs/guides/openai-compatible-provider.md`
-  shows it, and lists the instruction files Claude Code puts into every
-  session, which reach the provider too: `CLAUDE.md` and `CLAUDE.local.md` in
-  the launch folder and the folders above it, `.claude/CLAUDE.md` and the
-  `.claude/rules/` files without `paths` there, and the `AGENTS.md` files when
-  none of those loads. A playbook leaves files out with `claudeMdExcludes` in
-  its `settings.json`; cpb keeps the entries it did not write.
+  translator when none runs, waits until it answers, and runs the playbook
+  with every argument passed on. Sessions share the translator: the last one
+  to end stops it, and one started by hand is never stopped. The guide
+  `docs/guides/openai-compatible-provider.md` shows it, and lists the
+  instruction files Claude Code puts into every session, which reach the
+  provider too: `CLAUDE.md` and `CLAUDE.local.md` in the launch folder and the
+  folders above it, `.claude/CLAUDE.md` and the `.claude/rules/` files without
+  `paths` there, and the `AGENTS.md` files when none of those loads. A
+  playbook leaves files out with `claudeMdExcludes` in its `settings.json`;
+  cpb keeps the entries it did not write.
+
+### Fixed
+
+- **The context window for a model id Claude Code does not know**, in the
+  guide `docs/guides/openai-compatible-provider.md` (docs only, no change to
+  cpb): Claude Code assumes the window its warning names (1M tokens in Claude
+  Code 2.1.325), not 200K as the guide said, and compacts only near it.
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, set in the shell you launch from, gives
+  it the smaller window of a model that has one.
 
 ## [v4.9.0] -- 2026-11-15
 

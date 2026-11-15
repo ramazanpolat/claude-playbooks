@@ -200,8 +200,15 @@ Seen with LiteLLM 1.105.7, Claude Code 2.1.323 and Venice's Claude models:
 - **Effort** reaches the provider as `reasoning_effort`. A thinking budget
   set on its own does not: the translator drops it.
 - **Context window**: Claude Code knows the window of a model id it
-  recognises; for an id it does not (an older Claude Code, a prefixed id) it
-  assumes 200K.
+  recognises. For an id it does not (a prefixed id, a model other than
+  Claude, one newer than your Claude Code) it warns at launch, assumes the
+  window the warning names (1M tokens in Claude Code 2.1.325) and compacts
+  only near it. For a model with a smaller window, set
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to its size in tokens in the shell you
+  launch from (`CLAUDE_CODE_MAX_CONTEXT_TOKENS=256000 cpb run venice-agent`);
+  for an id that does not start with `claude-` it applies as it is
+  ([Claude Code's model configuration](https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id)
+  has the other cases).
 
 Not tried against Venice, or expected to fail:
 
