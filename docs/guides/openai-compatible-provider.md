@@ -139,9 +139,10 @@ copied next to `start.sh` in step 1, does both in one terminal:
 - It starts the translator when none runs, with its output in
   `translator.log` in the translator's folder, and waits until it answers.
   Then it runs the playbook with every argument passed on.
-- When the session ends it stops the translator it started, and the
-  per-run token goes with it. A translator already running, started by hand
-  in another terminal, is used and left running.
+- Sessions share the translator: one started while another runs uses the
+  same translator, and when the last of them ends it stops the translator,
+  and the per-run token goes with it. A translator already running, started
+  by hand in another terminal, is used and left running.
 - Set `PLAYBOOK` in it (and `TOKENS` as in `start.sh`). For a translator
   other than LiteLLM, set `HEALTH` to an address that answers once it is
   ready. To type a short name instead, put it on your `PATH` under a name no
@@ -199,8 +200,15 @@ Seen with LiteLLM 1.105.7, Claude Code 2.1.323 and Venice's Claude models:
 - **Effort** reaches the provider as `reasoning_effort`. A thinking budget
   set on its own does not: the translator drops it.
 - **Context window**: Claude Code knows the window of a model id it
-  recognises; for an id it does not (an older Claude Code, a prefixed id) it
-  assumes 200K.
+  recognises. For an id it does not (a prefixed id, a model other than
+  Claude, one newer than your Claude Code) it warns at launch, assumes the
+  window the warning names (1M tokens in Claude Code 2.1.325) and compacts
+  only near it. For a model with a smaller window, set
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to its size in tokens in the shell you
+  launch from (`CLAUDE_CODE_MAX_CONTEXT_TOKENS=256000 cpb run venice-agent`);
+  for an id that does not start with `claude-` it applies as it is
+  ([Claude Code's model configuration](https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id)
+  has the other cases).
 
 Not tried against Venice, or expected to fail:
 

@@ -32,9 +32,9 @@ claude ── Messages ──▶ translator, 127.0.0.1:4100 ── chat completi
   `sonnet_model`, `haiku_model`) is an id the translator serves. Claude Code's
   background requests use the haiku tier.
 - **One command.** `translator/session.sh` starts the translator when none
-  runs, runs `venice-agent` with every argument passed on, and stops the
-  translator it started when the session ends; one started by hand is left
-  running.
+  runs and runs `venice-agent` with every argument passed on. Sessions share
+  the translator, and the last one to end stops it; one started by hand is
+  left running.
 
 In this check no translator runs: `.setup` writes a placeholder token, the
 stand-in claude records what a launch would send, and `translator/session.sh`
