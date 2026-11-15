@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **One command for a translated provider, and the instruction files that go
+  along** (docs and an example script, no change to cpb). Example
+  `30-translated-gateway` gains `translator/session.sh`: it starts the
+  translator when none runs, waits until it answers, runs the playbook with
+  every argument passed on, and when the session ends stops the translator
+  only if it started it. The guide `docs/guides/openai-compatible-provider.md`
+  shows it, and lists the instruction files Claude Code puts into every
+  session, which reach the provider too: `CLAUDE.md` and `CLAUDE.local.md` in
+  the launch folder and the folders above it, `.claude/CLAUDE.md` and the
+  `.claude/rules/` files without `paths` there, and the `AGENTS.md` files when
+  none of those loads. A playbook leaves files out with `claudeMdExcludes` in
+  its `settings.json`; cpb keeps the entries it did not write.
+
 ## [v4.9.0] -- 2026-11-15
 
 v4.9.0 lets each session say what it is. A session carries short
